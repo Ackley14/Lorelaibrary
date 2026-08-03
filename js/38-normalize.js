@@ -94,6 +94,17 @@ BT.normalize = (function () {
 
   const CONFIDENCE = { day: 1, month: 0.8, quarter: 0.6, year: 0.4, tba: 0.1, unknown: 0.1 };
 
+  /* HOW FINE A DATE IS, as an ordinal — deliberately separate from CONFIDENCE,
+     which mixes precision together with how much the SOURCE FIELD is trusted.
+     pickRelease needs both and needs them apart: confidence answers "which of
+     these two is the better answer", and this answers "would taking the fresh
+     one throw information away".
+
+     `tba` and `unknown` share rank 0 because neither carries a date at all;
+     they are told apart by `status`, not by this table. */
+  const PRECISION_RANK = { unknown: 0, tba: 0, year: 1, quarter: 2, month: 3, day: 4 };
+  const precisionRank = p => (PRECISION_RANK[p] != null ? PRECISION_RANK[p] : 0);
+
   /* How much to trust the FIELD the date came out of, independent of how
      precise that field was.
 
@@ -108,6 +119,14 @@ BT.normalize = (function () {
   const BASIS_FACTOR = {
     'edition-published': 1,
     'work-first-published': 0.5,
+    /* Google Books `publishedDate` on a volume, which is an EDITION-level
+       field and is trusted like one. It earns the full factor because it is
+       the only source in the app that ever states a month or a day: Open
+       Library is year-granular by construction, so a Google date is not a
+       second opinion about the same figure, it is the finer half of a figure
+       we only had the front of. Reached only through js/25-googlebooks.js,
+       and only when the user supplied a key. */
+    'googlebooks-published': 1,
     'none': 1,
   };
 
@@ -125,6 +144,21 @@ BT.normalize = (function () {
          between the two apps. */
       type: null,
       basis: 'none',
+      /* WHICH SERVICE SUPPLIED THIS DATE. Distinct from `basis`, which says
+         which FIELD it came out of; two sources can offer the same kind of
+         field and disagree, and the reader is entitled to know which one is
+         on screen when the app claims to know the day a book came out.
+
+         It also stops a refresh fighting itself. Once a Google date has landed
+         on a record, the next Open Library sweep arrives carrying the coarser
+         year it always had; pickRelease already declines it, and this field is
+         what lets a human confirm that from the pane instead of watching the
+         date flicker and guessing.
+
+         null on every record written before the Google path existed. Those
+         dates all came from Open Library — it was the only source wired — so
+         the UI is free to read null as 'openlibrary' and stay truthful. */
+      dateSource: null,
       statusRank: STATUS_RANK.unannounced,
       windows: [], history: [],
     };
@@ -137,6 +171,8 @@ BT.normalize = (function () {
                  UNPARSEABLE date still means "published" rather than
                  "unannounced". This rescues the '19uu' and 'n.d.' half of the
                  backlist, which would otherwise file under Still to come.
+       source    which SERVICE said so — 'openlibrary' | 'googlebooks'. See the
+                 note on `dateSource` in emptyRelease.
        tba       hand through to the precision engine */
   function buildRelease(rawDate, opts) {
     opts = opts || {};
@@ -175,6 +211,7 @@ BT.normalize = (function () {
       * (BASIS_FACTOR[rel.basis] != null ? BASIS_FACTOR[rel.basis] : 1);
     rel.region = opts.region || BT.config.get('region') || 'US';
     rel.type = null;
+    rel.dateSource = opts.source || null;
 
     if (opts.status) rel.status = opts.status;
     else if (sk < BT.util.SK_UNKNOWN) {
@@ -208,6 +245,34 @@ BT.normalize = (function () {
     const eDated = existing.sortKey < BT.util.SK_UNKNOWN;
     if (fDated && !eDated) return keep(fresh);
     if (!fDated && eDated) return keep(existing);
+
+    /* PRECISION IS A RATCHET. A payload that is COARSER than what we already
+       hold can never win, whatever its confidence says.
+
+       The confidence comparison below looks like it already covers this and
+       does not quite, because confidence multiplies precision by how much the
+       source FIELD is trusted — so a month-precision date read off a
+       half-weighted `first_publish_year` (0.8 × 0.5 = 0.4) ties exactly with a
+       year-precision date off a full-weight edition field (0.4 × 1), and the
+       tie goes to the fresh payload. That single case silently replaced
+       'March 2024' with '2024', and it is the ordinary case for the Google
+       date path: an item enriched to day precision gets swept by Open Library
+       an hour later and handed back the bare year it always had.
+
+       Note what this does NOT do. It only fires when the fresh date is
+       strictly coarser, so a genuine correction at equal or finer precision
+       still lands, and a finer date always beats a coarser one on the line
+       below. A coarser date cannot correct a finer one anyway — there is
+       nothing in '2012' that can tell you 'Mar 5, 2012' was wrong.
+
+       This is the structural half of the never-downgrade guarantee; the other
+       half is in 25-googlebooks.js, which declines to spend a request at all
+       when the record is already finer than year. Both exist because one of
+       them is a policy and the other is an invariant. */
+    if (precisionRank(fresh.precision) < precisionRank(existing.precision)) {
+      return keep(existing);
+    }
+
     /* Both dated, or neither: the more trustworthy one wins, ties to the fresh
        payload so a genuine upstream correction at equal confidence still lands. */
     return keep((fresh.confidence || 0) >= (existing.confidence || 0) ? fresh : existing);
@@ -663,7 +728,8 @@ BT.normalize = (function () {
        publication date, and let an edition supersede it. */
     const release = buildRelease(
       doc.first_publish_year != null ? String(doc.first_publish_year) : '',
-      { basis: 'work-first-published', inPrint: !!(doc.edition_count || doc.cover_i) });
+      { basis: 'work-first-published', source: 'openlibrary',
+        inPrint: !!(doc.edition_count || doc.cover_i) });
 
     return {
       uid: uidOf('openlibrary', work),
@@ -760,6 +826,7 @@ BT.normalize = (function () {
        year but still work-level and still not authoritative. */
     const release = buildRelease(raw.first_publish_date || opts.firstPublishDate || '', {
       basis: 'work-first-published',
+      source: 'openlibrary',
       inPrint: true,          // a work with a record in the catalogue exists
     });
 
@@ -845,6 +912,7 @@ BT.normalize = (function () {
        supersedes the work's `first_publish_year` in pickRelease. */
     const release = buildRelease(raw.publish_date || '', {
       basis: 'edition-published',
+      source: 'openlibrary',
       inPrint: true,        // an edition record IS a physical artefact
     });
 
@@ -968,6 +1036,7 @@ BT.normalize = (function () {
 
     const release = buildRelease(rec.publish_date || '', {
       basis: 'edition-published',
+      source: 'openlibrary',
       inPrint: true,
     });
 
@@ -1402,6 +1471,12 @@ BT.normalize = (function () {
        legitimate reason to reuse rather than re-implement. */
     buildRelease, emptyRelease, pickRelease, buildTerms,
     cleanSubjects, ensureGenres, absorbEditions, mergeAuthors, setPath,
-    STATUS_RANK, CONFIDENCE,
+    /* EXPORTED SO THERE IS ONE RANKING, not two. 25-googlebooks.js has to
+       answer "is this record already finer than a year" before it spends a
+       request, and a private copy of the ladder there would be free to drift
+       out of step with the one pickRelease enforces — at which point the
+       adapter starts paying for lookups whose results the merge then throws
+       away, and nothing anywhere reports it. */
+    STATUS_RANK, CONFIDENCE, PRECISION_RANK, precisionRank,
   };
 })();

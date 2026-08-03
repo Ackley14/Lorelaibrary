@@ -210,7 +210,12 @@ BT.config = (function () {
    googlebooks — only ever used when the user supplied a key. Google's default
                  project quota is 1,000 volume requests/day; the budget below
                  is deliberately well under it so enrichment can never be the
-                 reason a user's own key gets throttled elsewhere.
+                 reason a user's own key gets throttled elsewhere. The key gate
+                 sits in 05-net's get() and again in js/25-googlebooks.js, so a
+                 keyless install issues NO request here at all — an anonymous
+                 volumes call answers 429 with "quota_limit_value":"0", and
+                 four of those in a row would trip the circuit breaker for a
+                 source that is merely switched off.
 
    `timeout` is per ATTEMPT, in ms. Without one, a host whose origin is down
    but whose CDN is up leaves the request hanging for as long as that CDN waits
@@ -223,7 +228,32 @@ BT.NET_POLICY = {
      appear on the second ask, and a library view can fire a hundred of these
      — a retry storm here is what actually trips the 100-per-5-minutes cap. */
   covers:      { rps: 2,   concurrency: 3, retries: 1, dailyBudget: null, monthlyBudget: null, timeout: 10000 },
-  googlebooks: { rps: 2,   concurrency: 2, retries: 1, dailyBudget: 400,  monthlyBudget: null, timeout: 10000 },
+  /* retries:4, unlike covers, and measured rather than guessed. The volumes
+     endpoint sheds load HARD and recovers instantly: twenty identical requests
+     against a valid key, sent back to back, answered
+
+         with `fields`:     503 200 503 503 503 503 503 200 503 200
+         without `fields`:  503 503 200 503 200 200 503 503 503 200
+
+     — twelve 503s out of twenty, every one of them
+     `{"error":{"code":503,"reason":"backendFailed"}}`, and the very next
+     attempt on the identical URL succeeds. (Both rows are there because the
+     partial-response `fields` parameter was the obvious suspect and is
+     innocent; the rate is the same without it.)
+
+     At three attempts that is a 0.6³ ≈ 22% chance of giving up on a book whose
+     date Google is holding and would have handed over on the fourth ask —
+     which is exactly what happened to Project Hail Mary in testing: three
+     attempts, three 503s, no upgrade. At five it is ≈8%.
+
+     This is affordable because retries cost bucket TOKENS but NOT budget
+     units: budgetTake() is called once per get(), before the attempt loop, so
+     five attempts spend one unit of the daily allowance, the same as one. The
+     only real price is latency, and this path is a lazy background upgrade
+     that paints when it lands rather than something a screen is waiting on.
+     A lookup that still fails is not stamped as checked, so the next open of
+     that pane simply asks again. */
+  googlebooks: { rps: 2,   concurrency: 2, retries: 4, dailyBudget: 400,  monthlyBudget: null, timeout: 10000 },
 };
 
 /* ── Cache TTLs (ms) ──────────────────────────────────────────────────────
@@ -256,6 +286,23 @@ BT.TTL = {
   /* Cover availability changes when a volunteer uploads one, which is the only
      reason this is not infinite. */
   covers:       30 * DAY,
+
+  /* ── Google Books ──────────────────────────────────────────────────────
+     A volume record is the same frozen artefact an edition record is, so it
+     gets the edition's TTL rather than the shorter search one — even when the
+     lookup that found it was a title search. What we cache is the ANSWER
+     about a book, not the query that reached it.
+
+     `gbDateRecheck` is a different thing entirely and is not a cache: it is
+     how long we wait before asking Google AGAIN about a book whose date it
+     could not improve. Without it, every open of a 1965 novel's detail pane
+     spends a request re-learning that Google also only has '1965'. The free
+     tier is ~1,000 requests/day against the user's own key, so the default
+     behaviour for the long tail of a library has to be "ask once, remember
+     that the answer was no". */
+  gbVolume:     30 * DAY,
+  gbDateRecheck: 30 * DAY,
+
   HARD_TTL:     150 * DAY,
 };
 
@@ -1407,11 +1454,36 @@ BT.OL = {
 };
 
 /* ── Google Books ─────────────────────────────────────────────────────────
-   Enrichment only — descriptions, categories and page counts where Open
-   Library has a gap. Never the primary source, never load-bearing, and never
-   called at all unless BT.config.hasKey('googlebooks') is true. */
+   Enrichment only — never the primary source, never load-bearing, and never
+   called at all unless BT.config.hasKey('googlebooks') is true.
+
+   THE ONE THING IT IS ACTUALLY FOR IS DATES. Open Library's publication data
+   is year-granular and there is no setting that changes that: `search.json`
+   answers `first_publish_year: 2024` and nothing finer, and an edition's
+   `publish_date` is a free-text string that is almost always a bare year. Of
+   twelve editions of The Hobbit, eleven read '2020', '1937', '2003'… and
+   exactly one carried a day ('15 julho 2019', in Portuguese). Pinning a
+   specific edition does not help, because the edition record has no better
+   date to give. That is the catalogue, not a bug in the adapter.
+
+   Google Books answers the same question properly. Verified live:
+
+       The Haunting of Velkwood -> '2024-03-05'   (Open Library: 2024)
+       Project Hail Mary        -> '2021-05-04'   (Open Library: 2021)
+       The Hobbit, 2012 edition -> '2012'         (older titles stay coarse)
+
+   So the Google half buys PRECISION on recent titles and nothing at all on
+   the backlist, which is the honest thing to tell a user deciding whether to
+   go and make a key. See js/25-googlebooks.js for the upgrade path itself. */
 BT.GB = {
   volumes: 'https://www.googleapis.com/books/v1/volumes',
+  /* A single volume by its Google id. Only reachable once a search or an ISBN
+     lookup has handed us that id, which is why it is a function rather than a
+     constant — nothing in the app can guess one. */
+  volume(id) {
+    const clean = String(id == null ? '' : id).replace(/[^A-Za-z0-9_-]/g, '');
+    return clean ? `${this.volumes}/${clean}` : '';
+  },
 };
 
 BT.LIMITS = {

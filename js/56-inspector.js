@@ -165,9 +165,53 @@ BT.inspector = (function () {
          without a line changing here. */
       BT.ui.hydrate(uid).then(fresh => {
         if (fresh && currentUid === uid) paint(fresh);
+        /* Chained rather than fired alongside, and that ordering is the whole
+           reason this is not two independent calls. Open Library's hydrate may
+           itself supply a better date, and the Google lookup decides whether to
+           spend a request by reading the date on the record — asked in parallel
+           it would read the stale one and buy a month we had just been given
+           for free. Sequential also means the two writes cannot interleave and
+           lose each other's fields. */
+        return upgradeDate(fresh || item, uid);
+      }).then(better => {
+        if (better && currentUid === uid) paint(better);
       }).catch(() => {});
     }
     if (!opts.silent) markSelected(uid);
+  }
+
+  /* ── LAZY DATE ENRICHMENT ────────────────────────────────────────────────
+     Open Library is year-granular and cannot be made otherwise: `search.json`
+     answers `first_publish_year` and nothing finer, and an edition's
+     `publish_date` is free text that is almost always a bare year. Opening a
+     book is the moment somebody actually wants to know when it came out, so it
+     is the moment we are willing to spend a request finding out.
+
+     ONE BOOK, ON DEMAND, AND NEVER ON BOOT. Google's free tier is ~1,000
+     requests a day against a key that belongs to the user and nobody else;
+     walking a 500-book library at startup would spend half of somebody's daily
+     allowance on books they did not open. 25-googlebooks.js declines the call
+     outright when there is no key, when the record already states a month or a
+     day, when the reader has corrected the date by hand, or when we asked
+     recently and Google had nothing better — so the ordinary case for an
+     already-enriched or keyless library is zero requests and no write.
+
+     Feature-detected, like every other adapter seam in this file. A bare
+     `BT.googlebooks.upgradeItemDate(...)` would be a TypeError that takes out
+     the pane on any page where the script is not loaded, in service of a
+     feature whose honest answer is "off". */
+  async function upgradeDate(item, uid) {
+    const gb = BT.googlebooks;
+    if (!item || !gb || typeof gb.upgradeItemDate !== 'function') return null;
+    const merged = await gb.upgradeItemDate(item);
+    /* A non-null answer always deserves the write, even when no better date
+       was found: the check stamp inside it is what stops the next open of this
+       pane asking Google the same question again. Quiet, because this is a
+       background refresh and not the reader editing anything — a loud write
+       would rebuild the tree and any open list for a field nobody touched. */
+    if (!merged) return null;
+    await BT.repo.putItemQuiet(merged);
+    return (currentUid === uid) ? merged : null;
   }
 
   /* ── M2 SEAM ─────────────────────────────────────────────────────────────
@@ -289,6 +333,7 @@ BT.inspector = (function () {
           <dt>Status</dt><dd>${esc(prettyStatus(rel.status))}</dd>
           <dt>Date</dt><dd>${BT.ui.dateField(rel)}</dd>
           <dt>Precision</dt><dd>${esc(rel.precision || 'unknown')}${rel.inferred ? ' <span class="faint">(inferred)</span>' : ''}</dd>
+          <dt>Source</dt><dd>${dateSourceLine(item, rel)}</dd>
         </dl>
         ${driftHistory(rel)}
       </div>
@@ -730,6 +775,45 @@ BT.inspector = (function () {
   /* Publication dates move, and a reader waiting on a preorder is exactly who
      notices. Last three changes, newest first — the whole ledger is on the
      record but nobody reads past the last slip. */
+  /* WHERE THIS DATE CAME FROM, said plainly, because the pane is otherwise
+     claiming to know something the reader has good reason to doubt.
+
+     Two audiences, one line. A reader with no key needs to know that "1937"
+     is the finest answer available and not a loading state — Open Library is
+     year-granular by construction, so the hatched day is permanent and there
+     is nothing to wait for. A reader with a key needs to know which service
+     supplied the day on screen, so that a date they believe is wrong can be
+     argued with at the right catalogue.
+
+     A null `dateSource` reads as Open Library rather than as "unknown", and
+     that is a statement of fact rather than a guess: every record written
+     before this field existed got its date from the only source the app had
+     wired at the time. */
+  function dateSourceLine(item, rel) {
+    const src = rel.dateSource
+      || (rel.sortKey < BT.util.SK_UNKNOWN ? 'openlibrary' : null);
+    if (!src) return '<span class="faint">No date on record</span>';
+    if (src === 'googlebooks') {
+      return 'Google Books <span class="faint">· refined from Open Library’s year</span>';
+    }
+
+    const gb = BT.googlebooks;
+    /* Only say "year only" when it actually IS year-or-worse. An Open Library
+       edition record occasionally does carry a real day — one of The Hobbit's
+       twelve editions reads '15 julho 2019' — and captioning that as coarse
+       would be wrong in the one place the app is being pedantic about honesty. */
+    const coarse = !rel.precision || rel.precision === 'year'
+      || rel.precision === 'unknown' || rel.precision === 'tba';
+    if (!coarse) return 'Open Library';
+    if (gb && gb.enabled && gb.enabled()) {
+      const stamp = (item.meta && item.meta.gbDate) || null;
+      return stamp && stamp.checkedAt
+        ? 'Open Library <span class="faint">· Google Books had nothing finer</span>'
+        : 'Open Library <span class="faint">· checking Google Books for a finer date</span>';
+    }
+    return 'Open Library <span class="faint">· year-granular; add a Google Books key in Settings for exact dates</span>';
+  }
+
   function driftHistory(rel) {
     const h = (rel.history || []).slice(-3).reverse();
     if (!h.length) return '';

@@ -198,11 +198,14 @@
 <!-- Later milestones slot in here, still in numeric order: 15-crypto and
      16-cloud (encrypted passphrase sync). -->
 <script src="js/20-openlibrary.js"></script>
-<!-- 22-googlebooks belongs on this line when it arrives. It slipped past M3:
-     nothing on the scan path wants it, and it cannot do anything at all until
-     there is a Settings screen to paste a key into (M5). It is optional
-     enrichment behind a user-supplied key, never a fallback, so the catalogue
-     below works whether or not it is ever loaded. -->
+<!-- Optional enrichment behind a user-supplied key, never a fallback. It is
+     loaded unconditionally and does nothing at all until a key is pasted into
+     Settings — every entry point returns before building a URL when
+     BT.config.hasKey('googlebooks') is false, because anonymous Google Books
+     answers 429 with a quota of ZERO rather than serving a degraded response.
+     It exists for one thing Open Library structurally cannot do: give a
+     publication date finer than a year. -->
+<script src="js/25-googlebooks.js"></script>
 <script src="js/38-normalize.js"></script>
 <!-- The scan PIPELINE, not the camera: it turns a string of digits into a
      library change and knows nothing about video. It sits here, above the UI

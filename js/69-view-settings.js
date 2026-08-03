@@ -869,27 +869,95 @@ BT.viewSettings = (function () {
   }
 
   /* ══ KEY VERIFICATION ═════════════════════════════════════════════════════
-     There is no Google Books client module yet — 22-googlebooks.js is the gap
-     noted in index.html — so this is the one place that URL is built, and it
-     moves into that adapter the day it lands. It does NOT call fetch(): BT.net
-     is the only caller of fetch() in this app, and the budget, the token
-     bucket, the circuit breaker and the cache all live behind it.
+     Delegated to the adapter, which is where the Google URL shapes belong. It
+     used to be built here because 25-googlebooks.js did not exist; leaving a
+     second copy behind would mean this screen could report a key as working
+     against a URL the rest of the app no longer uses.
 
-     `ttl: 0, noCache: true` because a cached 200 from a previous key would
-     cheerfully report a revoked one as working. Same shape 20-openlibrary's
-     verifyReachable() uses, for the same reason. */
+     Neither this nor the adapter calls fetch(): BT.net is the only caller in
+     the app, and the request budget, the token bucket, the circuit breaker and
+     the cache all live behind it. The adapter asks with `ttl: 0, noCache: true`
+     because a cached 200 from the PREVIOUS key would cheerfully report a
+     revoked one as working — the exact failure somebody clicks this to rule
+     out. */
   async function verifyGoogleKey() {
-    const key = BT.config.key('googlebooks');
-    if (!key) return { ok: false, reason: 'No key set — the Google path stays switched off.' };
-    try {
-      const raw = await BT.net.get('googlebooks',
-        `${BT.GB.volumes}?${BT.net.qs({ q: 'isbn:9780441013593', maxResults: 1, key })}`,
-        { ttl: 0, noCache: true, staleOk: false });
-      if (raw && typeof raw.totalItems === 'number') return { ok: true, reason: 'Key works.' };
-      return { ok: false, reason: 'Google answered, but not with a volumes response.' };
-    } catch (e) {
-      return { ok: false, reason: (e && e.message) || String(e) };
+    const gb = BT.googlebooks;
+    if (!gb || typeof gb.verifyKey !== 'function') {
+      return { ok: false, reason: 'The Google Books adapter is not loaded on this page.' };
     }
+    return gb.verifyKey();
+  }
+
+  /* ══ DATE UPGRADE SWEEP ═══════════════════════════════════════════════════
+     Manual, bounded, and never automatic.
+
+     Open Library is year-granular by construction, so most of a library sits
+     at year precision permanently. Google can sharpen the recent end of it,
+     but the key belongs to the user and the free tier is ~1,000 requests a
+     day — so a full-library pass is something they ASK for, with a visible
+     ceiling, rather than something that happens behind them on boot.
+
+     `BT.SWEEP.manualBudget.googlebooks` is the ceiling, reused rather than
+     re-invented: it is the same number every other manual sweep in the app
+     spends against this source, and duplicating it here as a literal is how
+     two budgets drift apart. 05-net's own daily budget sits underneath as a
+     second floor, so even a user clicking this repeatedly cannot spend more
+     than BT.NET_POLICY.googlebooks.dailyBudget.
+
+     ITEMS ARE FILTERED BEFORE THEY ARE COUNTED against the budget. The adapter
+     declines a record that already states a month or a day, one the reader has
+     corrected by hand, and one checked recently — so a second run costs almost
+     nothing, and a library that has already been swept reports "nothing left
+     to ask about" instead of burning the ceiling re-learning it. */
+  async function upgradeDates(opts) {
+    opts = opts || {};
+    const gb = BT.googlebooks;
+    const rep = { eligible: 0, asked: 0, upgraded: 0, unchanged: 0, errors: 0, budget: 0 };
+    if (!gb || typeof gb.upgradeItemDate !== 'function' || !gb.enabled()) return rep;
+
+    rep.budget = Math.max(1, (BT.SWEEP.manualBudget && BT.SWEEP.manualBudget.googlebooks) || 40);
+
+    const items = await BT.repo.allItems();
+    const due = items.filter(it => gb.needsDateUpgrade(it));
+    rep.eligible = due.length;
+
+    /* OLDEST-CHECKED FIRST, so repeated runs walk the whole library instead of
+       spending every ceiling on the same forty records. `allItems` order is
+       the store's, which is stable — without this sort, book forty-one would
+       never be asked about. */
+    due.sort((a, b) => {
+      const ca = (a.meta && a.meta.gbDate && a.meta.gbDate.checkedAt) || 0;
+      const cb = (b.meta && b.meta.gbDate && b.meta.gbDate.checkedAt) || 0;
+      return ca - cb;
+    });
+
+    for (const item of due.slice(0, rep.budget)) {
+      if (opts.alive && !opts.alive()) break;
+      let merged = null;
+      try {
+        merged = await gb.upgradeItemDate(item);
+      } catch (e) {
+        /* upgradeItemDate swallows its own network failures and answers null,
+           so reaching here means something structural went wrong. Counted and
+           carried on: one bad record must not abandon the other thirty-nine,
+           and everything already written stays written. */
+        console.warn('[settings] date upgrade failed for', item.uid, e && e.message);
+        rep.errors++;
+        continue;
+      }
+      if (!merged) continue;
+      rep.asked++;
+      if (merged.meta && merged.meta.gbDate && merged.meta.gbDate.upgraded) rep.upgraded++;
+      else rep.unchanged++;
+      /* Quiet: this is a background refresh of a derived field, not the reader
+         editing anything, so `updatedAt` is deliberately NOT stamped and the
+         tree is not rebuilt once per book. One event at the end, exactly as
+         the genre recalculation does it. */
+      await BT.repo.putItemQuiet(merged);
+    }
+
+    if (rep.asked) { BT.repo.emit('item:put', null); BT.tree.refresh(); }
+    return rep;
   }
 
   /* ══ RENDER ═══════════════════════════════════════════════════════════════ */
@@ -1012,10 +1080,16 @@ BT.viewSettings = (function () {
       <section class="section">
         ${BT.ui.groupHead('Google Books key')}
         <div class="warnbox">
-          <strong>Optional, and the app is complete without it</strong>
+          <strong>Optional — but it is the only way to get an exact publication date</strong>
           Open Library needs no key and covers search, works, editions, authors and covers on
-          its own. Google Books only ever fills gaps — a missing description, a missing page
-          count — and is never a fallback for anything load-bearing.
+          its own. What it cannot do, at all, is tell you the <em>day</em> a book came out:
+          its search returns a year and nothing finer, and an edition’s publish date is a
+          free-text field that is almost always a bare year. Pinning a specific edition does
+          not help, because that record has no better date to give.
+          <br><br>
+          <b>Without a key, every date in this app stays year-only</b> and is drawn with the
+          month and day hatched out. That is not a loading state and it will not fill in
+          later — it is the finest answer the catalogue holds.
         </div>
         <div class="field">
           <label class="field__label" for="key-gb">API key <span class="faint">(optional)</span></label>
@@ -1028,6 +1102,13 @@ BT.viewSettings = (function () {
             Google half stays switched off and nothing else changes.
             <a href="https://console.cloud.google.com/apis/library/books.googleapis.com"
                target="_blank" rel="noopener">Create one in Google Cloud ↗</a>
+            <br><br>
+            With a key, dates are sharpened <b>lazily, one book at a time, as you open it</b> —
+            never in bulk on startup, because the free tier is about a thousand requests a day
+            and the key is yours alone. Expect it to help on recent titles and to change
+            nothing on the backlist: Google answered
+            <span class="num">2024-03-05</span> for a 2024 novel and a bare
+            <span class="num">2012</span> for a 2012 reissue of The Hobbit.
           </div>
           <input id="key-gb" type="text" spellcheck="false" autocomplete="off"
                  placeholder="Paste your key" value="${stored ? esc(BT.config.key('googlebooks')) : ''}">
@@ -1039,8 +1120,24 @@ BT.viewSettings = (function () {
             ${stored ? '<button class="btn btn--sm btn--ghost" id="key-gb-clear">Clear</button>' : ''}
           </p>
           <div class="field__help" style="margin-top:var(--bt-space-3)">
-            Stored in this browser only. It is never included in an export.
+            Stored in this browser only, and in your encrypted sync payload if you use one.
+            It is never included in an export and never written to a file in this app.
           </div>
+          ${active ? `<div class="field" style="margin-top:var(--bt-space-4)">
+            <label class="field__label">Sharpen dates in bulk</label>
+            <div class="field__help">
+              Opening a book already asks Google about that one book. This walks the shelf
+              instead, oldest-checked first, and stops after
+              <span class="num">${esc(String((BT.SWEEP.manualBudget && BT.SWEEP.manualBudget.googlebooks) || 40))}</span>
+              books so one click cannot spend your daily quota. Run it again to continue.
+              Books that already have a month or a day, ones you dated by hand, and ones
+              Google was recently asked about are skipped without costing a request.
+            </div>
+            <p class="actions" style="margin-top:var(--bt-space-2)">
+              <button class="btn btn--sm" id="gb-dates-go">Upgrade publication dates</button>
+            </p>
+            <div class="field__state" id="gb-dates-state"></div>
+          </div>` : ''}
           ${gb ? `<div class="field__help" style="margin-top:var(--bt-space-3)">
             Google Books requests from this browser this ${esc(gb.period)}:
             <span class="num">${gb.used} / ${gb.cap}</span>
@@ -1250,8 +1347,51 @@ BT.viewSettings = (function () {
 
     on('key-gb-clear', 'onclick', () => {
       BT.config.setKey('googlebooks', '');
-      BT.ui.toast('Key cleared — Google enrichment is off');
+      BT.ui.toast('Key cleared — Google enrichment is off, and dates go back to year-only');
       BT.router.resolve();
+    });
+
+    on('gb-dates-go', 'onclick', async () => {
+      const btn = document.getElementById('gb-dates-go');
+      const state = document.getElementById('gb-dates-state');
+      btn.disabled = true;
+      state.textContent = '… asking Google about books that only have a year';
+      state.className = 'field__state';
+      let rep;
+      try {
+        rep = await upgradeDates();
+      } catch (e) {
+        /* A pass that died halfway has still written whatever it got to, and
+           those writes are real. Say so plainly rather than letting this
+           surface as an unhandled rejection on a screen that looks like it did
+           nothing. */
+        console.error('[settings] date upgrade sweep failed', e);
+        btn.disabled = false;
+        state.textContent = '✕ Stopped: ' + ((e && e.message) || String(e))
+          + ' — anything already sharpened was saved.';
+        state.className = 'field__state field__state--bad';
+        return;
+      }
+      btn.disabled = false;
+
+      /* Every number in this line is something that actually happened, and the
+         "nothing to ask about" case gets its own sentence rather than reading
+         as a silent failure — on a shelf of old paperbacks it is the ordinary
+         outcome, not a fault. */
+      if (!rep.eligible) {
+        state.textContent = '● Nothing to ask about — every book either has a finer date '
+          + 'already or was checked recently.';
+        state.className = 'field__state field__state--ok';
+        return;
+      }
+      const left = Math.max(0, rep.eligible - rep.asked);
+      state.textContent = `● Sharpened ${BT.util.pluralize(rep.upgraded, 'date')} of `
+        + `${BT.util.pluralize(rep.asked, 'book')} asked about`
+        + (rep.unchanged ? ` · ${rep.unchanged} had nothing finer at Google` : '')
+        + (rep.errors ? ` · ${rep.errors} failed` : '')
+        + (left ? ` · ${left} still to check — run it again` : '');
+      state.className = 'field__state field__state--ok';
+      if (rep.upgraded) BT.ui.toast(`${BT.util.pluralize(rep.upgraded, 'book')} now has an exact date`);
     });
 
     /* ── Contact, region, language ────────────────────────────────────── */
