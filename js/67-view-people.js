@@ -12,33 +12,63 @@
    that exists only on the page named after it is a feature nobody finds.
 
    ── What this screen may and may not claim ────────────────────────────────
-   OPEN LIBRARY HAS NO CONCEPT OF A FORTHCOMING BOOK. There are no street
-   dates, no announcements, no "coming soon" — the catalogue records books that
-   exist, its dates are YEARS rather than dates, and those years are often
-   wrong (The Alloy of Law, published 2011, is recorded as 2001; verified).
+   THE STRIP LISTS WORKS DATED AFTER TODAY, AND NOTHING ELSE. That is the
+   user's request in their own words — "i just want things listed with a
+   publication date that is in the future from the current date", "specifically
+   for those you follow of course" — and it replaced a much broader strip that
+   showed everything in a follow's catalogue that was not already on the
+   shelves. That version was not wrong, it was too wide to be useful: measured,
+   213 cards from four follows and 400 from eight, nearly all of it backlist.
 
-   MovieTrak's equivalent screen could honestly promise "projects before they
-   have a release date", because TMDB tracks films that have not been made.
-   Nothing here can promise that, and the temptation to phrase it as though it
-   could is the reason this comment exists. What we can honestly detect is:
+   OPEN LIBRARY HAS NO CONCEPT OF A FORTHCOMING BOOK, and narrowing the filter
+   does not change that. There are no street dates, no announcements, no "coming
+   soon" — the catalogue records books that EXIST, its dates are YEARS rather
+   than dates, and those years are often wrong (The Alloy of Law, published
+   2011, is recorded as 2001; verified). So the honest consequence of asking for
+   genuinely future dates is A SHORT LIST OR AN EMPTY ONE:
 
-       a work is in this author's or publisher's catalogue now
-       and it was not there the last time we looked
+       author (60-work page, sort=new)     dated > 2026    dated == 2026
+       Brandon Sanderson                        0                1
+       Stephen King                             0                1
+       Nora Roberts                             0                2
+       James Patterson                          0                6
+       Neil Gaiman                              0                0
+       Ursula K. Le Guin                        0                0
 
-   which does catch new books, and also catches reprints, translations, boxed
-   sets and backlist a volunteer catalogued last week. The copy below says so
-   in those words. Anything that renames this strip to "Upcoming" or sorts it
-   as a release calendar is making a promise the data cannot keep.
+       whole catalogue, publish_year:2027 -> 18 works.  2028 -> 12 works,
+       several of them a Nepali Bikram Sambat year read as Gregorian.
 
-   ── And it shows EVERYTHING it can see, not a sample ──────────────────────
+   THAT EMPTINESS IS THE ANSWER, NOT A FAILURE, and the empty state says so in
+   those words. The temptation when a screen looks bare is to widen the filter
+   until it looks busy again; doing that here would put last year's reprints
+   back under a heading that promises the future, which is a worse screen than
+   an empty one. If this list is ever quietly widened, the user's request has
+   been thrown away and the heading has become a lie.
+
+   A CURRENT-YEAR DATE IS GENUINELY UNDECIDABLE and is kept, marked. A bare
+   '2026' read in August could mean last March or next November; the record does
+   not say. Those rows are shown with the month and day HATCHED — the app's
+   existing grammar for "this value cannot exist in the record" — and labelled
+   in words. Where a Google Books key is configured they are sharpened into real
+   days, which resolves most of them one way or the other. The reasoning lives
+   next to the code that implements it, in 70-follows.js futureness().
+
+   ── And it shows EVERYTHING that passes, not a sample ─────────────────────
    The strip below polls every follow on the roster and truncates nothing the
-   reader could have seen. It did neither once, and that was a reported bug:
-   "the following section seems to only bring up like 10 results max regardless
-   of how many you have following." A short list with no explanation is read as
-   the complete answer, so under-reporting here is not a smaller version of the
+   filter let through. It did neither once, and that was a reported bug: "the
+   following section seems to only bring up like 10 results max regardless of
+   how many you have following." A short list with no explanation is read as the
+   complete answer, so under-reporting here is not a smaller version of the
    feature — it is a false one. Rate limiting is answered by SHAPE (serialized,
    cached, painted as it arrives, progress on screen) rather than by showing
    less. See the block above strip() before reintroducing any cap.
+
+   Note the difference between that rule and the filter above, because they look
+   contradictory and are not: the strip must never hide a row the reader was
+   entitled to see, and a row dated in the past is not one of those. What makes
+   the narrow filter honest is that the count it scanned is printed next to the
+   count it kept — "2 works dated after today · scanned 213 catalogued works" —
+   so the reader can see the size of the question as well as the answer.
 
    ── And a publisher follow is a guess ─────────────────────────────────────
    Open Library has no publisher records and no publisher ids. `publisher=` is
@@ -61,7 +91,15 @@ BT.viewPeople = (function () {
      at sixty works each would lay out two and a half thousand. It sits far
      above what an ordinary roster produces, and WHEN IT DOES BITE THE PAGE
      SAYS SO out loud ("showing 400 of 812"): a number that is quietly dropped
-     is exactly the failure this section was just fixed for. */
+     is exactly the failure this section was just fixed for.
+
+     The date filter has since put it out of reach entirely — measured, a
+     forty-follow roster produces single digits — so it is now a guard against
+     a future Open Library that grows a forthcoming catalogue, not a limit
+     anybody meets. KEPT RATHER THAN DELETED for exactly that reason: the DOM
+     bound was never about editorial taste, and removing it because today's
+     data cannot reach it is how the 2,400-card layout comes back the day the
+     catalogue changes. */
   const STRIP_MAX = 400;
 
   let followSet = new Set();   // ids currently followed — drives every button
@@ -97,6 +135,14 @@ BT.viewPeople = (function () {
     const out = [];
     if (!BT.follows || typeof BT.follows.toggleAuthor !== 'function') out.push('70-follows.js');
     if (!BT.openlibrary || typeof BT.openlibrary.searchAuthors !== 'function') out.push('20-openlibrary.js');
+    /* futureness() is checked separately from the module that holds it, because
+       an OLDER 70-follows.js parses fine and answers toggleAuthor perfectly
+       while having no forthcoming test at all — at which point the strip would
+       filter nothing and quietly go back to being the 400-card backlist screen
+       under a heading that now promises the future. A missing filter must fail
+       loudly; a strip that silently stops filtering is the failure this whole
+       change was made to remove. */
+    if (BT.follows && typeof BT.follows.futureness !== 'function') out.push('70-follows.js (futureness)');
     return out;
   }
 
@@ -160,12 +206,14 @@ BT.viewPeople = (function () {
       <div id="froster">${roster(follows)}</div>
 
       ${follows.length ? `
-        ${BT.ui.groupHead('Recent and newly catalogued')}
+        ${BT.ui.groupHead('Publishing after today')}
         <div class="why-line" style="margin:0 var(--bt-space-6) var(--bt-space-3)">
-          Everything Open Library lists for <b>all ${esc(String(follows.length))}</b> of your
-          follows that is not already on your shelves. Not a release calendar — the
-          catalogue has no forthcoming titles and records years rather than dates, so
-          reprints and translations turn up here alongside new books.
+          Only works dated <b>after today</b>, from all ${esc(String(follows.length))} of your
+          follows, that are not already on your shelves. Reprints count — the test is the
+          date. Open Library has no forthcoming-title concept and records years rather
+          than dates, so <b>expect this to be short or empty</b>; a year with no month
+          is shown as <span class="mono">${esc('▨▨')}</span> and could still be behind
+          us.${gbNote()}
         </div>
         <div id="fnew">${BT.ui.skeletonGrid(8)}</div>` : ''}`;
 
@@ -197,6 +245,22 @@ BT.viewPeople = (function () {
     };
 
     if (follows.length) strip(follows, alive);
+  }
+
+  /* Whether the year-only rows on this screen can be resolved at all, said
+     once and where the reader is standing when the question occurs to them.
+
+     Not a nag and not a banner: a key is optional, the screen works without
+     one, and every row it would sharpen is already on screen and honestly
+     labelled. What the note buys is that "2026, we cannot tell" stops looking
+     like a defect in BookTrak and starts looking like what it is — the limit of
+     a catalogue that stores years, with a named way out. */
+  function gbNote() {
+    const on = !!(BT.googlebooks && typeof BT.googlebooks.enabled === 'function'
+                  && BT.googlebooks.enabled());
+    if (on) return ' Google Books is sharpening those into real dates where it can.';
+    return ' A <a href="#/settings">Google Books key</a> would sharpen most of those'
+      + ' into real dates.';
   }
 
   /* ── Publishers the reader already owns ────────────────────────────────
@@ -562,7 +626,15 @@ BT.viewPeople = (function () {
       .sort((a, b) => (a.lastCheckedAt || 0) - (b.lastCheckedAt || 0));
 
     const state = {
-      seen: new Map(),      // workId -> row, which is also the de-dup
+      seen: new Map(),      // workId -> KEPT row, which is also the de-dup
+      /* Every distinct work any follow offered, whether or not it survived the
+         date filter. This is what makes a short answer legible: "2 works dated
+         after today · scanned 213 catalogued works" reads as a narrow question
+         honestly answered, while a bare "2 works" reads as a broken feed. It is
+         a SET rather than a counter because the same work arrives twice when
+         you follow both an author and their publisher, and counting it twice
+         would inflate the very number that is supposed to reassure. */
+      scanned: new Set(),
       of: queue.length,
       checked: 0,
       ok: 0,
@@ -570,6 +642,10 @@ BT.viewPeople = (function () {
       lastErr: null,
       shown: 0,
       total: 0,
+      maybe: 0,             // kept rows whose year straddles today
+      sharpened: 0,         // maybes Google Books resolved to a real date
+      dropped: 0,           // maybes Google resolved to a date already past
+      phase: 'poll',        // 'poll' | 'sharpen'
       done: false,
     };
 
@@ -631,9 +707,122 @@ BT.viewPeople = (function () {
     }
     if (alive && !alive()) return;
 
+    /* PASS THREE — sharpen the undecidable ones, if a key makes that possible.
+       Runs LAST, over what survived, rather than inside the loop above. Two
+       reasons, and the second is the one that matters:
+
+         · it does not slow the Open Library walk down, so the strip still
+           paints at the speed it always did and the sharpening visibly refines
+           a list that is already on screen;
+         · until every follow has answered we do not know which rows are
+           duplicates. Sharpening inside the loop would spend a Google request
+           on a work that the next follow is about to hand us again. */
+    await sharpen(state, alive, signal);
+    if (alive && !alive()) return;
+
     state.done = true;
     stripAbort = null;
     paintStrip(state);
+  }
+
+  /* ── PASS THREE ────────────────────────────────────────────────────────
+     Turn 'maybe' rows into real dates, or leave them honestly labelled.
+
+     A 'maybe' is a bare year equal to the CURRENT year: read in August, '2026'
+     could be last March or next November and the record does not say which.
+     Google Books does say, on a large share of volumes, and 70-follows.js
+     sharpenYear() borrows 25-googlebooks.js's own match rules to read it
+     safely — see the long note there for why a laxer copy of those rules is
+     dangerous rather than merely sloppy.
+
+     NOTHING HAPPENS WITHOUT A KEY. Anonymous Books API access answers HTTP 429
+     with a quota of zero, so a keyless attempt is not a slower version of this,
+     it is an error every time. sharpenYear() returns null before building a
+     URL, and this loop never runs at all.
+
+     SERIALIZED, for the same reason the Open Library walk is: the quota belongs
+     to the reader, and a fan-out spends it faster without producing an answer
+     any sooner on a list this short.
+
+     A SHARPENED ROW CAN LEAVE THE STRIP, and that is the point rather than a
+     side effect. If Google says the 2026 book came out on March 5th, it is
+     behind us and it does not belong under a heading that says "after today".
+     The count of those is kept and printed, because a card the reader saw a
+     moment ago vanishing with no explanation is exactly the kind of silent
+     change this screen has been burned by before. */
+  const SHARPEN_MAX = 24;
+
+  async function sharpen(state, alive, signal) {
+    const gb = BT.googlebooks;
+    if (!gb || typeof gb.enabled !== 'function' || !gb.enabled()) return;
+    if (typeof BT.follows.sharpenYear !== 'function') return;
+
+    /* Author follows only. A publisher search doc carries no author name, and
+       the shared-surname test in confidentMatch() cannot pass without one — so
+       asking would spend the reader's quota on a guaranteed refusal. */
+    const todo = [...state.seen.values()]
+      .filter(r => r.verdict === 'maybe' && r.via && r.via.type === 'author');
+    if (!todo.length) return;
+
+    state.phase = 'sharpen';
+    /* A BOUND ON THE REQUESTS, NOT ON THE ROWS, and the difference is what
+       makes it honest. Every row stays on screen either way; the cap only
+       decides how many of them get a real date instead of a hatched year. So
+       unlike the STRIP_MAX that was once the bug here, nothing the reader could
+       have seen is hidden by reaching it — and the twenty-fifth row still says
+       "year only" out loud rather than pretending to be precise. */
+    const batch = todo.slice(0, SHARPEN_MAX);
+
+    for (const r of batch) {
+      if (alive && !alive()) return;
+      /* `state.checked` is deliberately NOT advanced here. It counts follows
+         polled, it is printed as "checking N of M follows", and pushing it past
+         M to reuse it as a generic spinner counter would make that line read
+         "checking 31 of 12". A different phase gets a different sentence. */
+      paintProgress(state, r.via);
+      let better = null;
+      try {
+        better = await BT.follows.sharpenYear(r.w, r.via.name, { release: r.release, signal });
+      } catch (e) {
+        if (e && (e.kind === 'abort' || e.name === 'AbortError')) return;
+        if (signal && signal.aborted) return;
+        /* Enrichment is a nicety and must never be the reason this strip fails
+           to paint. The row keeps its honest year-only date and the loop
+           carries on; this is NOT counted against `failed`, which means "a
+           follow could not be checked" and would otherwise report a Google
+           outage as a broken roster. */
+        console.warn('[people] date sharpening failed for', r.w.title, e && e.message);
+        continue;
+      }
+
+      /* Marked on ASKING, not on succeeding, because the card distinguishes the
+         two: "year only" and "year only, and Google has no finer date either"
+         are different states, and a reader who paid for a key deserves to know
+         which of them they are looking at. Set after the catch, so a request
+         that threw is not recorded as an answer. */
+      r.sharp = 1;
+      /* No repaint on a no-op. The note it would add is picked up by the final
+         paint in strip(), and repainting here would re-create every cover on
+         the grid up to twenty-four times for nothing. */
+      if (!better) continue;
+
+      r.release = better;
+      r.verdict = BT.follows.futureness(better);
+      state.sharpened++;
+      if (r.verdict !== 'future' && r.verdict !== 'maybe') {
+        state.dropped++;
+        state.seen.delete(r.w.workId);
+      }
+      state.maybe = countMaybe(state);
+      paintStrip(state);
+    }
+    state.phase = 'poll';
+  }
+
+  function countMaybe(state) {
+    let n = 0;
+    for (const r of state.seen.values()) if (r.verdict === 'maybe') n++;
+    return n;
   }
 
   /* -> true when this answer put something new on the strip.
@@ -647,7 +836,20 @@ BT.viewPeople = (function () {
      Works already on the shelves are dropped rather than shown greyed out. The
      point of this section is what you do NOT have; a strip that also lists your
      own library is just the library with extra steps. The one exception is
-     `addedHere` — see the note on that set. */
+     `addedHere` — see the note on that set.
+
+     AND THIS IS WHERE THE DATE FILTER BITES. Everything the follows offered is
+     counted into `scanned`; only what is dated after today is kept. The order
+     of the two tests matters and is deliberate: OWNERSHIP IS CHECKED FIRST, so
+     a book already on the shelves is not counted as something we looked at and
+     rejected on a date — it was never a candidate, and inflating the scanned
+     figure with the reader's own library would make the ratio meaningless.
+
+     'unknown' AND 'past' ARE BOTH DROPPED, AND THEY ARE DROPPED SEPARATELY IN
+     MEANING EVEN THOUGH THE CODE TREATS THEM ALIKE. A work with no year at all
+     is not a forthcoming book; it is an unfinished catalogue record, and there
+     are a great many of them. Letting undated records through "in case" is the
+     softest possible way to reintroduce the backlist strip. */
   function absorb(state, f, res) {
     if (!res || !Array.isArray(res.works)) return false;
     let added = 0;
@@ -655,7 +857,19 @@ BT.viewPeople = (function () {
       if (!w.workId || state.seen.has(w.workId)) continue;
       const mine = addedHere.has(w.workId);
       if (ownedWorks.has(w.workId) && !mine) continue;
-      state.seen.set(w.workId, { w, via: f, approximate: !!res.approximate, owned: mine });
+      state.scanned.add(w.workId);
+
+      const release = BT.follows.releaseOfWork(w);
+      const verdict = BT.follows.futureness(release);
+      if (verdict !== 'future' && verdict !== 'maybe') continue;
+
+      state.seen.set(w.workId, {
+        w, via: f, release, verdict,
+        approximate: !!res.approximate,
+        owned: mine,
+        sharp: 0,
+      });
+      if (verdict === 'maybe') state.maybe++;
       added++;
     }
     return added > 0;
@@ -687,23 +901,49 @@ BT.viewPeople = (function () {
      the bug this whole section was rewritten for. */
   function progressLine(state, checking) {
     if (!state.done) {
+      if (state.phase === 'sharpen') {
+        /* Named, not hidden behind a generic spinner. The reader is watching a
+           list that may LOSE a row in a moment, and "sharpening dates" is the
+           sentence that makes that make sense when it happens. */
+        return `<span class="fdot"></span>Sharpening year-only dates with Google Books…${
+          checking ? ` <span class="faint">${esc(BT.util.truncate(checking.name, 34))}</span>` : ''}`;
+      }
       return `<span class="fdot"></span>Checking ${state.checked} of ${
         BT.util.pluralize(state.of, 'follow')}…${
         checking ? ` <span class="faint">${esc(BT.util.truncate(checking.name, 34))}</span>` : ''}`;
     }
-    /* The grid below says "could not look" and "nothing you don't already
-       have" in full sentences of its own, so this line never repeats them. It
-       adds only what the grid cannot say for itself: the counts.
+    /* The grid below says "could not look" and "nothing is dated ahead" in full
+       sentences of its own, so this line never repeats them. It adds only what
+       the grid cannot say for itself: the counts.
+
+       THE SCANNED FIGURE IS PRINTED WHETHER OR NOT ANYTHING SURVIVED, and that
+       is the whole reason this line still exists after the filter narrowed. A
+       screen showing two cards, or none, looks broken; the same screen saying
+       it read 213 catalogued works to find them does not. It is the difference
+       between "this feature is not working" and "the catalogue has nothing".
 
        The failure note is the exception, and it is the one that matters most —
-       "Nothing here you don't already have" while three follows went unchecked
-       is a claim we are not entitled to make, so the shortfall is stated next
-       to it whether or not there are any rows. */
+       "nothing is dated ahead of today" while three follows went unchecked is a
+       claim we are not entitled to make, so the shortfall is stated next to it
+       whether or not there are any rows. */
     const bits = [];
     if (state.shown) {
-      bits.push(BT.util.pluralize(state.shown, 'work') + ' not on your shelves');
-      bits.push(`from ${BT.util.pluralize(state.ok, 'follow')}`);
+      bits.push(BT.util.pluralize(state.shown, 'work') + ' dated after today');
       if (state.total > state.shown) bits.push(`showing ${state.shown} of ${state.total}`);
+    }
+    if (state.ok) {
+      bits.push(`scanned ${BT.util.pluralize(state.scanned.size, 'catalogued work')} across ${
+        BT.util.pluralize(state.ok, 'follow')}`);
+    }
+    /* Both halves of what the year-only band did, because they are different
+       facts and only one of them is visible on screen. `maybe` is countable by
+       looking; `dropped` is a card that WAS there and is not any more, and a
+       row that vanishes without a word is the failure this section has been
+       burned by before. */
+    if (state.maybe) bits.push(`${state.maybe} year-only`);
+    if (state.sharpened) {
+      bits.push(`${state.sharpened} sharpened by Google Books${
+        state.dropped ? `, ${state.dropped} of them already out` : ''}`);
     }
     if (state.failed && state.ok) {
       bits.push(`<span class="fbad">${esc(BT.util.pluralize(state.failed, 'follow'))
@@ -717,15 +957,28 @@ BT.viewPeople = (function () {
     const grid = document.getElementById('fgrid');
     if (!grid) return;
 
-    /* Most recently DATED first, and the field is chosen deliberately:
-       max(publish_year) is the newest printing anyone has catalogued, which is
-       the closest honest proxy for "this turned up recently".
-       first_publish_year is a computed minimum and is often decades wrong.
-       Undated works sort last rather than as year zero — Open Library records
-       no year at all for plenty of real books, and that is not the same as old. */
-    const all = [...state.seen.values()]
-      .sort((a, b) => (b.w.latestYear || b.w.firstYear || -Infinity)
-                    - (a.w.latestYear || a.w.firstYear || -Infinity));
+    /* SOONEST FIRST — this is a list of what is coming, so it reads forwards.
+       That is the opposite of the newest-first order this grid used when it was
+       a backlist strip, and the reversal is the point rather than a detail.
+
+       BUT CERTAINTY OUTRANKS DATE, and the reason is arithmetic rather than
+       taste. A bare year anchors to January 1st (01-util.js sorts vaguer
+       precisions to the START of their window), so every undecidable
+       current-year row carries a sort key months BEHIND today while every
+       genuinely future row carries one ahead of it. Sorting on the key alone
+       would therefore put all the "we cannot tell" cards above all the "we
+       know exactly" cards — burying the best information under the worst,
+       every time. So certain dates come first, ascending, and the year-only
+       band follows as a group.
+
+       Title breaks the tie because within that band every key is identical
+       (January 1st of this year, for all of them) and an unstable sort would
+       otherwise let the cards shuffle on every repaint. */
+    const band = r => (r.verdict === 'future' ? 0 : 1);
+    const all = [...state.seen.values()].sort((a, b) =>
+      band(a) - band(b)
+      || (a.release.sortKey - b.release.sortKey)
+      || String(a.w.title).localeCompare(String(b.w.title)));
     const rows = all.slice(0, STRIP_MAX);
     state.total = all.length;
     state.shown = rows.length;
@@ -748,9 +1001,27 @@ BT.viewPeople = (function () {
         `${why}. This is not a statement about whether anything new exists — `
         + 'only that we could not look.');
     } else {
+      /* AN EMPTY LIST IS THE ANSWER, AND IT HAS TO SAY SO IN FULL SENTENCES.
+         Open Library catalogues books that exist; it has no forthcoming-title
+         concept, so "nothing your follows have is dated after today" is the
+         ordinary result rather than the broken one. Measured: page one of
+         sixty works for each of six large-catalogue authors contained ZERO
+         works dated beyond the current year.
+
+         So the scanned figure is repeated here rather than left to the line
+         above. An empty panel that also says it read 213 records is visibly a
+         question that was asked and answered; an empty panel that says nothing
+         is indistinguishable from a feature that failed to load, and the reader
+         has no way to tell which they are looking at. This is the whole reason
+         the strip must not be widened to look busier. */
       html = BT.ui.emptyState({
-        title: 'Nothing here you don’t already have',
-        body: 'Every work Open Library lists for your follows is already on your shelves.',
+        title: 'Nothing from your follows is dated ahead of today',
+        body: `Open Library has no concept of a forthcoming book — it catalogues books
+          that already exist, and it records years rather than dates. So this list is
+          usually short and often empty, and empty here means we looked and found
+          nothing dated after today. We read ${
+            esc(BT.util.pluralize(state.scanned.size, 'catalogued work'))} across ${
+            esc(BT.util.pluralize(state.ok, 'follow'))}.`,
       });
     }
 
@@ -763,16 +1034,32 @@ BT.viewPeople = (function () {
     paintProgress(state, null);
   }
 
+  /* THE DATE IS RENDERED IN THE APP'S OWN GRAMMAR, not paraphrased into a
+     sentence. BT.ui.dateField draws a fixed ten-slot monospace field and
+     HATCHES every segment the record cannot support, so a bare year reads
+
+         2026-▨▨-▨▨      the year is stored; the month and day do not exist
+
+     which is the honest picture and needs no adjective. The old card said
+     "recorded 2026" precisely because it could not make that distinction; now
+     that this strip claims a FUTURE date, the distinction is the whole point
+     and hand-rolling it here — instead of using the one component that owns it
+     — is how a month-precision book eventually renders a day. */
   function card(r) {
     const w = r.w;
     const uid = 'book:openlibrary:' + w.workId;
-    const year = w.latestYear || w.firstYear;
     const imprint = w.publishers.length ? BT.util.truncate(w.publishers[0], 28) : '';
-    /* "recorded", never "published". This is the newest year attached to any
-       catalogued printing, and Open Library's years are years — not dates, and
-       often simply wrong. Naming it as a publication date on a card the reader
-       is about to open would put a confident falsehood in front of them. */
-    return `<div class="card${r.owned ? ' is-mine' : ''}" data-uid="${esc(uid)}">
+    const maybe = r.verdict === 'maybe';
+
+    /* A countdown ONLY for a real day. `relativeDays` against a bare year would
+       count down to January 1st — a date the record never stated and which,
+       for every row in the year-only band, is already months behind us. The
+       hatched field says "we do not know when" perfectly well on its own. */
+    const soon = (!maybe && r.release.precision === 'day')
+      ? BT.util.relativeDays(BT.util.daysUntil(r.release.sortKey))
+      : '';
+
+    return `<div class="card${r.owned ? ' is-mine' : ''}${maybe ? ' is-approx' : ''}" data-uid="${esc(uid)}">
       ${/* The shape BT.ui.poster reads, and no more: a cover id is all a
             search doc carries. `ids` is present-but-empty on purpose, so
             posterUrl's ISBN and edition-OLID fallbacks find nothing and fall
@@ -781,14 +1068,37 @@ BT.viewPeople = (function () {
       ${BT.ui.poster({ title: w.title, images: { coverId: w.coverId }, ids: {} })}
       <div class="ct">${esc(w.title)}</div>
       <div class="cs">
-        <span class="mono">${year ? 'recorded ' + esc(String(year)) : 'no year recorded'}</span>
+        ${BT.ui.dateField(r.release)}
+        ${soon ? `<span class="csoon">${esc(soon)}</span>` : ''}
         ${r.owned ? '<span class="cmine">✓ In your library</span>' : ''}
       </div>
+      ${/* The hatch says the month is missing; this says what that MEANS for
+            the promise the heading just made. Two different jobs, and the
+            second one is the reason this row survived the filter at all —
+            without it a card reading 2026-▨▨-▨▨ under "publishing after today"
+            is a flat claim that the book has not come out yet, which we do not
+            know. `sharp` marks the ones Google looked at and could not improve,
+            so a reader with a key can tell "not checked" from "checked, and the
+            catalogue simply does not say". */''}
+      ${maybe ? `<div class="capprox">${esc(vagueLabel(r.release))} — may already be out${
+        r.sharp ? '; Google Books has no finer date either' : ''}</div>` : ''}
       <div class="why-line">via <b>${esc(r.via.name)}</b>${
         r.approximate
           ? ` — approximate match${imprint ? ', catalogued as ' + esc(imprint) : ''}`
           : ''}</div>
     </div>`;
+  }
+
+  /* WHICH grain is missing, read off the release rather than assumed to be the
+     year. Almost every 'maybe' is a bare year, but not all of them: a Google
+     Books date of '2026-08' lands in the CURRENT month, which still straddles
+     today and is still undecidable — and calling that "year only" when the card
+     beside it plainly shows a month would read as a bug in BookTrak rather than
+     as a gap in the record. */
+  function vagueLabel(release) {
+    const p = (release && release.precision) || 'unknown';
+    if (p === 'month' || p === 'quarter') return 'No day recorded';
+    return 'Year only';
   }
 
   /* ══ OPENING A CARD ════════════════════════════════════════════════════

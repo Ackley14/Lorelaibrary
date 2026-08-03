@@ -632,9 +632,30 @@ BT.ui = (function () {
     return out + (open ? '</div>' : '');
   }
 
+  /* The `!p` line is load-bearing, and the reason is a JavaScript comparison
+     that does not behave the way the line above it reads: `undefined >=
+     SK_UNKNOWN` is FALSE, so a release block carrying no sortKey at all sails
+     straight through the TBA guard and reaches a null `parts`.
+
+     Those records are real. A book written before the date engine existed, or
+     merged in from another device mid-schema-change, keeps its `release`
+     object while losing the derived key — 62-view-list's pubKey() guards the
+     same shape for the same reason.
+
+     What it cost was not one wrong card. BT.ui.grid maps this over every item,
+     so ONE such record threw inside the map and the router replaced the entire
+     covers view with “This screen could not be displayed” — taking the Select
+     toggle and the pile's select bar down with it, on a screen the reader had
+     just asked to bulk-edit. The table beside it rendered fine the whole time,
+     because dateCell and waterline both tolerate this input, which is what made
+     it look like a covers-mode problem rather than a date one.
+
+     A record with no usable key has no known date, and TBA is exactly what the
+     rest of the app already calls that. */
   function shortWhen(release) {
     if (!release || release.sortKey >= BT.util.SK_UNKNOWN) return 'TBA';
     const p = BT.util.sortKeyToParts(release.sortKey);
+    if (!p) return 'TBA';
     if (release.precision === 'day') return release.display;
     if (release.precision === 'month') return `${BT.util.MONTHS_ABBR[p.m - 1]} ${p.y}`;
     return String(p.y);
@@ -871,7 +892,39 @@ BT.ui = (function () {
     const fresh = await ol.hydrate(item, opts);
     if (!fresh) return item;
 
-    const merged = BT.normalize.mergeItem(item, fresh);
+    /* RE-READ BEFORE MERGING. `item` was read before the request above, and an
+       Open Library round trip is one to three seconds — everything the reader
+       does to this book in that window is already committed to the database and
+       missing from the copy in hand. mergeItem's `user` rule is "user-authored
+       state always wins", but it can only mean "wins over the record it was
+       GIVEN", so handing it a pre-request snapshot makes it faithfully write the
+       stale user block back over the fresh one.
+
+       This is a lost update, and it was not theoretical. addItem fires hydrate
+       and does not await it, so the seconds right after adding a book are
+       exactly when someone is looking at it and marking it up. MEASURED on a
+       fresh library: add a book, mark it `sell`, and the pile read back 'sell'
+       at 828ms and null at 1234ms — the same tick that flipped meta.partial 1→0
+       and stamped detailsFetchedAt, i.e. this very write. Rating, notes, status
+       and reading history went the same way, silently, with no error anywhere.
+
+       It bites hardest on the bulk pile flow, because that is a batch: select
+       twelve books just added, mark them sold, and the ones whose hydrate had
+       not landed yet quietly came back unsold — a partial, unexplained failure
+       of an action the toast had already confirmed.
+
+       Re-reading costs one indexed lookup against a round trip already paid
+       for.
+
+       AND A MISSING ROW ENDS THE WRITE. The same window covers a delete — the
+       add toast's own Undo is a delete, sitting on screen for seven seconds
+       while this request is in flight — and merging into the copy we still hold
+       would put that record straight back, tombstone and all. There is nothing
+       to enrich once the book is gone. */
+    const current = await BT.repo.getItem(uid);
+    if (!current) return null;
+
+    const merged = BT.normalize.mergeItem(current, fresh);
     merged.meta.partial = 0;
     merged.meta.detailsFetchedAt = Date.now();
     retier(merged);

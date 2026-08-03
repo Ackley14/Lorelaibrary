@@ -427,14 +427,31 @@ BT.follows = (function () {
         The lean list from the adapter plus that one field; nothing else, for
         the same 22x reason `isbn` and `edition_key` are banned from searches.
 
-     2. NO `sort=`. A publisher query has no free-text `q`, so the prohibition
-        in 20-openlibrary.js's header does not literally apply — but "looks
-        safe" is precisely what `q=dune&sort=editions` also looked like before
-        it answered with Robinson Crusoe, and only the `?author=` form has been
-        checked against the live API. So results arrive in Open Library's own
-        order and are re-sorted by year HERE, by the caller, over the page we
-        were given. Which means: newest among these sixty, not newest in the
-        catalogue. Say that in the UI rather than implying a publisher feed.
+     2. `sort=new` IS SAFE HERE, AND IT WAS MEASURED BEFORE IT WAS USED.
+        20-openlibrary.js bans `sort=` beside a free-text `q` because
+        `q=dune&sort=editions` answers with Robinson Crusoe. A `publisher=`
+        query has no free-text `q`, so that ban does not literally apply — but
+        "looks safe" is exactly what the dune query looked like too, so this
+        form was checked against the live API rather than reasoned about:
+
+            publisher=Tor              numFound 8050, page 1 relevance-ordered,
+                                       years 2013 2024 2022 2018 2021 2024 …
+            publisher=Tor&sort=new     numFound 8050, page 1 EVERY row a Tor
+                                       imprint, years 2026 ×10
+
+        Same result set, same size, newest first. The sort re-orders the
+        publisher filter; it does not discard it.
+
+        AND THE FORTHCOMING FILTER NEEDS IT. Relevance order buries every
+        recent printing: on that unsorted page, not one of sixty works carried
+        a year at or beyond the current one — for an imprint that has dozens of
+        titles dated this year. A publisher follow was therefore guaranteed to
+        contribute nothing to a "publishing after today" list, silently and for
+        a reason no reader could have seen. See futureness() below.
+
+        The local re-sort further down stays anyway. It is now a tiebreak
+        rather than the ordering, and it costs nothing to keep the answer
+        well-ordered whether or not a future Open Library honours `sort=`.
 
      Built with the adapter's own url() and BT.OL.search so that no Open
      Library URL is spelled out in this file — 20-openlibrary.js stays the only
@@ -459,6 +476,7 @@ BT.follows = (function () {
       + ',publisher';
     const url = ol.url(BT.OL.search, {
       publisher: term,
+      sort: 'new',
       fields,
       limit: BT.util.clamp(opts.limit || BT.LIMITS.authorWorks, 1, 100),
       offset: (opts.offset || 0) || undefined,
@@ -479,9 +497,9 @@ BT.follows = (function () {
        claimed from it either way, because the caller's next pass asks properly. */
     const docs = Array.isArray(data && data.docs) ? data.docs : [];
     const works = shapeWorks(docs);
-    /* Point 2 above: the order we were given is relevance, not recency, so the
-       "newest" reading has to be imposed here. Nulls sort last rather than as
-       year zero, because "no year recorded" is common and is not old. */
+    /* Point 2 above: `sort=new` already ordered these, so this is a tiebreak
+       and a guard rather than the ordering itself. Nulls sort last rather than
+       as year zero, because "no year recorded" is common and is not old. */
     works.sort((a, b) => (b.latestYear || b.firstYear || -Infinity)
                        - (a.latestYear || a.firstYear || -Infinity));
     return {
@@ -543,6 +561,208 @@ BT.follows = (function () {
       publishers: Array.isArray(doc.publisher) ? doc.publisher.filter(Boolean).map(String) : [],
       doc,
     };
+  }
+
+  /* ══ IS THIS WORK STILL AHEAD OF US? ════════════════════════════════════
+     The Following page lists works whose publication date is after today, and
+     this is the whole test. It lives here rather than in the view because it is
+     a question about a catalogue record and not about a card — and because the
+     alerts sweep asks the same question the day it grows a "coming up" feed.
+
+     A DATE FROM OPEN LIBRARY IS A YEAR. That is the shape of the data, not a
+     gap to be papered over, and it is verified: search.json returns
+     `first_publish_year` and a `publish_year` array, both plain integers, and
+     an edition's `publish_date` is free text that is almost always a bare year.
+     So most releases here occupy a WINDOW rather than a point, and the honest
+     test is about the two ends of that window:
+
+         a bare '2026'  │ Jan 1 ─────────────────────────── Dec 31
+         today          │              ▲
+         verdict        │ it could be behind us or ahead of us, and the record
+                        │ genuinely does not say which
+
+     · window ENDS before today   -> 'past'    certainly behind us
+     · window STARTS after today  -> 'future'  certainly ahead of us
+     · anything in between        -> 'maybe'   the window straddles today, which
+                                               for a bare year means the CURRENT
+                                               year and no other
+
+     'maybe' IS SHOWN AND LABELLED, NEVER SILENTLY KEPT OR SILENTLY DROPPED.
+     Dropping it would empty the screen outright — measured against the live
+     API, a 60-work page for each of Brandon Sanderson, Stephen King, Nora
+     Roberts, James Patterson, Neil Gaiman and Ursula K. Le Guin contained ZERO
+     works dated beyond the current year and between zero and six dated within
+     it; the whole catalogue holds 18 works dated 2027 and 12 dated 2028, some
+     of which are a Nepali Bikram Sambat year misread as Gregorian. Keeping it
+     unlabelled would be worse: it would say "coming up" about a book that came
+     out in March. So the view renders the year with the month and day HATCHED
+     — the app's existing grammar for "this value cannot exist in the record" —
+     and says so in words. Where a Google Books key is configured, sharpenYear()
+     below turns a good share of these into real days and the maybe resolves.
+
+     WHY THE LIST IS SHORT IS NOT A BUG AND MUST NOT BE FIXED BY WIDENING THIS.
+     Open Library has no forthcoming-title concept at all: it catalogues books
+     that exist. A filter that lets last year's reprints through to make the
+     screen look busier is not a more generous version of this feature, it is
+     the previous screen with a false heading on it. */
+
+  /* The LAST day a release could actually fall on.
+     Its FIRST day is already the sort key — 01-util.js anchors vaguer
+     precisions to the start of their window on purpose, so a bare 2027 sorts as
+     2027-01-01 — and holding both ends is what makes the three-way verdict
+     above possible instead of a coin flip. */
+  function windowEnd(release) {
+    const sk = release && release.sortKey;
+    if (!Number.isFinite(sk) || sk >= BT.util.SK_UNKNOWN) return null;
+    const p = BT.util.sortKeyToParts(sk);
+    if (!p) return null;
+    switch (release.precision) {
+      case 'day':     return sk;
+      case 'month':   return BT.util.endOfMonthSortKey(p.y, p.m);
+      /* A quarter ends with its third month, read off the anchor month the
+         engine already stored rather than off the raw string again. */
+      case 'quarter': return BT.util.endOfMonthSortKey(p.y, BT.util.quarterOf(p.m) * 3);
+      case 'year':    return BT.util.endOfMonthSortKey(p.y, 12);
+      /* 'tba' and 'unknown' carry no window at all. Neither is a future date:
+         "we do not know" and "it has not happened yet" are different facts, and
+         a list that conflated them would be padded with undated backlist. */
+      default:        return null;
+    }
+  }
+
+  /* -> 'future' | 'maybe' | 'past' | 'unknown' */
+  function futureness(release) {
+    const end = windowEnd(release);
+    if (end == null) return 'unknown';
+    const today = BT.util.todaySortKey();
+    /* `<=`, not `<`. A book that publishes TODAY is not published in the
+       future, and the request this answers was for "a publication date that is
+       in the future from the current date". It is out; it is on a shelf in a
+       shop this morning, and a search finds it. */
+    if (end <= today) return 'past';
+    return release.sortKey > today ? 'future' : 'maybe';
+  }
+
+  /* The release a search doc supports, and not one grain more.
+
+     max(publish_year), NOT first_publish_year — and here that is not the same
+     choice paintStrip makes for sorting, it is the only one that can work.
+     first_publish_year is a computed minimum over every edition and is
+     frequently decades early (The Alloy of Law, published 2011, reports 2001;
+     verified), so a forthcoming reissue of an old novel would test as 1953 and
+     be dropped. max(publish_year) is the newest printing anyone has catalogued,
+     which is the one field in the response that can ever be ahead of today.
+
+     A REPRINT COUNTS, and that is the user's own rule rather than an oversight:
+     "i just want things listed with a publication date that is in the future
+     from the current date". A 2027 reissue of a 1953 novel has a 2027
+     publication date. The test is the date.
+
+     `basis: 'work-first-published'` is the half-weight one, matching
+     stubFromSearchDoc: the year is real, but a search doc names no edition, so
+     the confidence should say the printing behind it is not identified. */
+  function releaseOfWork(work) {
+    const year = work && (work.latestYear || work.firstYear);
+    return BT.normalize.buildRelease(year ? String(year) : '', {
+      basis: 'work-first-published',
+      source: 'openlibrary',
+      inPrint: !!(work && work.coverId),
+    });
+  }
+
+  /* ── SHARPENING A YEAR INTO A DAY ──────────────────────────────────────
+     -> a finer release for this work, or null when there is nothing to gain.
+
+     Open Library cannot answer "which day", so on its evidence alone a
+     current-year work is stuck at 'maybe' for ever. Google Books can: its
+     `publishedDate` is a real 'YYYY-MM-DD' on a large share of volumes. One
+     request turns "2026, could be either" into "Nov 17, still ahead of you" —
+     or into a row this filter then correctly drops.
+
+     KEY-GATED, AND THE GATE IS NOT A PREFERENCE. Anonymous access to the Books
+     API answers HTTP 429 carrying `"quota_limit_value":"0"` — a quota of zero,
+     not a quota you can exhaust — so a keyless request is not a degraded
+     version of this, it is an error every single time. BT.googlebooks.enabled()
+     is the gate, and nothing in this file builds a Google URL.
+
+     THE MATCH RULES ARE BORROWED, NOT REWRITTEN. confidentMatch() and
+     releaseFromVolume() come straight out of 25-googlebooks.js, so the year
+     gate, the folded-title test and the shared-surname test are the same three
+     the library's own date upgrade uses. A second, laxer copy of those rules is
+     precisely how a stranger's publication date ends up on the reader's book —
+     see the Hobbit measurement in that file, where two exact title-and-author
+     matches are both catastrophically wrong dates. Only the query and the pick
+     are local, because the caller here holds a search doc rather than a stored
+     item and there is no item to merge into.
+
+     SO IT CAN ONLY EVER SHARPEN, NEVER MOVE. The year gate refuses any volume
+     whose year disagrees with the one we already hold, so the worst this can do
+     is pick the wrong day inside the right year — which cannot resurrect a book
+     from a past year, and cannot invent a future one.
+
+     A PUBLISHER FOLLOW GETS NOTHING, deliberately. Its docs carry no author
+     name (the field list is lean by design), the shared-surname test therefore
+     cannot pass, and asking anyway would spend the reader's quota on a
+     guaranteed refusal. */
+  async function sharpenYear(work, authorName, opts) {
+    opts = opts || {};
+    const gb = BT.googlebooks;
+    if (!gb || typeof gb.enabled !== 'function' || !gb.enabled()) return null;
+
+    const release = opts.release || releaseOfWork(work);
+    /* Only a bare year is worth a request. Anything finer is already better
+       than Google's own field can be trusted to improve, and pickRelease would
+       refuse a coarser payload anyway — same floor, stated at both ends. */
+    if (release.precision !== 'year') return null;
+
+    const parts = BT.util.sortKeyToParts(release.sortKey);
+    const year = parts && parts.y;
+    const title = String((work && work.title) || '').trim();
+    const author = String(authorName || '').trim();
+    if (!year || !title || !author) return null;
+
+    /* The pseudo-item confidentMatch() reads: a title, an author list, and the
+       release we already believe. Assembled rather than fetched, because the
+       entire point of this screen is books the reader does NOT own — there is
+       no stored item to hand over and adding one to get a date would be the
+       silent-add bug this view was already fixed for. */
+    const probe = { title, authors: [{ name: author }], release };
+
+    const res = await gb.search(
+      `intitle:${phrase(title)} inauthor:${phrase(author)}`,
+      { limit: 20, signal: opts.signal, ttl: opts.ttl });
+
+    const rank = p => BT.normalize.precisionRank(p);
+    let best = null;
+    for (const vol of (res && res.items) || []) {
+      if (!gb.confidentMatch(probe, vol, year)) continue;
+      const hit = gb.releaseFromVolume(vol);
+      if (!hit || rank(hit.release.precision) <= rank(release.precision)) continue;
+      const rel = hit.release;
+      /* Finest first, then EARLIEST — and for this filter earliest is the
+         conservative end rather than merely the consistent one. A work with a
+         March hardback and a November paperback in one year came out in March;
+         taking November would leave a book already sitting in shops filed under
+         the heading "publishing soon", which is the exact lie this whole screen
+         is being narrowed to stop telling. */
+      if (!best
+          || rank(rel.precision) > rank(best.precision)
+          || (rank(rel.precision) === rank(best.precision) && rel.sortKey < best.sortKey)) {
+        best = rel;
+      }
+    }
+    return best;
+  }
+
+  /* A quoted phrase for Google's `intitle:` / `inauthor:`. Embedded quotes are
+     REPLACED rather than escaped, because Google's query grammar has no escape
+     sequence at all — a stray quote closes the phrase early and silently widens
+     the search into an unrelated result set, which the year gate would then be
+     the only thing standing between us and a wrong date. Same rule as
+     25-googlebooks.js's own phrase(), which is private to that file; one line
+     duplicated is a better trade than widening that module's surface. */
+  function phrase(s) {
+    return '"' + String(s == null ? '' : s).replace(/"/g, ' ').replace(/\s+/g, ' ').trim() + '"';
   }
 
   /* ══ BASELINE ═══════════════════════════════════════════════════════════
@@ -621,6 +841,12 @@ BT.follows = (function () {
     isFollowing, follow, unfollow, all, get,
     authorId, publisherId, publisherSlug,
     worksOf, markChecked, due,
+    /* The forthcoming test, exported as three separate pieces rather than one
+       `isUpcoming(work)` boolean, because the caller needs all three answers:
+       the release to RENDER, the verdict to LABEL, and the window end to
+       explain itself. A boolean would collapse 'maybe' into one of its
+       neighbours at the only point where the distinction is visible. */
+    releaseOfWork, futureness, windowEnd, sharpenYear,
     /* Exposed so the sweep and the console can assert the invariants that
        cannot be seen from a stored row: how many follows one SWEEP may touch
        (the Following page is uncapped and deliberately so), where the baseline

@@ -648,8 +648,28 @@ tbody tr.is-checked td:first-child { box-shadow: inset var(--bt-marker-w) 0 0 va
 .skel--poster { aspect-ratio: 2/3; }
 .skel--line { height: 10px; margin-top: var(--bt-space-2); }
 
+/* `--bt-toast-lift` gets the select bar out from under the toasts. Both are
+   anchored to the bottom of the window, and the collision is the exact one the
+   bulk-edit flow creates for itself: marking twelve books sold raises an Undo
+   toast in the same strip of pixels as the bar's Mark sold button, so the
+   confirmation of one bulk write covers the control for the next one — and
+   aiming for Undo can land on Mark sold instead, which is the single worst
+   mis-click this screen has to offer.
+
+   Set by whoever raises the bar, from the bar's own measured height, and
+   absent — hence 0px — everywhere else in the app.
+
+   Applied to the TRANSFORM and deliberately not to `bottom`, which is already
+   spoken for: 05-responsive.css re-declares `.toasts { bottom: … + safe-b }`
+   for the iOS home indicator, and being the later file it wins every time. A
+   lift written into `bottom` here was silently discarded on exactly the
+   viewport that matters — the phone, where the bar and the toast are competing
+   for the same 40 pixels. Moving it to the transform means the two rules stop
+   arguing: that file keeps owning where the stack sits, this one only nudges it
+   up when a bar is under it. */
 .toasts {
-  position: fixed; left: 50%; bottom: var(--bt-space-6); transform: translateX(-50%);
+  position: fixed; left: 50%; bottom: var(--bt-space-6);
+  transform: translate(-50%, calc(-1 * var(--bt-toast-lift, 0px)));
   z-index: var(--bt-z-toast); display: flex; flex-direction: column-reverse;
   gap: var(--bt-space-2); align-items: center; pointer-events: none;
   width: max-content; max-width: calc(100vw - 32px);

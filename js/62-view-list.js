@@ -266,6 +266,7 @@ BT.viewLibrary = (function () {
     view.classList.toggle('is-selecting', selecting);
     paintChecks();
     paintBar();
+    paintSelAll();
   }
 
   /* The indexed ids are the fast path and the correct one, but `idx` is written
@@ -335,9 +336,15 @@ BT.viewLibrary = (function () {
          right one without the caller having to know which mode drew this. */
       const host = el.querySelector('.title-cell') || el;
 
+      /* The title goes in the label, not the words "this book". A screen reader
+         moving down a shelf in selection mode announces one control per row,
+         and fifteen identical "Select this book" checkboxes describe the shelf
+         to a sighted reader and nothing at all to anyone else — the row's title
+         is read separately, so the checkbox has to carry it too or the two are
+         never connected. */
       host.insertAdjacentHTML('afterbegin',
         '<button type="button" class="rowsel" role="checkbox" aria-checked="false"'
-        + ' aria-label="Select this book">' + TICK + '</button>');
+        + ' aria-label="' + esc('Select ' + it.title) + '">' + TICK + '</button>');
 
       /* ── Edition not specified ──────────────────────────────────────────
          An `open` item is the WORK: the reader said "Dune", not "the 1990 Ace
@@ -407,10 +414,15 @@ BT.viewLibrary = (function () {
 
     const all = document.getElementById('selAll');
     if (all) all.onclick = () => {
-      /* One change event for the whole list — `replace` exists so selecting
-         four hundred rows does not fire four hundred re-counts of the bar. */
-      BT.ui.selection.replace(order);
-      anchor = order.length - 1;
+      const done = allPicked();
+      /* One change event for the whole list either way — `replace` exists so
+         selecting four hundred rows does not fire four hundred re-counts of the
+         bar, and emptying them does not fire four hundred more. */
+      BT.ui.selection.replace(done ? [] : order);
+      /* Un-selecting everything drops the anchor with it: leaving it pointing
+         at the last row would make the next shift-click sweep back to a row the
+         reader never touched, from a selection they had just cleared. */
+      anchor = done ? -1 : order.length - 1;
     };
 
     /* Shift-clicking through twenty rows drags a text selection across the
@@ -444,7 +456,7 @@ BT.viewLibrary = (function () {
        subscription per render would repaint the bar once per visit to the
        screen — invisible until the counts started arriving out of order. */
     if (unsubSel) unsubSel();
-    unsubSel = BT.ui.selection.onChange(() => { paintChecks(); paintBar(); });
+    unsubSel = BT.ui.selection.onChange(() => { paintChecks(); paintBar(); paintSelAll(); });
 
     void sort;
   }
@@ -487,31 +499,87 @@ BT.viewLibrary = (function () {
      It is built and destroyed rather than hidden, so `.selectbar`'s slide-up
      animation plays on appearance; the count is rewritten in place, which is
      why the element is reused while it is up. */
+
+  /* The toast stack is bottom-anchored too, so the bar has to say how tall it
+     is or the bulk action's own Undo lands underneath it — see --bt-toast-lift
+     in 03-components. MEASURED rather than a constant, because the bar wraps to
+     two lines on a narrow pane: 39px on a wide window, 67px on a phone, and a
+     hard-coded 48px would be wrong on the viewport with least room to spare. */
+  function toastLift(px) {
+    document.documentElement.style.setProperty('--bt-toast-lift', (px || 0) + 'px');
+  }
+
   function paintBar() {
     const pane = document.querySelector('.list-pane');
     if (!pane) return;
     const n = BT.ui.selection.size();
     let bar = document.getElementById('selectbar');
 
-    if (!n) { if (bar) bar.remove(); return; }
+    if (!n) { if (bar) bar.remove(); toastLift(0); return; }
 
     if (!bar) {
       bar = document.createElement('div');
       bar.id = 'selectbar';
       bar.className = 'selectbar';
+      /* The count is the only thing that changes while the bar is up, so the
+         bar itself is the live region. Marked here, once, on the element that
+         SURVIVES the repaints below — a live region rebuilt from scratch on
+         every tick is announced inconsistently, because the announcement is a
+         property of a region that was already there when the text changed. */
+      bar.setAttribute('aria-live', 'polite');
       bar.onclick = onBar;
+      bar.innerHTML = `
+        <span class="n"></span>
+        <span class="lbl"></span>
+        <div class="spacer"></div>
+        <div class="acts">
+          <button class="btn btn--sm" type="button" data-bulk="sell">Mark to sell</button>
+          <button class="btn btn--sm" type="button" data-bulk="sold">Mark sold</button>
+          <button class="btn btn--sm" type="button" data-bulk="keep">Keep</button>
+          <button class="btn btn--sm btn--ghost" type="button" data-bulk="clear">Clear selection</button>
+        </div>`;
       pane.appendChild(bar);
     }
-    bar.innerHTML = `
-      <span class="n">${n}</span>
-      <span class="lbl">${n === 1 ? 'book selected' : 'books selected'}</span>
-      <div class="spacer"></div>
-      <div class="acts">
-        <button class="btn btn--sm" type="button" data-bulk="sell">Mark to sell</button>
-        <button class="btn btn--sm" type="button" data-bulk="sold">Mark sold</button>
-        <button class="btn btn--sm" type="button" data-bulk="keep">Keep</button>
-        <button class="btn btn--sm btn--ghost" type="button" data-bulk="clear">Clear selection</button>
-      </div>`;
+
+    /* ONLY the two words that changed. Re-writing the whole bar's innerHTML on
+       every tick rebuilt the four buttons underneath the pointer each time
+       another row was picked — which threw away keyboard focus on Mark sold for
+       anyone tabbing to it, and re-ran the slide-up on elements that had not
+       gone anywhere. Ticking rows is the ONE thing guaranteed to be happening
+       while this bar is on screen, so it is the one moment it must sit still. */
+    bar.querySelector('.n').textContent = String(n);
+    bar.querySelector('.lbl').textContent = n === 1 ? 'book selected' : 'books selected';
+    /* Height plus a hair, so the toast clears the bar instead of resting on its
+       top edge — two glass panels flush against each other read as one panel
+       with a seam, and the seam is where the Undo is. */
+    toastLift(bar.offsetHeight + 8);
+  }
+
+  /* ══ SELECT ALL / NONE ════════════════════════════════════════════════════
+     One button doing both, because they are two halves of one question: "this
+     whole screen" and "none of it". A separate Select none would be a second
+     control that is dead most of the time, and in the moment it is not dead the
+     bar's own Clear selection is already sitting right there.
+
+     "the current filtered view" is the entire point of it. `order` is what
+     survived the status, genre, format, tag and pile filters above, so pressing
+     this on ?status=finished picks the finished books and nothing else — never
+     the whole library. That is what makes it safe to put next to a Mark sold.
+
+     The label follows the state rather than being written once, so the button
+     cannot sit there reading "Select all" over a list where everything already
+     is selected — a button that lies about what pressing it does is worse than
+     no button, on a screen where the next press is a bulk write. */
+  function allPicked() {
+    return order.length > 0 && BT.ui.selection.size() === order.length;
+  }
+
+  function paintSelAll() {
+    const b = document.getElementById('selAll');
+    if (!b) return;
+    const done = allPicked();
+    b.textContent = done ? 'Select none' : 'Select all';
+    b.setAttribute('aria-pressed', String(done));
   }
 
   async function onBar(e) {
@@ -567,6 +635,10 @@ BT.viewLibrary = (function () {
        still tear down anything left on screen. */
     const bar = document.getElementById('selectbar');
     if (bar) bar.remove();
+    /* The lift belongs to the bar, so it goes when the bar goes. Left behind it
+       would strand every toast in the app 48px up the screen for the rest of
+       the session, on views that have never had a select bar. */
+    toastLift(0);
     const view = document.getElementById('view');
     if (view) view.classList.remove('is-selecting');
     const btn = document.getElementById('selBtn');

@@ -523,6 +523,52 @@ a.src:hover { background: var(--bt-surface-hover); }
 }
 @media (prefers-reduced-motion: reduce) { .fdot { animation: none; } }
 
+/* ── A DATE THAT MIGHT ALREADY BE BEHIND US ───────────────────────────────
+   The strip lists works dated after today, but Open Library records YEARS: a
+   bare '2026' read in August could be last March or next November, and the
+   record does not say which. Those rows are kept and marked rather than guessed
+   at in either direction — see 70-follows.js futureness().
+
+   The .date field above already hatches the month and day, which says the value
+   is not in the record. This line says what that MEANS for the promise the
+   section heading just made, and the two are deliberately separate: the hatch
+   is a fact about the data, this is a caveat about the claim.
+
+   AMBER, reusing the palette's existing "coarse precision" hue — .prec.month
+   and .prec.quarter are already amber for exactly this idea — so a reader who
+   has seen a month-only date anywhere else in the app recognises the colour
+   before reading the words. No new value is introduced; the palette is shared
+   with a sibling app and a one-off hex here would drift out of both themes. */
+.capprox {
+  margin-top: 3px; padding: 2px var(--bt-space-2);
+  border-radius: var(--bt-radius-sm);
+  font-size: var(--bt-fs-micro); line-height: 1.35;
+  color: var(--bt-amber-text); background: var(--bt-amber-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-amber-edge);
+}
+/* The poster gets the same hue at the same weight the owned marker uses, so
+   the two states are legible from the ring alone while scrolling — which is how
+   this grid is actually read, rather than card by card. */
+.card.is-approx .poster { box-shadow: 0 0 0 2px var(--bt-amber-edge); }
+
+/* "in 34d", beside a date we know to the day. It appears on certain future
+   rows only: counting down to a bare year would be counting down to January
+   1st, a date the record never stated. Teal because it is the confident case,
+   matching the "exact day" precision tag. */
+.csoon { color: var(--bt-teal-text); white-space: nowrap; }
+
+/* Both markers take their own line rather than squeezing the date field. `.cs`
+   is a non-wrapping flex row and a card is 118px at its narrowest, so without
+   this the ten-slot mono date and a countdown collide and the field — the one
+   element on the card that must stay exact — is what gives way.
+
+   SCOPED TO #fgrid, not written as a bare `.card .cs`. The card is a shared
+   component and the search view lays out hundreds of them; relaxing its
+   subtitle row from here would reflow a screen this file has no business
+   touching, and the symptom would show up somewhere nobody would think to
+   connect to the Following page. */
+#fgrid .card .cs { flex-wrap: wrap; }
+
 /* A card the reader added FROM this strip, in the session they added it.
 
    The strip's whole job is books you do NOT have, so an owned work is normally
@@ -533,10 +579,13 @@ a.src:hover { background: var(--bt-surface-hover); }
 .cmine { color: var(--bt-teal-text); white-space: nowrap; }
 .card.is-mine .poster { box-shadow: 0 0 0 2px var(--bt-teal-edge); }
 /* The marker takes a second line rather than squeezing its neighbour. `.cs` is
-   a non-wrapping flex row, so without this the year breaks mid-phrase and the
-   card reads "recorded" above "2026". */
+   a non-wrapping flex row, so without this the "✓ In your library" marker
+   pushes the date field and one of the two breaks mid-phrase.
+
+   The rule above already wraps this row for the follows grid; this one stays
+   because `.is-mine` is set on cards elsewhere too, and scoping the general
+   case to #fgrid would have silently dropped the wrap on those. */
 .card.is-mine .cs { flex-wrap: wrap; }
-.card.is-mine .cs .mono { white-space: nowrap; }
 
 /* ══ SETTINGS ═════════════════════════════════════════════════════════════ */
 
