@@ -1,0 +1,564 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Components. One implementation of each; views compose these and never
+   hand-roll a cover, a date or a rating.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ══ PANE 1 — THE SHELF TREE ══════════════════════════════════════════════ */
+
+.tree-pane {
+  background: var(--bt-surface-rail);
+  border-right: var(--bt-rule-w) solid var(--bt-line-rule);
+  position: relative; z-index: 3;
+}
+
+.filter {
+  padding: var(--bt-space-3) var(--bt-space-4) var(--bt-space-2);
+  display: flex; gap: var(--bt-space-2); align-items: center; position: relative;
+}
+.filter input {
+  flex: 1; min-width: 0; height: 26px;
+  background: var(--bt-surface-raised);
+  border: var(--bt-rule-w) solid var(--bt-line-rule);
+  border-radius: var(--bt-radius);
+  padding: 0 var(--bt-space-3) 0 24px;
+  font-size: 12px; color: var(--bt-text-primary);
+}
+.filter .mag {
+  position: absolute; left: 17px; top: 50%; margin-top: -7.5px;
+  width: 13px; height: 13px; color: var(--bt-text-faint); pointer-events: none; z-index: 1;
+}
+.filter input::placeholder { color: var(--bt-text-faint); }
+.filter input:focus {
+  outline: none; border-color: var(--bt-brass-edge);
+  box-shadow: 0 0 0 3px var(--bt-brass-wash);
+}
+
+.tree { padding: 2px var(--bt-space-3) 20px; user-select: none; }
+.sec { margin-bottom: 2px; }
+.sec-h {
+  display: flex; align-items: center; gap: 5px; width: 100%; height: 22px;
+  padding: 0 var(--bt-space-1);
+  font-size: var(--bt-fs-micro); letter-spacing: var(--bt-tracking-caps);
+  text-transform: uppercase; color: var(--bt-text-muted); font-weight: 600;
+}
+.sec-h:hover { color: var(--bt-text-secondary); }
+.sec-h .n {
+  margin-left: auto; font-family: var(--bt-font-mono);
+  font-size: var(--bt-fs-micro); letter-spacing: 0; color: var(--bt-text-faint);
+}
+
+.row {
+  position: relative; display: flex; align-items: center; gap: var(--bt-space-2);
+  height: var(--bt-h-treerow);
+  padding: 0 var(--bt-space-2) 0 var(--bt-space-1);
+  border-radius: var(--bt-radius);
+  color: var(--bt-text-secondary); cursor: pointer; width: 100%; text-align: left;
+}
+.row:hover { background: var(--bt-surface-hover); }
+.row .lbl {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-size: var(--bt-fs-base);
+}
+.row .n {
+  font-family: var(--bt-font-mono); font-size: 10px; color: var(--bt-text-faint);
+  font-variant-numeric: tabular-nums; flex: 0 0 auto;
+}
+.row.is-sel { background: var(--bt-brass-wash); color: var(--bt-text-primary); font-weight: 500; }
+.row.is-sel .n { color: var(--bt-brass-text); }
+.row.is-sel::before {
+  content: ""; position: absolute; left: -8px; top: 50%; transform: translateY(-50%);
+  width: var(--bt-marker-w); height: 15px; border-radius: 0 3px 3px 0;
+  background: var(--bt-brass);
+}
+.row.is-focus { box-shadow: inset 0 0 0 1.5px var(--bt-focus-ring); }
+
+.tri {
+  flex: 0 0 13px; width: 13px; height: 13px;
+  display: grid; place-items: center; color: var(--bt-text-faint);
+  transition: transform var(--bt-dur) var(--bt-ease);
+}
+.tri svg { width: 8px; height: 8px; }
+.row:hover .tri { color: var(--bt-text-secondary); }
+.grp[data-open="0"] > .row > .tri,
+.sec[data-open="0"] .sec-h .tri { transform: rotate(-90deg); }
+.grp[data-open="0"] > .kids,
+.sec[data-open="0"] > .sec-body { display: none; }
+.tri.void { opacity: 0; pointer-events: none; }
+
+.kids {
+  margin-left: var(--bt-space-4); padding-left: 9px;
+  border-left: var(--bt-rule-w) solid var(--bt-line-hairline);
+}
+.kids:hover { border-left-color: var(--bt-line-rule); }
+
+.dot {
+  flex: 0 0 7px; width: 7px; height: 7px; border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px currentColor; background: transparent;
+}
+.dot.fill { background: currentColor; }
+
+/* Reading status. `want` is the cool end of the palette because nothing has
+   happened yet; `reading` takes the brand hue because it is the one state the
+   app is actually about. finished and dropped are BOTH faint on purpose — a
+   closed book should recede, and the tree already distinguishes them by
+   section, so spending a hue here would only add noise to a long shelf. */
+.c-want { color: var(--bt-slate); }
+.c-reading { color: var(--bt-brass); }
+.c-finished { color: var(--bt-text-faint); }
+.c-dropped { color: var(--bt-text-faint); }
+
+/* Genre. These read the same --bt-genre-* aliases the tags do, so a genre is
+   one colour everywhere it appears — dot, tag, chart segment. Change the
+   alias in 01-tokens.css and every surface follows. */
+.c-fiction { color: var(--bt-genre-fiction); }
+.c-nonfiction { color: var(--bt-genre-nonfiction); }
+.c-fantasysf { color: var(--bt-genre-fantasysf); }
+.c-mystery { color: var(--bt-genre-mystery); }
+.c-romance { color: var(--bt-genre-romance); }
+.c-general { color: var(--bt-genre-general); }
+
+.star { flex: 0 0 auto; font-size: 10px; color: var(--bt-brass); }
+.hash { flex: 0 0 auto; font-family: var(--bt-font-mono); font-size: 11px; color: var(--bt-text-faint); }
+.badge {
+  flex: 0 0 auto; min-width: 15px; height: 15px; padding: 0 4px;
+  display: grid; place-items: center; border-radius: var(--bt-radius-pill);
+  background: var(--bt-brass); color: var(--bt-surface-canvas);
+  font-family: var(--bt-font-mono); font-size: 9px; font-weight: 700;
+}
+
+.tree-foot {
+  border-top: var(--bt-rule-w) solid var(--bt-line-hairline);
+  padding: 7px var(--bt-space-5);
+  display: flex; flex-wrap: wrap; gap: var(--bt-space-1) var(--bt-space-3);
+  background: var(--bt-surface-rail);
+}
+kbd {
+  font-family: var(--bt-font-mono); font-size: 9px; color: var(--bt-text-muted);
+  background: var(--bt-surface-raised);
+  border: var(--bt-rule-w) solid var(--bt-line-rule); border-bottom-width: 2px;
+  border-radius: 3px; padding: 0 3px;
+}
+.tree-foot span {
+  font-size: var(--bt-fs-micro); color: var(--bt-text-faint);
+  display: flex; align-items: center; gap: 3px;
+}
+
+/* ══ PANE 2 — TOOLBAR, TABLE, GRID ════════════════════════════════════════ */
+
+/* Positioned so .selectbar can pin to the BOTTOM OF THE PANE rather than the
+   viewport. On a wide window the pane is only the middle third, and a bar
+   pinned to the viewport would float over the inspector. */
+.list-pane { background: transparent; position: relative; }
+
+.crumb {
+  display: flex; align-items: center; gap: 5px; flex: 1; min-width: 0;
+  font-size: var(--bt-fs-sm); color: var(--bt-text-muted);
+  overflow: hidden; white-space: nowrap;
+}
+.crumb b { color: var(--bt-text-primary); font-weight: 600; }
+.crumb s { text-decoration: none; color: var(--bt-text-faint); }
+
+.seg { display: flex; background: var(--bt-surface-sunk); border-radius: var(--bt-radius); padding: 2px; gap: 1px; }
+.seg button {
+  padding: 0 var(--bt-space-3); height: 21px; font-size: 11px;
+  color: var(--bt-text-muted); border-radius: 3px;
+  display: flex; align-items: center; gap: 5px;
+}
+.seg button:hover { color: var(--bt-text-primary); }
+.seg button[aria-pressed="true"] {
+  background: var(--bt-surface-raised); color: var(--bt-text-primary);
+  box-shadow: var(--bt-shadow-inset-top), 0 1px 1px rgba(0, 0, 0, .09);
+}
+.seg svg { width: 12px; height: 12px; }
+
+.toolbar {
+  display: flex; align-items: center; gap: var(--bt-space-3); flex-wrap: wrap;
+  padding: 9px var(--bt-space-6);
+  border-bottom: var(--bt-rule-w) solid var(--bt-line-hairline);
+}
+.chips { display: flex; gap: var(--bt-space-1); flex-wrap: wrap; }
+.chip {
+  height: 23px; padding: 0 9px; border-radius: var(--bt-radius-pill);
+  font-size: 11px; color: var(--bt-text-secondary);
+  border: var(--bt-rule-w) solid var(--bt-line-rule);
+  display: flex; align-items: center; gap: 5px;
+  background: var(--bt-surface-raised);
+}
+.chip:hover { border-color: var(--bt-line-strong); color: var(--bt-text-primary); }
+.chip[aria-pressed="true"] {
+  background: var(--bt-brass-wash); border-color: var(--bt-brass-edge); color: var(--bt-brass-text);
+}
+.spacer { flex: 1; }
+.count { font-family: var(--bt-font-mono); font-size: var(--bt-fs-mini); color: var(--bt-text-muted); }
+
+.tblwrap { overflow-x: auto; scrollbar-width: thin; }
+table { border-collapse: collapse; width: 100%; min-width: 760px; }
+thead th {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--bt-surface-canvas); text-align: left;
+  font-size: var(--bt-fs-micro); letter-spacing: .12em; text-transform: uppercase;
+  color: var(--bt-text-muted); font-weight: 600;
+  padding: 7px var(--bt-space-4);
+  border-bottom: var(--bt-rule-w) solid var(--bt-line-rule);
+  white-space: nowrap;
+}
+thead th.num { text-align: right; }
+tbody td {
+  padding: 0 var(--bt-space-4); height: var(--bt-h-tablerow);
+  border-bottom: var(--bt-rule-w) solid var(--bt-line-hairline);
+  font-size: var(--bt-fs-base); vertical-align: middle;
+}
+tbody tr { cursor: pointer; }
+tbody tr:hover td { background: var(--bt-surface-hover); }
+tbody tr.is-sel td { background: var(--bt-brass-wash); }
+tbody tr.is-sel td:first-child { box-shadow: inset var(--bt-marker-w) 0 0 var(--bt-brass); }
+td.num { text-align: right; }
+
+.title-cell { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.title-cell .chipart { flex: 0 0 18px; height: 26px; border-radius: var(--bt-radius-sm); }
+.title-cell .t {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 500; color: var(--bt-text-primary);
+}
+
+/* ── Genre tags. Text uses the --bt-genre-* alias (the BASE hue, the same
+      token the tree dot reads) while the ground and border use that hue's
+      -wash/-edge pair. Pinning the text to the alias is what keeps a genre
+      from drifting into two slightly different colours across the app. ─── */
+.tag {
+  display: inline-flex; align-items: center; height: 17px; padding: 0 var(--bt-space-2);
+  border-radius: 3px; font-size: var(--bt-fs-micro); letter-spacing: .09em;
+  text-transform: uppercase; font-weight: 600;
+}
+.tag.fiction {
+  color: var(--bt-genre-fiction); background: var(--bt-ink-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-ink-edge);
+}
+.tag.nonfiction {
+  color: var(--bt-genre-nonfiction); background: var(--bt-sage-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-sage-edge);
+}
+.tag.fantasysf {
+  color: var(--bt-genre-fantasysf); background: var(--bt-plum-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-plum-edge);
+}
+.tag.mystery {
+  color: var(--bt-genre-mystery); background: var(--bt-slate-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-slate-edge);
+}
+.tag.romance {
+  color: var(--bt-genre-romance); background: var(--bt-rose-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-rose-edge);
+}
+/* 'general' is the bucket a book lands in when nothing better fit, so it gets
+   the same hueless treatment as .prec.unknown below. Giving it a colour would
+   dress an absence of information up as a classification. */
+.tag.general {
+  color: var(--bt-text-muted); background: var(--bt-surface-sunk);
+  box-shadow: inset 0 0 0 1px var(--bt-line-rule);
+}
+
+/* ── Format. Deliberately monochrome and deliberately tiny: format is a
+      property of the copy you own, not of the book, so it must never pull
+      rank on the genre tag sitting next to it. The glyph is inlined as SVG by
+      the view; this styles the wrapper only, and currentColor is the whole
+      contract — the icon inherits whatever the row is already using. ────── */
+.fmt {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 17px; color: var(--bt-text-muted);
+}
+.fmt svg { width: 12px; height: 12px; display: block; }
+.fmt:hover { color: var(--bt-text-secondary); }
+/* 'unspecified' is the default for anything added by search, which is most of
+   the library. Drawing a glyph for it would put an icon on every single row
+   and say nothing. */
+.fmt.unspecified { display: none; }
+
+/* ── Pile. The ownership axis (to sell / sold), which is orthogonal to
+      reading status — you can want a book you already own, and you can sell a
+      book you finished. Neutral and understated so the two axes never read as
+      one ladder. ──────────────────────────────────────────────────────────── */
+.pile {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 15px; padding: 0 5px; border-radius: var(--bt-radius-sm);
+  background: var(--bt-surface-sunk);
+  box-shadow: inset 0 0 0 1px var(--bt-line-rule);
+  font-family: var(--bt-font-mono); font-size: var(--bt-fs-micro);
+  letter-spacing: .08em; text-transform: uppercase; font-weight: 700;
+  color: var(--bt-text-muted); white-space: nowrap;
+}
+.pile.sell { color: var(--bt-text-secondary); }
+/* Sold is history, not a task. It loses the ground and the edge entirely so
+   it stops looking like something you still have to act on. */
+.pile.sold { color: var(--bt-text-faint); box-shadow: none; background: none; padding: 0; }
+.pile.sold::before { content: "✓"; font-size: 9px; }
+
+.stat { display: flex; align-items: center; gap: var(--bt-space-2); color: var(--bt-text-secondary); font-size: var(--bt-fs-sm); }
+
+.grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: var(--bt-space-6) 14px; padding: var(--bt-space-6);
+}
+.card { cursor: pointer; }
+.card .poster {
+  aspect-ratio: 2/3; margin-bottom: 7px;
+  transition: transform var(--bt-dur) var(--bt-ease), box-shadow var(--bt-dur);
+}
+.card:hover .poster { transform: translateY(-3px); box-shadow: var(--bt-shadow-lift); }
+.card.is-sel .poster { box-shadow: 0 0 0 2px var(--bt-brass), var(--bt-shadow-lift); }
+.card .ct {
+  font-size: var(--bt-fs-sm); font-weight: 500; color: var(--bt-text-primary); line-height: 1.25;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.card .cs { font-size: var(--bt-fs-mini); color: var(--bt-text-muted); margin-top: 2px; display: flex; gap: 5px; align-items: center; }
+
+/* ── Cover. Real Open Library jacket art when present; otherwise a generated
+      block, so a coverless edition is never an empty hole — and there are a
+      LOT of coverless editions once you leave the bestseller lists.
+
+      2/3 is not inherited laziness: US trade is 6×9in, which is 2:3 within a
+      rounding error, so real jackets crop to almost nothing.
+
+      The generated block is a hue pair (--a/--b) derived from the uid by the
+      view, a diagonal hatch, and one giant serif initial. It is stable per
+      book: the same title always generates the same block, which is what
+      makes a grid of unfetched covers still navigable by muscle memory. ─── */
+.poster {
+  position: relative; overflow: hidden; border-radius: 3px;
+  background: linear-gradient(158deg, var(--a, #4A3E2E), var(--b, #1A140D));
+  box-shadow: inset 0 0 0 1px var(--bt-poster-edge);
+}
+.poster img { width: 100%; height: 100%; object-fit: cover; position: relative; z-index: 2; }
+.poster.gen::before {
+  content: ""; position: absolute; inset: 0; mix-blend-mode: soft-light;
+  background:
+    repeating-linear-gradient(74deg, rgba(255, 255, 255, .14) 0 1.5px, transparent 1.5px 9px),
+    radial-gradient(120% 75% at 22% 4%, rgba(255, 255, 255, .42), transparent 62%);
+}
+/* The initial is set in the serif stack and cropped by the block's own
+   overflow, so it reads as blocked foil on a jacket rather than as a letter
+   sitting in a box. Do not shrink it to fit — the crop IS the effect. */
+.poster.gen::after {
+  content: attr(data-i); position: absolute; left: -2px; bottom: -14px;
+  font-family: var(--bt-font-serif); font-size: 64px; font-weight: 600; line-height: 1;
+  color: rgba(255, 255, 255, .26); letter-spacing: -.05em;
+}
+/* Same block at table-row scale. No hatch and no initial down here: at 18px
+   wide both turn to mud, and the hue pair alone is enough to tell two rows
+   apart while scanning. */
+.chipart {
+  background: linear-gradient(158deg, var(--a, #4A3E2E), var(--b, #1A140D));
+  box-shadow: inset 0 0 0 1px var(--bt-poster-edge);
+  position: relative; overflow: hidden;
+}
+.chipart img { width: 100%; height: 100%; object-fit: cover; }
+
+/* ══ SELECTION MODE ═══════════════════════════════════════════════════════
+   Bulk editing — built for the to-sell pile, but nothing about it is pile
+   specific, so future bulk edits inherit it for free.                      */
+
+/* Selection is a MODE, not a hover affordance. The checkbox is out of flow
+   entirely until .is-selecting is set on the list root, which costs one shift
+   of the title column at mode entry. That is deliberate: the shift is the
+   clearest possible signal that the list now answers to different clicks.
+   Revealing it on row hover instead was tried first and read as jitter on a
+   34px row scanning past at speed. */
+.rowsel {
+  display: none;
+  flex: 0 0 14px; width: 14px; height: 14px;
+  place-items: center; border-radius: var(--bt-radius-sm);
+  border: var(--bt-rule-w) solid var(--bt-line-strong);
+  background: var(--bt-surface-raised); color: transparent;
+}
+.is-selecting .rowsel { display: grid; }
+.rowsel svg { width: 9px; height: 9px; }
+.rowsel[aria-checked="true"] {
+  background: var(--bt-brass); border-color: var(--bt-brass); color: var(--bt-surface-canvas);
+}
+tbody tr.is-checked td { background: var(--bt-surface-hover); }
+tbody tr.is-checked td:first-child { box-shadow: inset var(--bt-marker-w) 0 0 var(--bt-brass-edge); }
+.card.is-checked .poster { box-shadow: 0 0 0 2px var(--bt-brass-edge); }
+
+/* Pinned to the pane, not the viewport (see .list-pane). It sits ABOVE the
+   list rather than pushing it, because the row you just clicked must not
+   move out from under the pointer when the bar appears. */
+.selectbar {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: var(--bt-z-bar);
+  display: flex; align-items: center; gap: var(--bt-space-4);
+  padding: var(--bt-space-3) var(--bt-space-6);
+  background: var(--bt-surface-glass);
+  backdrop-filter: var(--bt-glass-blur); -webkit-backdrop-filter: var(--bt-glass-blur);
+  border-top: var(--bt-rule-w) solid var(--bt-line-highlight);
+  box-shadow: var(--bt-shadow-sheet);
+  animation: slideup var(--bt-dur) var(--bt-ease);
+}
+@supports not (backdrop-filter: blur(2px)) { .selectbar { background: var(--bt-surface-rail); } }
+@keyframes slideup { from { transform: translateY(100%); } }
+.selectbar .n {
+  font-family: var(--bt-font-mono); font-size: var(--bt-fs-md); font-weight: 700;
+  color: var(--bt-brass-text); font-variant-numeric: tabular-nums;
+}
+.selectbar .lbl { font-size: var(--bt-fs-sm); color: var(--bt-text-muted); }
+.selectbar .acts { display: flex; align-items: center; gap: var(--bt-space-2); flex-wrap: wrap; }
+
+/* ══ THE DATE GRAMMAR ═════════════════════════════════════════════════════
+   A date is a fixed 10-slot monospace field. A segment that is not stored is
+   replaced by a hatched block EXACTLY as wide as the digits it stands in for,
+   because the placeholder characters are monospace too.
+
+     hatch  = this value cannot exist in the record
+     dots   = the value exists upstream but we do not know it yet
+
+   This is the app's core idea, and a library leans on it hard: catalogue
+   records are full of bare years and reprint dates that nobody pinned down.
+   A year-precision book must never render a month, here or anywhere else. */
+
+.date {
+  font-family: var(--bt-font-mono); font-size: 12px; letter-spacing: .01em;
+  display: inline-flex; align-items: center; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.date .k { color: var(--bt-text-primary); }
+.date .sep { color: var(--bt-text-faint); padding: 0 .5px; }
+.hatch {
+  color: var(--bt-hatch-ink); border-radius: var(--bt-radius-sm); padding: 1px .1em;
+  background-color: var(--bt-hatch-ground);
+  background-image: repeating-linear-gradient(-45deg, var(--bt-hatch-stripe) 0 1px, transparent 1px 4px);
+  box-shadow: inset 0 0 0 1px var(--bt-hatch-edge);
+}
+.pending { color: var(--bt-pending-ink); letter-spacing: .08em; }
+
+.prec {
+  font-size: 8.5px; letter-spacing: .13em; text-transform: uppercase; font-weight: 700;
+  padding: 2px 5px; border-radius: var(--bt-radius-sm); white-space: nowrap;
+}
+.prec.day { background: var(--bt-sage-wash); color: var(--bt-sage-text); box-shadow: inset 0 0 0 1px var(--bt-sage-edge); }
+.prec.month { background: var(--bt-brass-wash); color: var(--bt-brass-text); box-shadow: inset 0 0 0 1px var(--bt-brass-edge); }
+/* Quarter shares month's hue. Publishers announce whole seasons ("Fall 2027")
+   and a season is just a coarse month, so splitting the two into different
+   colours would imply a distinction the reader does not need to make. */
+.prec.quarter { background: var(--bt-brass-wash); color: var(--bt-brass-text); box-shadow: inset 0 0 0 1px var(--bt-brass-edge); }
+.prec.year { background: var(--bt-rose-wash); color: var(--bt-rose-text); box-shadow: inset 0 0 0 1px var(--bt-rose-edge); }
+.prec.tba, .prec.unknown { background: var(--bt-surface-sunk); color: var(--bt-text-muted); box-shadow: inset 0 0 0 1px var(--bt-line-rule); }
+
+/* The waterline — Folio's three-segment gauge, filling only what is stored. */
+.wl { display: inline-flex; flex-direction: column-reverse; gap: 2px; vertical-align: middle; margin-right: 8px; flex: 0 0 auto; }
+.wl i { display: block; width: 10px; height: 2.5px; border-radius: 1px; background: var(--bt-line-rule); }
+.wl i.f { background: var(--bt-brass); }
+.datecell { display: flex; align-items: center; }
+
+/* Drift — a publication date that moved. The one place in the whole app where
+   a hue carries a value judgement, because here it genuinely is one: earlier
+   is good news and later is not. */
+.drift {
+  display: inline-flex; align-items: center; gap: 3px; padding: 1px 5px;
+  border-radius: var(--bt-radius-sm); font-family: var(--bt-font-mono); font-size: var(--bt-fs-micro);
+}
+.drift.later { color: var(--bt-rose-text); background: var(--bt-rose-wash); box-shadow: inset 0 0 0 1px var(--bt-rose-edge); }
+.drift.earlier { color: var(--bt-sage-text); background: var(--bt-sage-wash); box-shadow: inset 0 0 0 1px var(--bt-sage-edge); }
+
+/* ══ FEEDBACK ═════════════════════════════════════════════════════════════ */
+
+.empty {
+  padding: var(--bt-space-7) var(--bt-space-6);
+  text-align: center; color: var(--bt-text-muted); max-width: 52ch; margin: 0 auto;
+}
+.empty h3 { font-family: var(--bt-font-serif); font-size: var(--bt-fs-lg); color: var(--bt-text-primary); margin-bottom: var(--bt-space-3); }
+.empty p { font-size: var(--bt-fs-base); line-height: 1.6; margin-bottom: var(--bt-space-5); }
+
+.errorbox {
+  margin: var(--bt-space-6);
+  border: var(--bt-rule-w) solid var(--bt-rose-edge); border-left-width: var(--bt-marker-w);
+  border-radius: var(--bt-radius); background: var(--bt-rose-wash);
+  padding: var(--bt-space-4) var(--bt-space-5); font-size: var(--bt-fs-base);
+}
+.errorbox strong { display: block; color: var(--bt-rose-text); margin-bottom: 2px; }
+
+/* Brass is the brand hue AND the caution hue, which would normally be a
+   mistake. It survives because a warning is never identified by colour alone
+   here — it always carries the marker rule on the left edge and a bold label
+   line, and brand brass never appears as a filled panel like this one. */
+.warnbox {
+  border: var(--bt-rule-w) solid var(--bt-brass-edge); border-left-width: var(--bt-marker-w);
+  border-radius: var(--bt-radius); background: var(--bt-brass-wash);
+  padding: var(--bt-space-4) var(--bt-space-5); font-size: var(--bt-fs-base);
+  margin-bottom: var(--bt-space-5); color: var(--bt-text-secondary);
+}
+.warnbox strong { display: block; color: var(--bt-brass-text); margin-bottom: 2px; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--bt-space-2);
+  height: 28px; padding: 0 var(--bt-space-4);
+  border: var(--bt-rule-w) solid var(--bt-line-rule); border-radius: var(--bt-radius);
+  background: var(--bt-surface-raised); color: var(--bt-text-secondary);
+  font-size: var(--bt-fs-base); white-space: nowrap;
+  box-shadow: var(--bt-shadow-inset-top);
+}
+.btn:hover { border-color: var(--bt-line-strong); color: var(--bt-text-primary); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+/* Brass inverts between themes — dark gold on paper, bright gold on ink — so
+   the label has to invert with it or one of the two themes loses contrast. */
+.btn--primary { background: var(--bt-brass); border-color: var(--bt-brass); color: #1A1207; font-weight: 600; }
+:root[data-theme="light"] .btn--primary { color: #fff; }
+.btn--primary:hover { filter: brightness(1.08); color: #1A1207; }
+:root[data-theme="light"] .btn--primary:hover { color: #fff; }
+.btn--ghost { background: none; border-color: transparent; }
+.btn--danger:hover { border-color: var(--bt-rose-edge); color: var(--bt-rose-text); }
+.btn--sm { height: 22px; padding: 0 var(--bt-space-3); font-size: var(--bt-fs-sm); }
+
+.skel {
+  background: var(--bt-surface-sunk); border-radius: var(--bt-radius-sm);
+  position: relative; overflow: hidden;
+}
+.skel::after {
+  content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--bt-surface-hover), transparent);
+  animation: sweep 1.3s infinite;
+}
+@keyframes sweep { to { transform: translateX(100%); } }
+.skel--poster { aspect-ratio: 2/3; }
+.skel--line { height: 10px; margin-top: var(--bt-space-2); }
+
+.toasts {
+  position: fixed; left: 50%; bottom: var(--bt-space-6); transform: translateX(-50%);
+  z-index: var(--bt-z-toast); display: flex; flex-direction: column-reverse;
+  gap: var(--bt-space-2); align-items: center; pointer-events: none;
+  width: max-content; max-width: calc(100vw - 32px);
+}
+.toast {
+  pointer-events: auto; display: flex; align-items: center; gap: var(--bt-space-4);
+  padding: var(--bt-space-3) var(--bt-space-5);
+  background: var(--bt-surface-glass);
+  backdrop-filter: var(--bt-glass-blur); -webkit-backdrop-filter: var(--bt-glass-blur);
+  border: var(--bt-rule-w) solid var(--bt-line-rule);
+  border-left: var(--bt-marker-w) solid var(--bt-brass);
+  border-radius: var(--bt-radius); box-shadow: var(--bt-shadow-drawer);
+  font-size: var(--bt-fs-base); color: var(--bt-text-primary);
+  animation: rise var(--bt-dur) var(--bt-ease);
+}
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+.toast--bad { border-left-color: var(--bt-rose); }
+.toast button { color: var(--bt-brass-text); text-decoration: underline; font-size: var(--bt-fs-sm); }
+
+.banner {
+  display: flex; align-items: center; gap: var(--bt-space-4);
+  padding: var(--bt-space-3) var(--bt-space-6);
+  background: var(--bt-brass-wash); color: var(--bt-text-primary);
+  border-bottom: var(--bt-rule-w) solid var(--bt-brass-edge);
+  font-size: var(--bt-fs-base);
+}
+.banner button { margin-left: auto; color: var(--bt-brass-text); text-decoration: underline; }
+
+/* A section divider inside the table. Deliberately NOT sticky. The thead
+   already sticks at top:0 and its height changes with theme and pointer type,
+   so pinning these below it would mean guessing an offset that drifts. With at
+   most a handful of sections there is nothing to gain. */
+tbody tr.grouprow td {
+  height: auto; padding: 7px var(--bt-space-4);
+  background: var(--bt-surface-canvas);
+  border-bottom: var(--bt-rule-w) solid var(--bt-line-rule);
+  font-size: var(--bt-fs-micro); letter-spacing: var(--bt-tracking-caps);
+  text-transform: uppercase; color: var(--bt-text-muted); font-weight: 600;
+}
+tbody tr.grouprow { cursor: default; }
+tbody tr.grouprow:hover td { background: var(--bt-surface-canvas); }

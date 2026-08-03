@@ -1,0 +1,177 @@
+<!doctype html>
+<!-- The doctype is load-bearing rather than decorative: the three-pane layout
+     is a viewport-height flex chain, and quirks mode resolves those heights
+     differently. One line here is cheaper than debugging that later. -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>BookTrak</title>
+<meta name="description" content="A local-first library for the books you want to read, are reading, and have finished.">
+
+<!-- Relative paths, because this has to resolve identically from file:// and
+     from a project page served under /Lorelaibrary/. A leading slash would
+     break the second one.
+     The SVG wins wherever it is supported and stays crisp on a retina tab;
+     the .ico is the fallback and also stops browsers hitting /favicon.ico and
+     logging a 404 on every load. -->
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="apple-touch-icon" href="icon-180.png">
+
+<!-- M5 inserts the manifest link here, and the service worker registration at
+     the foot of the script block. Deliberately absent until then: a worker
+     that caches the shell while the shell still changes daily mostly serves
+     yesterday's bug back to you. -->
+
+<!-- Tints the browser chrome to match whichever ground the app is painting:
+     Vellum's parchment, or Marginalia's ink. These two values are the
+     --bt-surface-canvas of each theme and must be changed with them. -->
+<meta name="theme-color" content="#FAF8F3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#14110E" media="(prefers-color-scheme: dark)">
+
+<!-- Theme is resolved BEFORE the stylesheets paint. Doing this in a deferred
+     script would flash the wrong ground colour on every load.
+     Note the key prefix: BookTrak and MovieTrak are served from the same
+     GitHub Pages origin, so `bt.theme` and `mt.theme` are neighbours in one
+     localStorage. Reading the wrong one would quietly hand this app the other
+     app's theme. -->
+<script>
+(function () {
+  var t;
+  try { t = localStorage.getItem('bt.theme'); } catch (e) {}
+  if (t !== 'light' && t !== 'dark') {
+    t = window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+  document.documentElement.setAttribute('data-theme', t);
+})();
+</script>
+
+<link rel="stylesheet" href="css/01-tokens.css">
+<link rel="stylesheet" href="css/02-base.css">
+<link rel="stylesheet" href="css/03-components.css">
+<link rel="stylesheet" href="css/04-views.css">
+<!-- Must load last: it carries every media query, and they override component
+     rules of equal specificity defined in the files above. -->
+<link rel="stylesheet" href="css/05-responsive.css">
+
+<!-- The gate sits in front of the app. The repository is the source of
+     truth, so nothing renders until the library has been signed into. -->
+<div class="gate" id="gate" hidden></div>
+
+<div class="app">
+
+  <!-- ── Pane 1 · the index tree ────────────────────────────────────────── -->
+  <aside class="pane tree-pane" id="treePane">
+    <div class="pane-h">
+      <a class="brand" href="#/library"><b>BookTrak</b><i>Folio</i></a>
+      <div class="tswitch" role="group" aria-label="Colour theme" id="tswitch">
+        <button type="button" data-theme-set="light" aria-pressed="false" title="Vellum — pale parchment">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+          </svg>Vellum
+        </button>
+        <button type="button" data-theme-set="dark" aria-pressed="false" title="Marginalia — lamplight on ink">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/>
+          </svg>Margin
+        </button>
+      </div>
+    </div>
+
+    <div class="filter">
+      <svg class="mag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
+      </svg>
+      <input id="treeFilter" type="search" placeholder="Filter shelves…" spellcheck="false" aria-label="Filter the index">
+    </div>
+
+    <div class="scroll">
+      <nav class="tree" id="tree" role="tree" aria-label="Library index"></nav>
+    </div>
+
+    <div class="tree-foot">
+      <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
+      <span><kbd>←</kbd><kbd>→</kbd> fold</span>
+      <span><kbd>/</kbd> search</span>
+      <span><kbd>⏎</kbd> open</span>
+    </div>
+  </aside>
+
+  <!-- ── Pane 2 · the working surface ───────────────────────────────────── -->
+  <main class="pane list-pane">
+    <div class="mobilebar">
+      <button class="icobtn" id="menuBtn" aria-label="Open index">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M4 7h16M4 12h16M4 17h16"/>
+        </svg>
+      </button>
+      <div class="brand"><b>BookTrak</b></div>
+      <a class="icobtn" href="#/search" aria-label="Search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
+        </svg>
+      </a>
+    </div>
+
+    <div class="pane-h">
+      <div class="crumb" id="crumb"></div>
+      <div id="paneActions" style="display:flex;gap:var(--bt-space-2);align-items:center"></div>
+    </div>
+
+    <div id="banner" class="banner" hidden></div>
+
+    <div class="scroll" id="viewScroll">
+      <div id="view" tabindex="-1"></div>
+
+      <footer class="colophon">
+        <p>
+          Catalogue data and cover images from
+          <a href="https://openlibrary.org/" target="_blank" rel="noopener">Open Library</a>,
+          a project of the <a href="https://archive.org/" target="_blank" rel="noopener">Internet Archive</a>.
+          Open Library is free, keyless and openly licensed, which is why it is
+          the primary source here and not a fallback.
+        </p>
+        <p>
+          <a href="https://books.google.com/" target="_blank" rel="noopener">Google Books</a>
+          is optional and only consulted when you supply your own API key —
+          anonymous access to it is closed
+          · Editions and covers are contributed by Open Library's own
+          volunteers, so corrections belong upstream
+          · A personal, non-commercial tool.
+        </p>
+        <p id="footMeta" class="mono"></p>
+      </footer>
+    </div>
+  </main>
+
+  <!-- ── Pane 3 · the inspector ─────────────────────────────────────────── -->
+  <aside class="pane insp" id="inspector" aria-label="Selected book"></aside>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+<!-- Host for the ISBN scanner overlay, and empty on purpose: opening a camera
+     means a permission prompt and a live video track, so nothing is built and
+     no camera light comes on until someone actually asks to scan. It also
+     needs a secure context — over file:// there is no camera at all, and the
+     scanner has to offer typing the ISBN instead. -->
+<div class="scanner" id="scanner" hidden></div>
+
+<!-- Classic scripts, numeric order, one BT global. The order IS the dependency
+     graph — there are no modules to express it, because module scripts are
+     blocked on file:// and opening this from disk has to keep working. -->
+<script src="js/00-config.js"></script>
+<script src="js/01-util.js"></script>
+<script src="js/02-theme.js"></script>
+<script src="js/05-net.js"></script>
+<script src="js/10-db.js"></script>
+<script src="js/12-repo.js"></script>
+<!-- Later milestones slot in here, still in numeric order: 15-crypto and
+     16-cloud (encrypted passphrase sync), 20-openlibrary / 22-googlebooks /
+     38-normalize (catalogue clients), 40-recommend / 45-alerts / 48-sync. -->
+<script src="js/49-router.js"></script>
+<script src="js/50-ui-core.js"></script>
+<script src="js/55-tree.js"></script>
+<script src="js/56-inspector.js"></script>
+<!-- …and here: 58-scanner, the 6x view files, 70-view-unlock. -->
+<script src="js/90-boot.js"></script>

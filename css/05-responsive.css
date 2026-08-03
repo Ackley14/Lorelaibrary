@@ -1,0 +1,390 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Responsive and touch. THIS FILE MUST LOAD LAST.
+
+   It used to live at the bottom of 02-base.css, which was a real bug: the
+   media queries set `.tree-pane { position: fixed }` and `.insp { position:
+   fixed }`, but 03-components.css and 04-views.css load afterwards and set
+   `position: relative` on the same selectors at equal specificity. The later
+   files won, so the panes never detached — below 1180px all three simply
+   stacked vertically, and because html/body are overflow:hidden, everything
+   past the first viewport was unreachable. Keeping every media query in the
+   last-loaded file is what stops that happening again.
+
+   The other reason this file is small: all geometry lives in custom
+   properties, so retuning the entire interface for a thumb is mostly a matter
+   of overriding a dozen token values rather than rewriting components.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ══ 1 · SAFE AREAS ═══════════════════════════════════════════════════════
+   index.html sets viewport-fit=cover, which is what allows the background to
+   run under the notch and the home indicator — but it also means anything
+   pinned to an edge lands underneath them unless it says otherwise. */
+:root {
+  --bt-safe-t: env(safe-area-inset-top, 0px);
+  --bt-safe-r: env(safe-area-inset-right, 0px);
+  --bt-safe-b: env(safe-area-inset-bottom, 0px);
+  --bt-safe-l: env(safe-area-inset-left, 0px);
+}
+
+/* Applied unconditionally: a notched phone in landscape is wider than 820px,
+   so scoping these to the phone band left exactly the orientation that needs
+   them most without any. */
+.gate { padding:
+  calc(var(--bt-space-6) + var(--bt-safe-t)) calc(var(--bt-space-6) + var(--bt-safe-r))
+  calc(var(--bt-space-6) + var(--bt-safe-b)) calc(var(--bt-space-6) + var(--bt-safe-l)); }
+.mobilebar { padding-left: calc(var(--bt-space-5) + var(--bt-safe-l));
+             padding-right: calc(var(--bt-space-5) + var(--bt-safe-r)); }
+.toasts { bottom: calc(var(--bt-space-6) + var(--bt-safe-b)); }
+.colophon { padding-bottom: calc(var(--bt-space-7) + var(--bt-safe-b)); }
+.insp .sheet { padding-bottom: calc(40px + var(--bt-safe-b)); }
+
+/* ══ 2 · TOUCH ════════════════════════════════════════════════════════════
+   Keyed on pointer capability rather than width, because a 1092px foldable is
+   still touched with a thumb and a 1024px laptop is not. */
+@media (pointer: coarse) {
+  :root {
+    --bt-h-treerow: 44px;
+    --bt-h-tablerow: 48px;
+    --bt-h-bar: 52px;
+    /* Text inputs below 16px make iOS Safari zoom the whole page on focus,
+       which then leaves the layout scrolled sideways. 16px is the threshold,
+       not a preference. */
+    --bt-fs-input: 16px;
+    --bt-control-h: 44px;
+  }
+  .field input[type="text"], .field input[type="password"], .field select,
+  .filter input, .sfield { height: var(--bt-control-h); }
+
+  .icobtn { width: 44px; height: 44px; }
+  .icobtn svg { width: 20px; height: 20px; }
+  .seg button { height: 36px; padding: 0 var(--bt-space-4); font-size: var(--bt-fs-base); }
+  .chip { height: 36px; padding: 0 var(--bt-space-4); font-size: var(--bt-fs-base); }
+  .tswitch button { height: 36px; width: 60px; }
+  .btn { height: 44px; padding: 0 var(--bt-space-5); }
+  .btn--sm { height: 36px; }
+  .sec-h { height: 38px; }
+  .tri { width: 26px; flex-basis: 26px; }
+
+  input, select, textarea { font-size: var(--bt-fs-input) !important; }
+
+  /* Hover states are meaningless on touch and leave a "stuck" highlight after
+     a tap, so the feedback moves to :active instead. */
+  .row:hover, tbody tr:hover td, .card:hover .poster,
+  .ev:hover, .miss:hover, .cu:hover { background: none; transform: none; }
+  .row:active, .ev:active, .miss:active, .cu:active { background: var(--bt-surface-hover); }
+  tbody tr:active td { background: var(--bt-surface-hover); }
+  .card:active .poster { transform: scale(.98); }
+
+  * { -webkit-tap-highlight-color: transparent; }
+
+  /* The ten-segment rating control is ~30px per tick on a desktop pane and far
+     less inside a phone drawer. Taller bars are the cheapest fix that keeps
+     the design. */
+  .ticks i { height: 34px; }
+
+  /* The drawer close button is the only way back from a full-screen inspector
+     on a phone, so it is the last thing that should be hard to hit. */
+  .insp-close { width: 44px; height: 44px; }
+  .insp-close svg { width: 20px; height: 20px; }
+}
+
+/* ══ 3 · THE LADDER ═══════════════════════════════════════════════════════
+   ≥1181px  three panes.
+   ≤1180px  the inspector detaches into a right drawer.
+   ≤820px   the tree detaches too; the mobilebar appears.
+   ≤560px   the table sheds secondary columns.
+   ≤460px   tighter padding, smaller cover grid.                           */
+
+@media (max-width: 1180px) {
+  :root { --bt-w-inspector: 0px; }
+  .app { grid-template-columns: var(--bt-w-tree) minmax(0, 1fr); }
+  .insp {
+    position: fixed; top: 0; right: 0; bottom: 0;
+    width: min(var(--bt-w-insp-drawer), calc(100% - 44px));
+    padding-right: var(--bt-safe-r);
+    z-index: var(--bt-z-drawer);
+    transform: translateX(101%);
+    transition: transform 220ms var(--bt-ease);
+    box-shadow: var(--bt-shadow-drawer);
+    overscroll-behavior: contain;
+  }
+  .insp.open { transform: none; }
+  .insp-close { display: grid; top: calc(var(--bt-space-4) + var(--bt-safe-t)); }
+  .scrim {
+    display: block; position: fixed; inset: 0; z-index: var(--bt-z-scrim);
+    background: var(--bt-scrim); opacity: 0; pointer-events: none;
+    transition: opacity 220ms var(--bt-ease);
+  }
+  .scrim.on { opacity: 1; pointer-events: auto; }
+}
+
+@media (max-width: 820px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .mobilebar {
+    display: flex; align-items: center; gap: var(--bt-space-4);
+    height: calc(46px + var(--bt-safe-t)); flex: 0 0 auto;
+    padding: var(--bt-safe-t) var(--bt-space-5) 0;
+    border-bottom: var(--bt-rule-w) solid var(--bt-line-rule);
+    background: var(--bt-surface-rail);
+    position: relative; z-index: var(--bt-z-bar);
+  }
+  .list-pane { height: 100vh; height: 100dvh; }
+  .tree-pane {
+    position: fixed; top: 0; left: 0; bottom: 0;
+    width: min(var(--bt-w-tree-drawer), calc(100% - 44px));
+    padding-left: var(--bt-safe-l);
+    z-index: var(--bt-z-drawer);
+    transform: translateX(-101%);
+    transition: transform 220ms var(--bt-ease);
+    box-shadow: var(--bt-shadow-drawer);
+    overscroll-behavior: contain;
+  }
+  .tree-pane.open { transform: none; }
+  .tree-pane .pane-h { padding-top: var(--bt-safe-t); height: calc(var(--bt-h-bar) + var(--bt-safe-t)); }
+  .tree-foot { padding-bottom: calc(7px + var(--bt-safe-b)); }
+  .two { grid-template-columns: minmax(0, 1fr); }
+  .col + .col { border-left: 0; border-top: var(--bt-rule-w) solid var(--bt-line-hairline); }
+  .colophon { padding-bottom: calc(var(--bt-space-7) + var(--bt-safe-b)); }
+  .toasts { bottom: calc(var(--bt-space-6) + var(--bt-safe-b)); }
+}
+
+@media (max-width: 560px) {
+  table { min-width: 0; }
+  thead th:first-child { min-width: 0; }
+  thead th[data-drop], tbody td[data-drop] { display: none; }
+  .title-cell .chipart { display: none; }
+  tbody td, thead th { padding-left: var(--bt-space-3); padding-right: var(--bt-space-3); }
+  .searchbox { padding: var(--bt-space-5) var(--bt-space-5) var(--bt-space-4); }
+
+  /* An auto-layout table hands its leftover width out in PROPORTION to how
+     wide each column's content already is, so the widest cell wins the surplus
+     — and the release cell, being ten monospace slots plus a waterline, was
+     winning it every time. Measured at 320px: release took 138px and the title
+     was left with 57. The one column with something worth reading was the one
+     being starved.
+
+     Pinning every fixed-content column to `width: 1%` (the table idiom for
+     "shrink to your content" — 0 reads as a hint a browser may ignore) makes
+     the title the only column that can grow, so the surplus lands there
+     instead. Same 320px screen: the title goes 57px → 102px. Both badge
+     columns are listed because a shelf can be shown by format or by genre and
+     either one can be the narrow column standing next to the title. */
+  thead th[data-col="format"],  tbody td[data-col="format"],
+  thead th[data-col="genre"],   tbody td[data-col="genre"],
+  thead th[data-col="release"], tbody td[data-col="release"],
+  thead th[data-col="rating"],  tbody td[data-col="rating"] {
+    width: 1%; white-space: nowrap;
+  }
+  thead th[data-col="format"], tbody td[data-col="format"],
+  thead th[data-col="genre"],  tbody td[data-col="genre"] { padding-right: var(--bt-space-2); }
+  /* Required, not cosmetic. `.title-cell .t` is `white-space: nowrap`, so the
+     cell's min-content width is the WHOLE title — and an auto-layout table
+     cannot size a column below min-content. Without this the table quietly
+     grows past the screen and scrolls sideways inside .tblwrap instead of
+     ellipsizing. `max-width: 0` is what lets the cell collapse and the
+     ellipsis engage. */
+  tbody td[data-col="title"] { max-width: 0; }
+}
+
+@media (max-width: 460px) {
+  /* Below this the title is down to about 100px and every pixel of it counts,
+     so even the 11px state dot goes. The distinction is still one tap away in
+     the inspector, and Coming Up answers the same question directly. */
+  tbody .nextchip { display: none; }
+  .toolbar { padding: var(--bt-space-3) var(--bt-space-5); }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 13px var(--bt-space-4); padding: var(--bt-space-5); }
+  .ratings { grid-template-columns: 1fr; }
+  .strip { grid-template-columns: repeat(3, 1fr); }
+  .legend { padding: var(--bt-space-4) var(--bt-space-5); }
+  .kv { grid-template-columns: 76px minmax(0, 1fr); }
+}
+
+/* ══ 4 · COMING UP ON A NARROW SCREEN ═════════════════════════════════════
+   The shared timeline is the app's best idea and the first thing to fail on a
+   phone: at 360px the whole 2-year axis is ~270px, so a month band renders 7px
+   wide and is indistinguishable from the 3px "exact day" pin. Precision stops
+   being legible exactly where the screen is smallest.
+
+   Rather than drop the track, give every band a floor wide enough to read and
+   lean on the precision tag and the hatched date field, which stay exact at
+   any width. The track becomes an indication of WHEN; the chip remains the
+   authority on HOW PRECISELY. */
+@media (max-width: 700px) {
+  .cu { grid-template-columns: 40px minmax(0, 1fr); padding: var(--bt-space-5); }
+  .cu-r { grid-column: 2; align-items: flex-start; margin-top: var(--bt-space-2); text-align: left; }
+  .track { grid-column: 1 / -1; height: 30px; }
+  .band { min-width: 10px; }
+  .band.day { width: 4px; min-width: 4px; }
+  .track .yr { font-size: 9px; }
+  /* Only the outer year labels survive; the middle ones collide. */
+  .track .yr:not(:first-of-type):not(:last-of-type) { display: none; }
+  .legend { gap: var(--bt-space-1) var(--bt-space-4); font-size: var(--bt-fs-micro); }
+}
+
+/* ══ 5 · SHORT AND WIDE — a phone in landscape ════════════════════════════
+   ~380px of height with a keyboard eating half of it. The gate must scroll
+   rather than centre, or the button ends up unreachable. */
+@media (max-height: 560px) {
+  .gate { place-items: start center; padding: var(--bt-space-5) var(--bt-space-5) var(--bt-space-7); }
+  .gate__panel { padding: var(--bt-space-5); }
+  .gate h1 { font-size: 21px; }
+  .gate .lede { margin-bottom: var(--bt-space-4); }
+  .firstrun { padding: var(--bt-space-5); }
+  .firstrun h1 { font-size: 22px; }
+}
+
+/* ══ 6 · TABLETS AND FOLDABLES ═══════════════════════════════════════════
+   Three panes are not available on any foldable, and the arithmetic is what
+   decides it: the Fold 7 inner screen is 984 x 1092 portrait. Even at the
+   shrunken tokens, tree + inspector cost 526px and leave 458px of list —
+   less than the table needs. So the choice is which pane to give up.
+
+   Give up the TREE. It is one hamburger tap away and its contents are
+   navigation. Keeping the inspector DOCKED is what matters, because the
+   alternative — a 392px overlay plus a scrim over live content — is a
+   genuinely bad experience on a physically 8-inch display.
+
+   Result: 654px of list on a Fold 7 inner portrait, 762px landscape, 803px on
+   an iPad mini landscape. All comfortably above what the table needs. Gated
+   on `pointer: coarse`, so a narrow desktop window is untouched. */
+@media (min-width: 821px) and (max-width: 1180px) and (pointer: coarse) {
+  :root { --bt-w-inspector: 330px; }
+  .app { grid-template-columns: minmax(0, 1fr) var(--bt-w-inspector); }
+  .tree-pane {
+    position: fixed; top: 0; left: 0; bottom: 0;
+    width: min(var(--bt-w-tree-drawer), calc(100% - 44px));
+    z-index: var(--bt-z-drawer);
+    transform: translateX(-101%);
+    transition: transform 220ms var(--bt-ease);
+    box-shadow: var(--bt-shadow-drawer);
+    overscroll-behavior: contain;
+  }
+  .tree-pane.open { transform: none; }
+  .mobilebar { display: flex; align-items: center; gap: var(--bt-space-4);
+    height: calc(46px + var(--bt-safe-t)); flex: 0 0 auto;
+    padding-top: var(--bt-safe-t);
+    border-bottom: var(--bt-rule-w) solid var(--bt-line-rule);
+    background: var(--bt-surface-rail); position: relative; z-index: var(--bt-z-bar); }
+  /* Docked, so none of the overlay machinery applies. */
+  .insp { position: relative; transform: none; width: auto;
+          box-shadow: none; z-index: auto; padding-right: 0; }
+  .insp-close { display: none; }
+}
+
+/* Dual-segment devices, once browsers report it. A flat fold reports ONE
+   segment — this only matches in flex mode, where the viewport does not split
+   or shrink anyway, so the honest answer is to do nothing structural and just
+   thicken the pane rules so the crease lands on a boundary. */
+@media (horizontal-viewport-segments: 2) {
+  .tree-pane { border-right-width: 2px; }
+  .insp { border-left-width: 2px; }
+}
+
+/* ══ 7 · MOTION ══════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  .card:hover .poster, .card:active .poster { transform: none; }
+}
+
+/* The sort control is a <select> wearing .chip, so it needs the chip's box
+   without the chip's flex centring. Declared here rather than inline, because
+   an inline height would beat every touch override above. */
+select.chip { padding: 0 var(--bt-space-3); appearance: none; }
+
+/* ══ 8 · RESIDUE ══════════════════════════════════════════════════════════ */
+
+/* .tblwrap sets overflow-x:auto, which makes it the containing block for the
+   sticky header — but it scrolls horizontally, not vertically, so `top: 0`
+   never triggered. The vertical scroller is .scroll, one level up. */
+.tblwrap { overflow-x: auto; overflow-y: visible; }
+
+/* The keyboard legend is meaningless on a touch device and eats the most
+   reachable strip of the drawer. */
+@media (pointer: coarse) { .tree-foot { display: none; } }
+
+/* Undo lives in a toast and is the only way back from a mis-tap. */
+@media (pointer: coarse) {
+  .toast { padding: var(--bt-space-4) var(--bt-space-5); }
+  .toast button { min-height: 44px; padding: 0 var(--bt-space-3); }
+}
+
+/* These live inside a fixed-width drawer, so keying them to the viewport was
+   wrong — at 1100px the drawer is 392px but the rule had not fired yet. */
+@media (max-width: 1180px) {
+  .insp .ratings { grid-template-columns: 1fr 1fr; }
+  .insp .strip { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* Keyboard selection in the search results list. */
+.miss.is-sel { background: var(--bt-brass-wash); box-shadow: inset var(--bt-marker-w) 0 0 var(--bt-brass); }
+
+/* Results being replaced: dim rather than tear down, so the list keeps its
+   height and nothing jumps under a thumb mid-type. */
+#results.is-stale { opacity: .55; transition: opacity 120ms var(--bt-ease); }
+#results.is-stale .miss { pointer-events: none; }
+
+/* Rows are uniform and numerous — let the browser skip the offscreen ones. */
+.miss { content-visibility: auto; contain-intrinsic-size: auto 52px; }
+
+/* The Add control is a real button with a real hit area — the row itself no
+   longer adds anything, so a flick-scroll cannot add a book by accident. */
+.miss .add { flex: 0 0 auto; cursor: pointer; }
+.miss .add.is-in { border-color: var(--bt-brass-edge); color: var(--bt-brass-text); background: var(--bt-brass-wash); }
+@media (pointer: coarse) {
+  .miss .add { min-height: 40px; min-width: 64px; display: grid; place-items: center; font-size: var(--bt-fs-base); }
+  .miss { gap: var(--bt-space-3); padding-top: var(--bt-space-3); padding-bottom: var(--bt-space-3); }
+}
+
+/* ══ 8 · PROGRESS AND RELEASES ON A PHONE ═════════════════════════════════ */
+@media (pointer: coarse) {
+  /* A 18px thumb is under the 44px floor, so the whole track gets the height
+     instead and the thumb keeps its visual size. */
+  .prgctl input[type="range"] { height: 6px; padding: 19px 0; background-clip: content-box; }
+  .prgnum input { width: 62px; }
+}
+
+@media (max-width: 560px) {
+  .relwin, .relnote { padding-left: var(--bt-space-5); padding-right: var(--bt-space-5); }
+  /* Seven ranges will not fit on one line; let them wrap rather than scroll,
+     so none is hidden off the edge. */
+  .toolbar--sub .chips { gap: var(--bt-space-1) 5px; }
+}
+
+@media (pointer: coarse) {
+  /* Same trick as the progress sliders: give the track the tap height rather
+     than inflating the thumb. */
+  .notabar input[type="range"] { height: 6px; padding: 19px 0; background-clip: content-box; }
+}
+@media (max-width: 560px) {
+  .notabar { padding-left: var(--bt-space-5); padding-right: var(--bt-space-5); gap: var(--bt-space-2); }
+  /* The word "Notability" plus both captions plus a usable track do not fit on
+     a 320px line. The captions carry the meaning, so the label goes. */
+  .notabar label { display: none; }
+}
+
+@media (max-width: 560px) {
+  .relbar--dates { padding-left: var(--bt-space-5); padding-right: var(--bt-space-5); }
+  /* Two date fields plus their labels do not fit on a 320px line. */
+  .relbar--dates { flex-wrap: wrap; gap: var(--bt-space-2); }
+  .relbar--dates input[type="date"] { flex: 1 1 42%; }
+}
+
+@media (max-width: 820px) {
+  /* 80% of a phone screen is an unreadable page; take the width and keep the
+     tall page box, which is the part that matters. */
+  .reader { padding: var(--bt-space-4); }
+  .reader-card { width: 100%; }
+  .reader-frame { max-height: calc(100vh - 140px); }
+}
+
+@media (max-width: 560px) {
+  /* Words out, dot in. The release column is the tightest thing on a phone and
+     every pixel it takes comes out of the title. */
+  .nextchip { margin-left: 5px; padding: 0; background: none; }
+  .nextchip i { display: block; }
+  .nextchip b { display: none; }
+  /* The inspector has room, so it keeps the words. */
+  .kv .nextchip { padding: 0 5px; background: var(--bt-line-hairline); }
+  .kv .nextchip i { display: none; }
+  .kv .nextchip b { display: inline; }
+}

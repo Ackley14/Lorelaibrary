@@ -1,0 +1,150 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Base, the three-pane shell, and the responsive collapse.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+*, *::before, *::after { box-sizing: border-box; }
+* { margin: 0; padding: 0; }
+
+/* The UA [hidden] rule is a bare attribute selector, so any class setting
+   display beats it. Without this, every flex/grid component ignores hidden. */
+[hidden] { display: none !important; }
+
+html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+
+body {
+  background-color: var(--bt-surface-canvas);
+  background-image: var(--bt-tank-1), var(--bt-tank-2);
+  background-attachment: fixed;
+  color: var(--bt-text-primary);
+  font-family: var(--bt-font-sans);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button, input, textarea, select { font: inherit; color: inherit; background: none; border: 0; }
+button { cursor: pointer; }
+a { color: inherit; text-decoration: none; }
+h1, h2, h3 { font-weight: 600; }
+img { display: block; max-width: 100%; }
+
+.mono, .num {
+  font-family: var(--bt-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+::selection { background: var(--bt-selection); }
+:focus-visible { outline: 2px solid var(--bt-focus-ring); outline-offset: 1px; border-radius: var(--bt-radius-sm); }
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb {
+  background: var(--bt-line-rule); border-radius: 9px;
+  border: 3px solid transparent; background-clip: content-box;
+}
+::-webkit-scrollbar-track { background: transparent; }
+
+.sr {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+/* ── The shell ─────────────────────────────────────────────────────────── */
+
+.app {
+  display: grid;
+  grid-template-columns: var(--bt-w-tree) minmax(0, 1fr) var(--bt-w-inspector);
+  height: 100vh; height: 100dvh;
+}
+.pane { min-width: 0; display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+
+.pane-h {
+  height: var(--bt-h-bar); flex: 0 0 var(--bt-h-bar);
+  display: flex; align-items: center; gap: var(--bt-space-3);
+  padding: 0 var(--bt-space-4) 0 var(--bt-space-5);
+  border-bottom: var(--bt-rule-w) solid var(--bt-line-hairline);
+}
+
+.scroll {
+  flex: 1; overflow-y: auto; overflow-x: hidden;
+  scrollbar-width: thin; scrollbar-color: var(--bt-line-rule) transparent;
+}
+
+.caps {
+  font-size: var(--bt-fs-micro); letter-spacing: var(--bt-tracking-caps);
+  text-transform: uppercase; color: var(--bt-text-muted); font-weight: 600;
+}
+.muted { color: var(--bt-text-muted); }
+.faint { color: var(--bt-text-faint); }
+
+/* ── Theme switch — fixed size, so toggling reflows nothing ────────────── */
+
+.tswitch {
+  display: flex; flex: 0 0 auto; gap: 1px; padding: 2px;
+  background: var(--bt-surface-sunk);
+  border: var(--bt-rule-w) solid var(--bt-line-hairline);
+  border-radius: var(--bt-radius);
+}
+.tswitch button {
+  width: 52px; height: 22px;
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+  border-radius: var(--bt-radius-sm);
+  font-size: 10px; letter-spacing: .02em; color: var(--bt-text-muted);
+}
+.tswitch button svg { width: 11px; height: 11px; flex: 0 0 11px; }
+.tswitch button:hover { color: var(--bt-text-primary); }
+.tswitch button[aria-pressed="true"] {
+  background: var(--bt-surface-raised); color: var(--bt-text-primary);
+  box-shadow: var(--bt-shadow-inset-top), 0 1px 1px rgba(0, 0, 0, .10);
+}
+
+.icobtn {
+  width: 22px; height: 22px; flex: 0 0 auto;
+  display: grid; place-items: center;
+  border-radius: var(--bt-radius-sm); color: var(--bt-text-muted);
+}
+.icobtn:hover { background: var(--bt-surface-hover); color: var(--bt-text-primary); }
+.icobtn svg { width: 14px; height: 14px; }
+
+/* ── Brand ─────────────────────────────────────────────────────────────── */
+
+.brand { display: flex; align-items: baseline; gap: var(--bt-space-2); flex: 1; min-width: 0; }
+.brand b {
+  font-family: var(--bt-font-serif); font-size: 15px; font-weight: 600;
+  letter-spacing: -.01em; color: var(--bt-text-primary);
+}
+.brand i {
+  font-style: normal; font-size: 9px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--bt-brass-text);
+  border: var(--bt-rule-w) solid var(--bt-brass-edge);
+  border-radius: var(--bt-radius-sm); padding: 1px 4px;
+}
+
+/* ── Views live in the middle pane ─────────────────────────────────────── */
+
+.view { display: none; }
+.view.on { display: block; }
+.mobilebar { display: none; }
+.scrim { display: none; }
+
+/* ── Colophon: attribution that must appear on every route ─────────────── */
+
+.colophon {
+  border-top: var(--bt-rule-w) solid var(--bt-line-hairline);
+  padding: var(--bt-space-5) var(--bt-space-6) var(--bt-space-7);
+  font-size: var(--bt-fs-micro); line-height: 1.6; color: var(--bt-text-faint);
+}
+.colophon p + p { margin-top: var(--bt-space-2); }
+.colophon a { color: var(--bt-text-muted); text-decoration: underline; text-underline-offset: 2px; }
+.colophon a:hover { color: var(--bt-brass-text); }
+/* The Open Library mark that sits beside the attribution line. Drawn as a
+   gradient rather than fetched: a remote logo would be the app's only
+   third-party request, and a bundled file would not load over file://. The
+   ramp runs parchment → brass → ink, which is the app reading as itself
+   rather than a pixel-accurate reproduction of someone else's mark. */
+.ol-logo {
+  display: inline-block; width: 40px; height: 10px; vertical-align: -1px; margin-right: 5px;
+  background: linear-gradient(90deg, #E1DCC5 0%, #C7A15A 58%, #2A2118 100%);
+  border-radius: 1px;
+}

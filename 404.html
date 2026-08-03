@@ -1,0 +1,10 @@
+<meta charset="utf-8">
+<title>BookTrak</title>
+<!-- GitHub Pages serves this for any unmatched path. BookTrak uses hash
+     routing, so the only way to land here is a mistyped directory path —
+     send it back to the app rather than showing GitHub's 404. -->
+<script>
+  var base = location.pathname.split('/').slice(0, 2).join('/') || '/';
+  location.replace(base + '/#/');
+</script>
+<noscript><a href="./">Go to BookTrak</a></noscript>

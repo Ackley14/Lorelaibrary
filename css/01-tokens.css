@@ -1,0 +1,194 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   BookTrak design tokens — "Folio"
+
+   A dense three-pane reading room set like a printed page: warm paper in the
+   light theme, warm ink-black in the dark one, as ONE token set. Light is
+   "Vellum", dark is "Marginalia". Restrained and editorial on purpose — the
+   covers supply the colour, so the chrome must not compete with them.
+
+   THE RULE OF THIS FILE
+   ─────────────────────
+   Geometry is declared exactly once, in :root, and is IDENTICAL in both
+   themes. Every spacing value, rule weight, radius and type size lives there.
+   The two [data-theme] blocks declare the SAME token names in the SAME order
+   and differ only in value. Nothing anywhere else reads a raw colour.
+
+   Toggle the theme and not one pixel moves — only colour and material change.
+   That property is the whole point of the direction, so keep it: if you find
+   yourself adding a geometry value inside a theme block, the design has
+   drifted and it is worth stopping to ask why.
+
+   The geometry numbers below were tuned against a dense three-pane layout at
+   this exact type scale; the row heights in particular are what let a long
+   shelf stay scannable. Re-tune them only with a layout reason in hand.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ══ 1 · GEOMETRY + TYPE — theme-invariant, declared once ══════════════════ */
+:root {
+  /* pane geometry */
+  --bt-w-tree: 266px;
+  --bt-w-inspector: 372px;
+  --bt-w-insp-drawer: 392px;
+  --bt-w-tree-drawer: 300px;
+  --bt-control-h: 30px;
+  --bt-fs-input: var(--bt-fs-base);
+  --bt-h-bar: 44px;
+  --bt-h-treerow: 25px;
+  --bt-h-tablerow: 34px;
+
+  /* spacing scale */
+  --bt-space-1: 4px;  --bt-space-2: 6px;  --bt-space-3: 8px;
+  --bt-space-4: 10px; --bt-space-5: 12px; --bt-space-6: 16px; --bt-space-7: 22px;
+
+  /* radii + rule weights */
+  --bt-radius-sm: 2px; --bt-radius: 4px; --bt-radius-lg: 10px; --bt-radius-pill: 999px;
+  --bt-rule-w: 1px;    --bt-marker-w: 3px;
+
+  /* type scale */
+  --bt-fs-micro: 9.5px; --bt-fs-mini: 10.5px; --bt-fs-sm: 11.5px;
+  --bt-fs-base: 12.5px; --bt-fs-md: 14.5px;   --bt-fs-lg: 23px;
+  --bt-tracking-caps: .15em;
+
+  /* System stacks only. A webfont would be an external request, and a relative
+     @font-face URL is blocked on file:// — which would break opening the app
+     from disk, the mode this app is built for. The serif stack is not
+     decoration: it is what makes titles and blurbs read as book-set text
+     rather than UI chrome, so it earns its place even though it is the one
+     stack that varies most across machines. */
+  --bt-font-sans: ui-sans-serif, system-ui, "Segoe UI Variable", "Segoe UI",
+                  -apple-system, Roboto, sans-serif;
+  --bt-font-serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --bt-font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
+
+  --bt-ease: cubic-bezier(.2, .7, .3, 1);
+  --bt-dur: 170ms;
+
+  /* Semantic aliases — resolved per theme via the colour tokens below, and
+     deliberately never redeclared inside a theme block. Genre and precision
+     share the hue pool on purpose; they never appear in the same badge, so a
+     reused hue costs nothing and keeps the palette from sprawling. */
+  --bt-genre-fiction: var(--bt-ink);
+  --bt-genre-nonfiction: var(--bt-sage);
+  --bt-genre-fantasysf: var(--bt-plum);
+  --bt-genre-mystery: var(--bt-slate);
+  --bt-genre-romance: var(--bt-rose);
+  /* 'general' is the catch-all bucket and is deliberately hueless — colouring
+     it would imply a classification the data does not actually carry. */
+  --bt-genre-general: var(--bt-text-muted);
+  --bt-precision-day: var(--bt-sage);
+  --bt-precision-month: var(--bt-brass);
+  --bt-precision-year: var(--bt-rose);
+
+  --bt-z-bar: 20;  --bt-z-scrim: 35;  --bt-z-drawer: 45;  --bt-z-toast: 60;
+}
+
+/* ══ 2 · LIGHT — "Vellum": warm parchment, aged paper ═════════════════════ */
+:root[data-theme="light"] {
+  --bt-surface-canvas: #FAF8F3;
+  --bt-surface-rail: #F3F0E8;
+  --bt-surface-sunk: #EAE5DA;
+  --bt-surface-raised: #FFFDF8;
+  --bt-surface-hover: #F0ECE2;
+  --bt-surface-glass: rgba(253, 251, 246, .66);
+  --bt-glass-blur: blur(28px) saturate(1.7);
+
+  --bt-line-hairline: #E7E1D5;
+  --bt-line-rule: #D7CFC0;
+  --bt-line-strong: #BCB3A1;
+  --bt-line-highlight: rgba(255, 255, 255, .9);
+
+  /* Ink, not black. The primary is a very dark warm brown so long blurbs sit
+     on the page instead of vibrating against it. Its lightness is held where
+     a neutral near-black would be, so every contrast ratio still clears AA. */
+  --bt-text-primary: #1F1A13;
+  --bt-text-secondary: #4C4438;
+  --bt-text-muted: #7B7263;
+  --bt-text-faint: #A79D8B;
+
+  --bt-brass: #8A6516; --bt-brass-text: #6F4F0D; --bt-brass-wash: #F5EAD2; --bt-brass-edge: #D6BE84;
+  --bt-ink:   #3B4A99; --bt-ink-text:   #303C80; --bt-ink-wash:   #E5E5F0; --bt-ink-edge:   #A9AFDC;
+  --bt-sage:  #4F6B42; --bt-sage-text:  #3F5734; --bt-sage-wash:  #E6ECDD; --bt-sage-edge:  #AABE9B;
+  --bt-plum:  #86478F; --bt-plum-text:  #6F3A78; --bt-plum-wash:  #F0E4F1; --bt-plum-edge:  #C7A6CB;
+  --bt-rose:  #AE4257; --bt-rose-text:  #94374A; --bt-rose-wash:  #F8E3E5; --bt-rose-edge:  #E0A7B1;
+  --bt-slate: #4C6377; --bt-slate-text: #3E5364; --bt-slate-wash: #E4E9EE; --bt-slate-edge: #A8B6C2;
+
+  --bt-good: #2C6B3E;  --bt-bad: #A6301C;
+
+  /* The hatch is a static stripe and never blurs — it repeats hundreds of
+     times across a dense table, so it has to be free to paint. */
+  --bt-hatch-stripe: rgba(31, 26, 19, .22);
+  --bt-hatch-ground: rgba(31, 26, 19, .04);
+  --bt-hatch-edge: rgba(31, 26, 19, .11);
+  --bt-hatch-ink: #A79D8B;
+  --bt-pending-ink: #A79D8B;
+
+  --bt-shadow-sheet: 0 -12px 30px -18px rgba(38, 28, 16, .45);
+  --bt-shadow-drawer: 0 18px 44px -26px rgba(38, 28, 16, .55);
+  --bt-shadow-lift: 0 8px 18px -8px rgba(38, 28, 16, .32);
+  --bt-shadow-inset-top: inset 0 1px 0 rgba(255, 255, 255, .9);
+
+  /* The focus ring is indigo rather than brass: brass is the brand hue and
+     turns up in badges and the active marker, so a brass ring would be
+     ambiguous exactly when it needs to be unmistakable. */
+  --bt-focus-ring: #303C80;
+  --bt-selection: #EEDFB6;
+  --bt-scrim: rgba(31, 26, 19, .24);
+  --bt-poster-edge: rgba(31, 26, 19, .14);
+  --bt-tank-1: transparent;
+  --bt-tank-2: transparent;
+  color-scheme: light;
+}
+
+/* ══ 3 · DARK — "Marginalia": same geometry, warm ink-black ground ════════ */
+:root[data-theme="dark"] {
+  --bt-surface-canvas: #14110E;
+  --bt-surface-rail: #1C1813;
+  --bt-surface-sunk: #100D0A;
+  --bt-surface-raised: rgba(255, 255, 255, .045);
+  --bt-surface-hover: rgba(255, 255, 255, .055);
+  --bt-surface-glass: rgba(22, 18, 14, .70);
+  --bt-glass-blur: blur(12px) saturate(1.25);   /* cheap: dark leans on translucency */
+
+  --bt-line-hairline: rgba(255, 255, 255, .075);
+  --bt-line-rule: rgba(255, 255, 255, .13);
+  --bt-line-strong: rgba(255, 255, 255, .24);
+  --bt-line-highlight: rgba(255, 255, 255, .16);
+
+  --bt-text-primary: #F6F1E7;
+  --bt-text-secondary: #CFC5B3;
+  --bt-text-muted: #9A8F7C;
+  --bt-text-faint: #746B5C;
+
+  --bt-brass: #EDB556; --bt-brass-text: #F7D18E; --bt-brass-wash: rgba(237, 181, 86, .14); --bt-brass-edge: rgba(237, 181, 86, .42);
+  --bt-ink:   #9AA6FF; --bt-ink-text:   #BFC7FF; --bt-ink-wash:   rgba(154, 166, 255, .14); --bt-ink-edge:   rgba(154, 166, 255, .42);
+  --bt-sage:  #8FC98C; --bt-sage-text:  #B4DDB1; --bt-sage-wash:  rgba(143, 201, 140, .14); --bt-sage-edge:  rgba(143, 201, 140, .42);
+  --bt-plum:  #C596DC; --bt-plum-text:  #DCBBEE; --bt-plum-wash:  rgba(197, 150, 220, .14); --bt-plum-edge:  rgba(197, 150, 220, .42);
+  --bt-rose:  #F58396; --bt-rose-text:  #FFAAB7; --bt-rose-wash:  rgba(245, 131, 150, .15); --bt-rose-edge:  rgba(245, 131, 150, .42);
+  --bt-slate: #9DB6CC; --bt-slate-text: #C2D3E2; --bt-slate-wash: rgba(157, 182, 204, .14); --bt-slate-edge: rgba(157, 182, 204, .42);
+
+  --bt-good: #6BCB86;  --bt-bad: #FF8069;
+
+  --bt-hatch-stripe: rgba(240, 232, 214, .20);
+  --bt-hatch-ground: rgba(255, 255, 255, .035);
+  --bt-hatch-edge: rgba(255, 255, 255, .10);
+  --bt-hatch-ink: #746B5C;
+  --bt-pending-ink: #746B5C;
+
+  --bt-shadow-sheet: 0 -14px 34px -20px rgba(0, 0, 0, .75);
+  --bt-shadow-drawer: 0 22px 52px -28px rgba(0, 0, 0, .85);
+  --bt-shadow-lift: 0 10px 22px -10px rgba(0, 0, 0, .7);
+  --bt-shadow-inset-top: inset 0 1px 0 rgba(255, 255, 255, .16);
+
+  /* Dark flips the rule to brass: indigo at this lightness is too close to the
+     line tokens to register against an ink ground. */
+  --bt-focus-ring: #EDB556;
+  --bt-selection: rgba(237, 181, 86, .24);
+  --bt-scrim: rgba(8, 6, 4, .6);
+  --bt-poster-edge: rgba(255, 255, 255, .14);
+  /* Two very large, very cheap radial washes give the dark ground its depth.
+     Painted once, never animated, never blurred — this is what lets the theme
+     read as lamplight on a page without a single expensive filter. */
+  --bt-tank-1: radial-gradient(72vw 58vw at 6% -8%, rgba(158, 108, 32, .28), transparent 62%);
+  --bt-tank-2: radial-gradient(60vw 52vw at 96% 92%, rgba(122, 78, 36, .22), transparent 62%);
+  color-scheme: dark;
+}

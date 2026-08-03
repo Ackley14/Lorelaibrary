@@ -1,0 +1,871 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Per-view layout, and pane 3 — the inspector.
+
+   The first two thirds of this file are the shared views: the publication
+   timeline, Activity + Stats, search, the inspector sheet, settings and the
+   gate. The last third is what a book tracker needs and a watchlist never did
+   — the barcode scanner overlay, its scan log, the edition picker, and the
+   to-sell pile.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ══ COMING UP — one shared timeline where precision becomes WIDTH ════════ */
+
+.legend {
+  display: flex; flex-wrap: wrap; gap: var(--bt-space-2) 18px;
+  padding: 11px var(--bt-space-6);
+  background: var(--bt-surface-sunk);
+  border-bottom: var(--bt-rule-w) solid var(--bt-line-hairline);
+  font-size: var(--bt-fs-mini); color: var(--bt-text-secondary);
+}
+.legend b { font-weight: 600; color: var(--bt-text-primary); }
+.legend > div { display: flex; align-items: center; gap: var(--bt-space-2); }
+
+.cu {
+  border-bottom: var(--bt-rule-w) solid var(--bt-line-hairline);
+  padding: 14px var(--bt-space-6);
+  display: grid; grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 0 13px; align-items: start; cursor: pointer;
+}
+.cu:hover { background: var(--bt-surface-hover); }
+.cu .poster { grid-row: span 2; aspect-ratio: 2/3; }
+.cu-t {
+  font-size: var(--bt-fs-md); font-weight: 600; font-family: var(--bt-font-serif);
+  line-height: 1.2; color: var(--bt-text-primary);
+}
+.cu-m { display: flex; align-items: center; gap: var(--bt-space-3); flex-wrap: wrap; margin-top: 5px; }
+.cu-r { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: var(--bt-space-1); }
+.cu-when { font-size: var(--bt-fs-sm); color: var(--bt-text-secondary); }
+.cu-when em { font-style: normal; font-family: var(--bt-font-mono); color: var(--bt-text-primary); }
+.cu-when.sub { font-family: var(--bt-font-mono); font-size: var(--bt-fs-mini); color: var(--bt-text-muted); }
+
+.track { grid-column: 2/4; margin-top: 11px; position: relative; height: 26px; }
+.track .rail {
+  position: absolute; left: 0; right: 0; top: 9px; height: 4px;
+  background: var(--bt-surface-sunk); border-radius: var(--bt-radius-sm);
+  box-shadow: inset 0 0 0 1px var(--bt-line-hairline);
+}
+.track .yr {
+  position: absolute; top: 16px; font-family: var(--bt-font-mono); font-size: 8.5px;
+  color: var(--bt-text-faint); transform: translateX(-50%);
+}
+.track .gr { position: absolute; top: 5px; width: 1px; height: 12px; background: var(--bt-line-rule); }
+
+/* Precision is width. A known publication day is a 3px pin; a month is a month
+   wide; a year fills the year; an announced-but-undated book has no position
+   on the axis at all and is drawn across the whole rail as hatch.
+
+   This is the same core idea the date grammar states in 03-components, spent
+   here on geometry instead of glyphs: a record that only knows "spring 2027"
+   must never draw a pin on a Tuesday. Publishers move street dates constantly,
+   and a band you can see the width of is the only honest way to show that the
+   uncertainty is the data, not a rendering shortcut.
+
+   Hues follow the --bt-precision-* aliases: day is sage, month/quarter brass,
+   year rose. They are spelled out as the underlying hue tokens because the
+   washes and edges have no aliased form. */
+.band { position: absolute; top: 6px; height: 10px; border-radius: var(--bt-radius-sm); }
+.band.day { background: var(--bt-sage); width: var(--bt-marker-w); box-shadow: 0 0 0 3px var(--bt-sage-wash); }
+.band.day::after {
+  content: ""; position: absolute; left: 50%; top: -6px; transform: translateX(-50%);
+  width: 5px; height: 5px; border-radius: 50%; background: var(--bt-sage);
+}
+.band.month, .band.quarter { background: var(--bt-brass-wash); box-shadow: inset 0 0 0 1px var(--bt-brass); }
+.band.year {
+  background-color: var(--bt-rose-wash);
+  background-image: repeating-linear-gradient(-45deg, var(--bt-rose-edge) 0 1px, transparent 1px 5px);
+  box-shadow: inset 0 0 0 1px var(--bt-rose-edge);
+}
+.band.tba, .band.unknown {
+  left: 0; right: 0;
+  background-color: var(--bt-hatch-ground);
+  background-image: repeating-linear-gradient(-45deg, var(--bt-hatch-stripe) 0 1px, transparent 1px 5px);
+  box-shadow: inset 0 0 0 1px var(--bt-hatch-edge);
+}
+
+/* ══ ACTIVITY + STATS ═════════════════════════════════════════════════════ */
+
+.two { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); align-items: start; }
+.col { padding: 14px var(--bt-space-6); }
+.col + .col { border-left: var(--bt-rule-w) solid var(--bt-line-hairline); }
+.hd {
+  font-size: var(--bt-fs-micro); letter-spacing: var(--bt-tracking-caps); text-transform: uppercase;
+  color: var(--bt-text-muted); font-weight: 600; margin-bottom: 11px;
+}
+.ev {
+  display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: var(--bt-space-4);
+  padding: 9px 0; border-bottom: var(--bt-rule-w) solid var(--bt-line-hairline);
+  cursor: pointer;
+}
+.ev:last-child { border-bottom: 0; }
+.ev:hover { background: var(--bt-surface-hover); }
+.ev .ic {
+  width: 16px; height: 16px; display: grid; place-items: center; border-radius: var(--bt-radius-sm);
+  font-size: 10px; font-weight: 700;
+}
+/* Three states at 16px, so they are picked for separation rather than for
+   brand: a date that moved is rose, a book that published is sage, anything
+   else is indigo. Brass is deliberately not in this set — brass means "the app
+   did something you can act on", and a feed entry is a report, not a control. */
+.ev .ic.move { background: var(--bt-rose-wash); color: var(--bt-rose-text); }
+.ev .ic.land { background: var(--bt-sage-wash); color: var(--bt-sage-text); }
+.ev .ic.info { background: var(--bt-ink-wash); color: var(--bt-ink-text); }
+.ev .et { font-size: var(--bt-fs-base); color: var(--bt-text-primary); font-weight: 500; }
+.ev .es { font-size: var(--bt-fs-mini); color: var(--bt-text-muted); margin-top: 2px; }
+.ev.unread .et::after {
+  content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--bt-brass); margin-left: 6px; vertical-align: middle;
+}
+.diff { display: flex; align-items: center; gap: var(--bt-space-2); margin-top: 4px; flex-wrap: wrap; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: var(--bt-space-3); margin-bottom: var(--bt-space-6); }
+.tile {
+  border: var(--bt-rule-w) solid var(--bt-line-hairline); border-radius: var(--bt-radius);
+  padding: 9px var(--bt-space-4); background: var(--bt-surface-raised);
+  box-shadow: var(--bt-shadow-inset-top);
+}
+.tile .v { font-family: var(--bt-font-mono); font-size: 20px; font-weight: 600; line-height: 1.1; color: var(--bt-text-primary); }
+.tile .l { font-size: var(--bt-fs-micro); letter-spacing: .1em; text-transform: uppercase; color: var(--bt-text-muted); margin-top: 2px; }
+
+.bars { display: flex; flex-direction: column; gap: var(--bt-space-2); }
+.bar {
+  display: grid; grid-template-columns: 96px minmax(0, 1fr) 30px;
+  gap: var(--bt-space-3); align-items: center;
+  font-size: 11px; color: var(--bt-text-secondary);
+}
+.bar .bl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar .g { height: 7px; border-radius: var(--bt-radius-sm); background: var(--bt-surface-sunk); overflow: hidden; }
+.bar .g i { display: block; height: 100%; border-radius: var(--bt-radius-sm); background: var(--bt-brass); }
+.bar .n { font-family: var(--bt-font-mono); font-size: var(--bt-fs-mini); color: var(--bt-text-muted); text-align: right; }
+.stack {
+  display: flex; height: 9px; border-radius: var(--bt-radius-sm); overflow: hidden;
+  margin: var(--bt-space-2) 0 var(--bt-space-3);
+  box-shadow: inset 0 0 0 1px var(--bt-line-hairline);
+}
+.stack i { display: block; height: 100%; }
+
+/* ══ SEARCH ═══════════════════════════════════════════════════════════════ */
+
+.searchbox {
+  padding: var(--bt-space-7) var(--bt-space-6) var(--bt-space-5);
+  border-bottom: var(--bt-rule-w) solid var(--bt-line-hairline);
+}
+.sfield {
+  display: flex; align-items: center; gap: 9px; height: 38px; padding: 0 var(--bt-space-5);
+  background: var(--bt-surface-raised);
+  border: var(--bt-rule-w) solid var(--bt-line-rule);
+  border-radius: var(--bt-radius); box-shadow: var(--bt-shadow-inset-top);
+}
+/* Focus is indigo, not brass, and that is the rule everywhere in this file.
+   Brass is the brand hue: it is already the active marker, the unread dot and
+   half the badges, so a brass ring is ambiguous at exactly the moment it has
+   to be unmistakable. 01-tokens says the same thing about --bt-focus-ring. */
+.sfield:focus-within { border-color: var(--bt-ink-edge); box-shadow: 0 0 0 3px var(--bt-ink-wash); }
+.sfield input { flex: 1; font-size: 14px; min-width: 0; }
+.sfield input:focus { outline: none; }
+.shint {
+  display: flex; gap: var(--bt-space-2); margin-top: 9px;
+  font-size: var(--bt-fs-mini); color: var(--bt-text-faint);
+  align-items: center; flex-wrap: wrap;
+}
+.group-h {
+  display: flex; align-items: center; gap: var(--bt-space-3);
+  padding: var(--bt-space-4) var(--bt-space-6) var(--bt-space-2);
+  font-size: var(--bt-fs-micro); letter-spacing: .14em; text-transform: uppercase;
+  color: var(--bt-text-muted); font-weight: 600;
+}
+.group-h::after { content: ""; flex: 1; height: 1px; background: var(--bt-line-hairline); }
+
+/* Headings that stick while you scroll, so you always know which group you are
+   in. Written as a modifier rather than baked into .group-h because it is only
+   correct inside a scroll container of its own — the editions picker and the
+   author's-other-works list are the two that qualify. */
+.group-h--sticky {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--bt-surface-canvas);
+}
+
+.miss {
+  padding: 9px var(--bt-space-6);
+  border-bottom: var(--bt-rule-w) solid var(--bt-line-hairline);
+  display: flex; align-items: center; gap: var(--bt-space-4); cursor: pointer;
+}
+.miss:hover { background: var(--bt-surface-hover); }
+.miss .add {
+  margin-left: auto; font-size: var(--bt-fs-mini); color: var(--bt-ink-text);
+  border: var(--bt-rule-w) solid var(--bt-ink-edge); border-radius: 3px;
+  padding: 2px 7px; background: var(--bt-ink-wash);
+}
+
+/* ══ PANE 3 — THE INSPECTOR, the app's only blurred surface ═══════════════
+   Confining backdrop-filter to one large element is deliberate: a blur behind
+   every row or tile is the first thing to stutter on modest hardware, and the
+   dark theme gets its depth from flat translucency instead.                */
+
+.insp {
+  background: var(--bt-surface-canvas);
+  border-left: var(--bt-rule-w) solid var(--bt-line-rule);
+  position: relative; overflow-y: auto; overflow-x: hidden;
+}
+/* --a / --b are set on the element by the view from the cover's own colours,
+   so the hero is a wash of the book rather than a crop of it. The fallbacks
+   are a warm board-and-ink pair for the case where no cover has loaded yet —
+   a cool default read as "broken image" against the Vellum page. */
+.wash {
+  position: sticky; top: 0; height: 196px; margin-bottom: -64px; z-index: 0;
+  background: linear-gradient(163deg, var(--a, #4a3f2f), var(--b, #17120c));
+}
+/* A laid-paper grain and a single soft highlight. Both are gradients on one
+   element: no images, nothing to request, nothing to decode. */
+.wash::before {
+  content: ""; position: absolute; inset: 0;
+  background: repeating-linear-gradient(74deg, rgba(255, 255, 255, .10) 0 2px, transparent 2px 11px);
+}
+.wash::after {
+  content: ""; position: absolute; inset: 0;
+  background: radial-gradient(130% 90% at 70% 0%, rgba(255, 255, 255, .28), transparent 58%);
+}
+.sheet {
+  position: relative; z-index: 1;
+  min-height: calc(100vh - 132px);
+  min-height: calc(100dvh - 132px);
+  background: var(--bt-surface-glass);
+  backdrop-filter: var(--bt-glass-blur); -webkit-backdrop-filter: var(--bt-glass-blur);
+  border-top: var(--bt-rule-w) solid var(--bt-line-highlight);
+  border-radius: var(--bt-radius-lg) var(--bt-radius-lg) 0 0;
+  box-shadow: var(--bt-shadow-sheet);
+  padding: 0 var(--bt-space-6) 40px;
+}
+@supports not (backdrop-filter: blur(2px)) { .sheet { background: var(--bt-surface-canvas); } }
+
+.insp-poster {
+  width: 78px; aspect-ratio: 2/3; margin: -52px 0 0; position: relative; z-index: 2;
+  box-shadow: var(--bt-shadow-lift), inset 0 0 0 1px rgba(255, 255, 255, .35);
+}
+.itype { display: flex; align-items: center; gap: 7px; margin: 11px 0 3px; }
+.ititle {
+  font-family: var(--bt-font-serif); font-size: var(--bt-fs-lg); line-height: 1.12;
+  font-weight: 600; letter-spacing: -.015em; color: var(--bt-text-primary);
+}
+.isub {
+  font-size: var(--bt-fs-sm); color: var(--bt-text-muted); margin-top: var(--bt-space-1);
+  display: flex; align-items: center; gap: var(--bt-space-2); flex-wrap: wrap;
+}
+.blk {
+  border-top: var(--bt-rule-w) solid var(--bt-line-hairline);
+  margin-top: var(--bt-space-6); padding-top: var(--bt-space-5);
+}
+.blk-h {
+  font-size: var(--bt-fs-micro); letter-spacing: var(--bt-tracking-caps); text-transform: uppercase;
+  color: var(--bt-text-muted); font-weight: 600; margin-bottom: 9px;
+  display: flex; align-items: center; gap: 7px;
+}
+.blk-h .why { margin-left: auto; font-size: 9px; letter-spacing: .04em; text-transform: none; color: var(--bt-text-faint); }
+
+/* Ratings — native units, never averaged. Open Library rates out of 5 stars,
+   Google Books out of 5 with a different population behind it, and turning
+   either into a percentage invents precision nobody measured.
+
+   A source that cannot cover this record at all — no key configured, or a work
+   it simply does not carry — renders as a hatched void. A source that carries
+   the work but has no ratings on it yet renders as a dash. Those are different
+   facts and the UI must not blur them into one shrug. */
+.ratings {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+  background: var(--bt-line-hairline);
+  border: var(--bt-rule-w) solid var(--bt-line-hairline);
+  border-radius: var(--bt-radius); overflow: hidden;
+}
+.src { background: var(--bt-surface-raised); padding: var(--bt-space-3) 9px; }
+.src .sn { font-size: var(--bt-fs-micro); letter-spacing: .09em; text-transform: uppercase; color: var(--bt-text-muted); font-weight: 600; }
+.src .sv { display: flex; align-items: baseline; gap: 3px; margin-top: 2px; }
+.src .sv b { font-family: var(--bt-font-mono); font-size: 17px; font-weight: 600; color: var(--bt-text-primary); }
+.src .sv i { font-style: normal; font-size: var(--bt-fs-mini); color: var(--bt-text-faint); font-family: var(--bt-font-mono); }
+.src .meter { height: 3px; border-radius: var(--bt-radius-sm); background: var(--bt-surface-sunk); margin-top: var(--bt-space-2); overflow: hidden; }
+.src .meter i { display: block; height: 100%; background: var(--bt-brass); }
+.src.na { background: var(--bt-surface-sunk); }
+.src.na .sn { color: var(--bt-text-faint); }
+.src .void {
+  display: block; height: 19px; margin-top: 3px; border-radius: var(--bt-radius-sm);
+  background-color: var(--bt-hatch-ground);
+  background-image: repeating-linear-gradient(-45deg, var(--bt-hatch-stripe) 0 1px, transparent 1px 5px);
+  box-shadow: inset 0 0 0 1px var(--bt-hatch-edge);
+}
+.src .note { font-size: var(--bt-fs-micro); color: var(--bt-text-faint); margin-top: 5px; line-height: 1.3; }
+a.src:hover { background: var(--bt-surface-hover); }
+
+.insp-close {
+  display: none; position: absolute; top: var(--bt-space-4); right: var(--bt-space-4); z-index: 3;
+  width: 28px; height: 28px; border-radius: 50%; place-items: center;
+  color: #fff; background: rgba(14, 10, 5, .5);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .3);
+}
+
+.mine { display: flex; align-items: center; gap: var(--bt-space-4); }
+.ticks { display: flex; gap: 2px; flex: 1; }
+.ticks i {
+  flex: 1; height: 16px; border-radius: 1px; cursor: pointer;
+  background: var(--bt-surface-sunk); box-shadow: inset 0 0 0 1px var(--bt-line-hairline);
+}
+.ticks i.on { background: var(--bt-brass); box-shadow: none; }
+.ticks i:hover { box-shadow: inset 0 0 0 1px var(--bt-brass-edge); }
+.myscore { font-family: var(--bt-font-mono); font-size: 15px; font-weight: 600; color: var(--bt-text-primary); }
+.myscore s { text-decoration: none; font-size: 11px; color: var(--bt-text-faint); }
+
+/* Ruled notebook paper, drawn as one repeating gradient. The 22px line-height
+   and the 22px background-size are the same number on purpose — they must stay
+   locked or the text drifts off the rules as the box grows, which is the whole
+   effect. background-position is offset by the top padding so the first line of
+   text sits ON the first rule rather than a padding's distance above it.
+
+   This was already the nicest control in MovieTrak and it belongs here even
+   more: a reading note is the one thing in this app a person actually writes
+   at length, and a serif face on ruled paper invites a paragraph where a bare
+   textarea invites four words. */
+.notecard {
+  width: 100%; resize: vertical;
+  border: var(--bt-rule-w) solid var(--bt-line-rule); border-radius: var(--bt-radius);
+  padding: var(--bt-space-3) var(--bt-space-4);
+  font-size: 12px; color: var(--bt-text-secondary); line-height: 22px; min-height: 70px;
+  font-family: var(--bt-font-serif); background: var(--bt-surface-raised);
+  background-image: linear-gradient(transparent 21px, var(--bt-line-hairline) 21px, var(--bt-line-hairline) 22px, transparent 22px);
+  background-size: 100% 22px; background-position: 0 var(--bt-space-3);
+}
+.notecard:focus { outline: none; border-color: var(--bt-ink-edge); box-shadow: 0 0 0 3px var(--bt-ink-wash); }
+
+.kv { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 5px var(--bt-space-4); font-size: 12px; }
+.kv dt { color: var(--bt-text-muted); font-size: 11px; }
+.kv dd { color: var(--bt-text-primary); }
+
+.strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--bt-space-3); }
+.strip .poster { aspect-ratio: 2/3; }
+.strip .st {
+  font-size: var(--bt-fs-mini); color: var(--bt-text-secondary); margin-top: var(--bt-space-1);
+  line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.why-line {
+  font-size: var(--bt-fs-mini); color: var(--bt-text-secondary); line-height: 1.45;
+  border-left: 2px solid var(--bt-brass-edge); padding-left: var(--bt-space-3); margin-top: var(--bt-space-2);
+}
+.why-line b { color: var(--bt-brass-text); font-weight: 600; }
+/* Reached through the taste graph — same author, same subject cluster — rather
+   than through something the user did. Different colour because it is a
+   different kind of claim, and one the user should be able to discount. */
+.why-line.graph { border-left-color: var(--bt-ink-edge); }
+.why-line.graph b { color: var(--bt-ink-text); }
+
+/* ══ SETTINGS ═════════════════════════════════════════════════════════════ */
+
+.settings { padding: var(--bt-space-6); max-width: 720px; }
+.field { margin-bottom: var(--bt-space-6); }
+.field__label { display: block; font-size: var(--bt-fs-base); color: var(--bt-text-primary); font-weight: 500; margin-bottom: 3px; }
+.field__help { font-size: var(--bt-fs-sm); color: var(--bt-text-muted); line-height: 1.5; margin-bottom: var(--bt-space-3); }
+.field__help a { color: var(--bt-brass-text); text-decoration: underline; }
+.field input[type="text"], .field input[type="password"], .field select {
+  width: 100%; height: 30px; padding: 0 var(--bt-space-3);
+  background: var(--bt-surface-raised);
+  border: var(--bt-rule-w) solid var(--bt-line-rule); border-radius: var(--bt-radius);
+  color: var(--bt-text-primary); font-family: var(--bt-font-mono); font-size: var(--bt-fs-base);
+}
+.field input:focus, .field select:focus { outline: none; border-color: var(--bt-ink-edge); box-shadow: 0 0 0 3px var(--bt-ink-wash); }
+.field__state { font-family: var(--bt-font-mono); font-size: var(--bt-fs-mini); margin-top: var(--bt-space-2); color: var(--bt-text-muted); }
+.field__state--ok { color: var(--bt-good); }
+.field__state--bad { color: var(--bt-bad); }
+/* Budget spent against a source's daily allowance. Only Google Books actually
+   has one worth drawing — Open Library is rate-limited per second, not per day
+   — so this bar is usually reporting on a key the user chose to add. */
+.gauge { height: 6px; background: var(--bt-surface-sunk); border-radius: var(--bt-radius-sm); overflow: hidden; margin-top: var(--bt-space-2); }
+.gauge i { display: block; height: 100%; background: var(--bt-brass); }
+.gauge i.hot { background: var(--bt-rose); }
+.actions { display: flex; gap: var(--bt-space-2); flex-wrap: wrap; }
+
+/* ══ FIRST RUN / UNLOCK ═══════════════════════════════════════════════════ */
+
+.firstrun { padding: var(--bt-space-7) var(--bt-space-6); max-width: 620px; }
+.firstrun h1 { font-family: var(--bt-font-serif); font-size: 30px; line-height: 1.15; margin-bottom: var(--bt-space-4); }
+.firstrun .lede { font-size: var(--bt-fs-md); color: var(--bt-text-secondary); line-height: 1.55; margin-bottom: var(--bt-space-6); }
+.firstrun ol { padding-left: var(--bt-space-6); display: flex; flex-direction: column; gap: var(--bt-space-3); font-size: var(--bt-fs-base); color: var(--bt-text-secondary); }
+.firstrun ol a { color: var(--bt-brass-text); text-decoration: underline; }
+.firstrun li::marker { color: var(--bt-brass); font-family: var(--bt-font-mono); }
+
+/* ── Carried over by Settings and Unlock, which are form-shaped rather than
+      list-shaped and so do not use the table/grid components. ──────────── */
+.pagehead { padding: var(--bt-space-6) 0 var(--bt-space-4); }
+.pagehead h1 { font-family: var(--bt-font-serif); font-size: var(--bt-fs-lg); }
+.section { margin-bottom: var(--bt-space-7); }
+.prose { max-width: 64ch; color: var(--bt-text-secondary); font-size: var(--bt-fs-base); line-height: 1.65; }
+.prose p + p { margin-top: var(--bt-space-3); }
+.prose b { color: var(--bt-text-primary); }
+.deck {
+  border: var(--bt-rule-w) solid var(--bt-line-hairline);
+  border-radius: var(--bt-radius); padding: var(--bt-space-4);
+  background: var(--bt-surface-raised); box-shadow: var(--bt-shadow-inset-top);
+}
+.deck dl { display: grid; grid-template-columns: auto 1fr; gap: var(--bt-space-2) var(--bt-space-4); font-size: var(--bt-fs-base); }
+.deck dt { color: var(--bt-text-muted); }
+.deck dd { text-align: right; font-family: var(--bt-font-mono); font-size: var(--bt-fs-sm); color: var(--bt-text-primary); }
+.linkout {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--bt-space-2) 0; font-size: var(--bt-fs-base);
+  border-bottom: var(--bt-rule-w) solid var(--bt-line-hairline);
+}
+.linkout:last-child { border-bottom: 0; }
+.linkout__id { font-family: var(--bt-font-mono); font-size: var(--bt-fs-micro); color: var(--bt-text-faint); }
+
+/* ══ THE GATE ═════════════════════════════════════════════════════════════
+   Sits in front of the app. The repository holds the library, so nothing
+   renders until it has been signed into. */
+.gate {
+  position: fixed; inset: 0; z-index: 100;
+  display: grid; place-items: center;
+  padding: var(--bt-space-6);
+  background-color: var(--bt-surface-canvas);
+  background-image: var(--bt-tank-1), var(--bt-tank-2);
+  overflow-y: auto;
+}
+.gate__panel {
+  width: min(520px, 100%);
+  background: var(--bt-surface-glass);
+  backdrop-filter: var(--bt-glass-blur); -webkit-backdrop-filter: var(--bt-glass-blur);
+  border: var(--bt-rule-w) solid var(--bt-line-rule);
+  border-top-color: var(--bt-line-highlight);
+  border-radius: var(--bt-radius-lg);
+  box-shadow: var(--bt-shadow-drawer);
+  padding: var(--bt-space-7);
+}
+@supports not (backdrop-filter: blur(2px)) { .gate__panel { background: var(--bt-surface-rail); } }
+.gate__brand { display: flex; align-items: baseline; gap: var(--bt-space-2); margin-bottom: var(--bt-space-5); }
+.gate__brand b { font-family: var(--bt-font-serif); font-size: 15px; color: var(--bt-text-primary); }
+/* The "Folio" kicker. Brass, outlined, tiny — the one place the brand hue is
+   spent purely on identity rather than on a control. */
+.gate__brand i {
+  font-style: normal; font-size: 9px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--bt-brass-text); border: var(--bt-rule-w) solid var(--bt-brass-edge);
+  border-radius: var(--bt-radius-sm); padding: 1px 4px;
+}
+.gate h1 { font-family: var(--bt-font-serif); font-size: 27px; line-height: 1.15; margin-bottom: var(--bt-space-3); }
+.gate .lede { font-size: var(--bt-fs-base); color: var(--bt-text-secondary); line-height: 1.6; margin-bottom: var(--bt-space-5); }
+.gate .lede b { color: var(--bt-text-primary); }
+.gate__check { display: flex; align-items: center; gap: var(--bt-space-2); font-size: var(--bt-fs-sm); color: var(--bt-text-secondary); }
+.gate__note {
+  font-size: var(--bt-fs-micro); color: var(--bt-text-faint); line-height: 1.5;
+  margin-top: var(--bt-space-6); padding-top: var(--bt-space-4);
+  border-top: var(--bt-rule-w) solid var(--bt-line-hairline);
+}
+
+/* ══ PROGRESS ═════════════════════════════════════════════════════════════
+   How far into a book you are. Two renderings of one number.
+
+   In the list it is a hairline along the bottom edge of the row rather than
+   another column — the phone layout has no width left to give (the title is
+   down to 102px at 320px as it is), and a 2px rule costs no height and stays
+   legible at any width.
+
+   In the inspector it is a control sized for a thumb, because the moment you
+   set it is the moment you put the book down. */
+.prg {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: var(--bt-line-hairline);
+}
+.prg i { display: block; height: 100%; background: var(--bt-brass); }
+tbody td[data-col="title"] { position: relative; }
+
+.prgctl { display: flex; flex-direction: column; gap: var(--bt-space-3); }
+.prgrow { display: flex; align-items: center; gap: var(--bt-space-3); flex-wrap: wrap; }
+.prgval { font-size: var(--bt-fs-sm); color: var(--bt-text-secondary); min-width: 34px; }
+.prgnote { font-size: var(--bt-fs-mini); }
+
+.prgmeter {
+  height: 4px; border-radius: var(--bt-radius-pill); overflow: hidden;
+  background: var(--bt-line-hairline);
+}
+.prgmeter i { display: block; height: 100%; background: var(--bt-brass); }
+
+/* The page-number box. Wide enough for four digits because a page count is not
+   a percentage and plenty of books run past 999. */
+.prgnum {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: var(--bt-fs-mini); color: var(--bt-text-muted);
+}
+.prgnum input {
+  width: 52px; height: var(--bt-control-h, 26px); text-align: center;
+  border: var(--bt-rule-w) solid var(--bt-line-rule); border-radius: var(--bt-radius-sm);
+  background: var(--bt-surface-canvas); color: var(--bt-text-primary);
+  font-family: var(--bt-font-mono); font-size: var(--bt-fs-sm);
+}
+
+/* A range input has no honest cross-browser default, so it is drawn here. */
+.prgctl input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 4px; border-radius: var(--bt-radius-pill);
+  background: var(--bt-line-hairline); outline: none;
+}
+.prgctl input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--bt-brass); cursor: pointer;
+  border: 2px solid var(--bt-surface-canvas);
+}
+.prgctl input[type="range"]::-moz-range-thumb {
+  width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--bt-surface-canvas);
+  background: var(--bt-brass); cursor: pointer;
+}
+
+/* ══ THE SCANNER ══════════════════════════════════════════════════════════
+   A full-screen camera overlay, built on the same scrim/card/close skeleton as
+   MovieTrak's trailer modal and for the same reason: one fixed layer, one
+   card, no blur anywhere near it. backdrop-filter over a live video stream is
+   the single most reliable way to make a phone drop frames, and a viewfinder
+   that stutters is a viewfinder that cannot decode a barcode.
+
+   It sits above every token z-layer (bar 20 / scrim 35 / drawer 45 / toast 60)
+   AND above the gate at 100. That has a consequence worth stating: while the
+   scanner is open the toast layer is covered, so scan feedback must come from
+   the scan log below the viewfinder and never from a toast. */
+.scanner {
+  position: fixed; inset: 0; z-index: 150;
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--bt-space-6);
+  background: var(--bt-scrim);
+}
+.scanner[hidden] { display: none !important; }
+
+.scanner-card {
+  position: relative;
+  display: flex; flex-direction: column;
+  width: min(760px, 100%);
+  height: min(78vh, 78dvh);
+  background: #000;
+  border: var(--bt-rule-w) solid var(--bt-line-rule);
+  border-radius: var(--bt-radius-lg);
+  box-shadow: var(--bt-shadow-drawer);
+  overflow: hidden;
+}
+
+.scanner-bar {
+  display: flex; align-items: center; gap: var(--bt-space-3);
+  padding: var(--bt-space-3) var(--bt-space-4) var(--bt-space-3) var(--bt-space-5);
+  border-bottom: var(--bt-rule-w) solid var(--bt-line-hairline);
+  background: var(--bt-surface-rail);
+  flex: 0 0 auto;
+}
+.scanner-title {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 500; color: var(--bt-text-primary);
+}
+.scanner-torch[aria-pressed="true"] {
+  background: var(--bt-brass-wash); border-color: var(--bt-brass-edge); color: var(--bt-brass-text);
+}
+.scanner-close {
+  flex: 0 0 auto;
+  width: 28px; height: 28px; border-radius: 50%;
+  display: grid; place-items: center;
+  color: var(--bt-text-secondary); background: var(--bt-surface-raised);
+  border: var(--bt-rule-w) solid var(--bt-line-rule);
+}
+.scanner-close:hover { color: var(--bt-text-primary); border-color: var(--bt-line-strong); }
+
+/* object-fit: cover, not contain. A letterboxed preview lies about the frame
+   the decoder is actually reading, and the user aims by what they can see. */
+.scanner-view { position: relative; flex: 1 1 auto; min-height: 0; background: #000; }
+.scanner-view video {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; display: block;
+}
+
+/* The aiming band. The huge spread box-shadow is the dimmer for everything
+   OUTSIDE the band — cheaper and crisper than four positioned overlays, and it
+   is why .scanner-card has to clip. Static on purpose: an animated sweep line
+   over a live stream costs frames the decoder wants. */
+.scanner-roi {
+  position: absolute; left: 0; right: 0; top: 50%;
+  height: clamp(84px, 26%, 150px); transform: translateY(-50%);
+  border-top: var(--bt-rule-w) solid rgba(255, 255, 255, .55);
+  border-bottom: var(--bt-rule-w) solid rgba(255, 255, 255, .55);
+  background: rgba(255, 255, 255, .06);
+  box-shadow: 0 0 0 100vmax rgba(8, 6, 4, .5);
+  pointer-events: none;
+}
+.scanner-roi::after {
+  content: ""; position: absolute; left: 8%; right: 8%; top: 50%;
+  height: 2px; margin-top: -1px; border-radius: var(--bt-radius-pill);
+  background: var(--bt-rose); opacity: .85;
+}
+.scanner-hint {
+  position: absolute; left: 0; right: 0; bottom: var(--bt-space-5);
+  text-align: center; padding: 0 var(--bt-space-5);
+  font-size: var(--bt-fs-mini); color: rgba(255, 255, 255, .8);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .7);
+  pointer-events: none;
+}
+
+.scanner-status {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: var(--bt-space-3);
+  padding: var(--bt-space-3) var(--bt-space-5);
+  border-top: var(--bt-rule-w) solid var(--bt-line-hairline);
+  background: var(--bt-surface-rail);
+  font-size: var(--bt-fs-mini); color: var(--bt-text-secondary);
+  min-height: 34px;
+}
+.scanner-status code {
+  font-family: var(--bt-font-mono); font-size: var(--bt-fs-sm);
+  color: var(--bt-text-primary); letter-spacing: .02em;
+}
+.scanner-status.bad { color: var(--bt-bad); }
+
+/* The app's panes scroll independently; freeze them while the camera is up.
+   Same trick as MovieTrak's player — the overlay is a sibling of .app, so
+   killing pointer events on .app alone leaves the overlay fully live. */
+.has-scanner .app { pointer-events: none; }
+.has-scanner .scanner { pointer-events: auto; }
+
+/* ══ THE SCAN LOG ═════════════════════════════════════════════════════════
+   The running list for a scanning session, newest first (the view prepends;
+   nothing here reverses anything, because reversing hundreds of nodes on every
+   beep is not free).
+
+   A row is written the INSTANT the barcode decodes, long before the lookup
+   answers — the queue is rate-limited to Open Library's few requests a second,
+   so a fast scanner can be twenty rows ahead of the network. Every row must
+   therefore be able to exist in `pending` and resolve in place, and its
+   geometry must not depend on which state it is in: min-height on the row and
+   a fixed size on the pill mean a resolving row never changes height, so the
+   list cannot jump under the thumb of someone still scanning. */
+.scanlog { display: flex; flex-direction: column; }
+.scanlog-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 0 var(--bt-space-4);
+  align-items: center; min-height: 44px;
+  padding: var(--bt-space-2) var(--bt-space-6);
+  border-bottom: var(--bt-rule-w) solid var(--bt-line-hairline);
+}
+.scanlog-row .poster { grid-row: 1 / span 2; width: 24px; aspect-ratio: 2/3; }
+.scanlog-t {
+  grid-column: 2; grid-row: 1;
+  font-size: var(--bt-fs-base); color: var(--bt-text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Still looking it up: there is no title yet, so the slot holds the placeholder
+   ink rather than collapsing and taking the row's height with it. */
+.scanlog-row.pending .scanlog-t { color: var(--bt-pending-ink); letter-spacing: .08em; }
+.scanlog-isbn {
+  grid-column: 2; grid-row: 2;
+  font-family: var(--bt-font-mono); font-size: var(--bt-fs-mini);
+  color: var(--bt-text-muted); letter-spacing: .02em;
+  font-variant-numeric: tabular-nums;
+}
+.scanlog-row .scanpill { grid-column: 3; grid-row: 1 / span 2; align-self: center; }
+
+/* The state classes reuse names the app already owns: `.miss` is also a search
+   result row and `.pending` is also the date grammar's "not known yet" ink.
+   Both are single-class selectors of the SAME specificity as .scanpill, so the
+   box properties below are restated rather than left to cascade — an earlier
+   cut omitted `border` and `cursor` and every missed scan inherited the search
+   row's bottom rule and pointer cursor, which made a dead pill look clickable.
+   Keep this block declaring its own box. */
+.scanpill {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  height: 17px; min-width: 54px; padding: 0 var(--bt-space-2);
+  border: 0; border-radius: var(--bt-radius-sm); cursor: default;
+  font-size: var(--bt-fs-micro); font-weight: 600; letter-spacing: .09em;
+  text-transform: uppercase; white-space: nowrap;
+  background: var(--bt-line-hairline); color: var(--bt-text-muted);
+}
+.scanpill.pending { background: var(--bt-surface-sunk); color: var(--bt-text-faint); }
+.scanpill.ok      { background: var(--bt-sage-wash);  color: var(--bt-sage-text); }
+.scanpill.dupe    { background: var(--bt-brass-wash); color: var(--bt-brass-text); }
+.scanpill.miss    { background: var(--bt-slate-wash); color: var(--bt-slate-text); }
+.scanpill.err     { background: var(--bt-rose-wash);  color: var(--bt-rose-text); }
+
+/* A pill in flight breathes, so a stalled queue is visible without a spinner
+   per row. Opacity only — it composites, so a screen full of them costs
+   nothing — and it is off entirely when the user has asked for less motion. */
+@keyframes bt-scan-breathe { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+.scanpill.pending { animation: bt-scan-breathe 1.1s var(--bt-ease) infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .scanpill.pending { animation: none; opacity: 1; }
+}
+
+/* The footer counts. Monospace and tabular so the numbers do not jitter
+   sideways as they tick up mid-session.
+
+   Each count carries the same state class as its pill, and each one is hung on
+   a .tal element rather than a bare span for the reason given above: a bare
+   `.miss` here would collect the search row's padding, bottom rule, pointer
+   cursor AND its hover tint, and the tally would light up under the mouse like
+   something you could click. .tal declares its own box so it cannot. */
+.scantally {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: var(--bt-space-2) var(--bt-space-5);
+  padding: var(--bt-space-3) var(--bt-space-6);
+  border-top: var(--bt-rule-w) solid var(--bt-line-hairline);
+  background: var(--bt-surface-sunk);
+  font-size: var(--bt-fs-mini); color: var(--bt-text-muted);
+}
+/* Deliberately written as a descendant pair, not a bare `.tal`: it has to
+   out-specify `.miss:hover`, which is also (0,2,0), and a tie is broken by
+   source order — this block is below it, so this block wins. */
+.scantally .tal {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 0; border: 0; cursor: default; background: none;
+}
+.scantally b {
+  font-family: var(--bt-font-mono); font-size: var(--bt-fs-sm); font-weight: 600;
+  color: var(--bt-text-primary); font-variant-numeric: tabular-nums;
+}
+.tal.ok b   { color: var(--bt-sage-text); }
+.tal.dupe b { color: var(--bt-brass-text); }
+.tal.miss b { color: var(--bt-slate-text); }
+.tal.err b  { color: var(--bt-bad); }
+
+/* ══ SPECIFY EDITION ══════════════════════════════════════════════════════
+   Turning an `open` item (added by search, no edition chosen) into a `closed`
+   one (this printing, this ISBN, this page count).
+
+   The list is the reason this needs its own scroll region rather than riding
+   the inspector's: a well-catalogued classic has HUNDREDS of editions, fetched
+   50 at a time, and letting that grow the inspector's own scroll means the
+   user loses the title, the cover and the Cancel affordance the moment they
+   start hunting. Bounded box, bounded scroll, header stays put. */
+.editions {
+  display: flex; flex-direction: column; min-height: 0;
+  border: var(--bt-rule-w) solid var(--bt-line-hairline);
+  border-radius: var(--bt-radius);
+  background: var(--bt-surface-raised);
+  overflow: hidden;
+}
+.editions-head {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: var(--bt-space-3);
+  padding: var(--bt-space-3) var(--bt-space-4);
+  border-bottom: var(--bt-rule-w) solid var(--bt-line-hairline);
+  background: var(--bt-surface-sunk);
+  font-size: var(--bt-fs-micro); letter-spacing: var(--bt-tracking-caps);
+  text-transform: uppercase; color: var(--bt-text-muted); font-weight: 600;
+}
+.editions-count {
+  margin-left: auto; letter-spacing: 0; text-transform: none;
+  font-family: var(--bt-font-mono); font-size: var(--bt-fs-mini);
+  color: var(--bt-text-faint); font-variant-numeric: tabular-nums;
+}
+.editions-scroll {
+  flex: 1 1 auto; min-height: 0;
+  max-height: min(52vh, 440px);
+  overflow-y: auto; overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+/* content-visibility lets the browser skip layout and paint for rows scrolled
+   out of view. It is the whole reason a 400-edition work stays responsive on a
+   phone. contain-intrinsic-size must stay in step with the row's real height
+   or the scrollbar jumps as rows are realised — 46px is the min-height below
+   plus its padding. */
+.edrow {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 0 var(--bt-space-4);
+  align-items: center; min-height: 46px;
+  padding: var(--bt-space-2) var(--bt-space-4);
+  border-bottom: var(--bt-rule-w) solid var(--bt-line-hairline);
+  content-visibility: auto;
+  contain-intrinsic-size: 0 46px;
+}
+.edrow:last-child { border-bottom: 0; }
+.edrow:hover { background: var(--bt-surface-hover); }
+.edrow .poster { grid-row: 1 / span 2; width: 28px; aspect-ratio: 2/3; }
+.ed-pub {
+  grid-column: 2; grid-row: 1;
+  font-family: var(--bt-font-serif); font-size: var(--bt-fs-base);
+  color: var(--bt-text-primary); line-height: 1.25;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Year · format · pages, and then the ISBN. Anything the edition record does
+   not carry is simply absent — the view writes a .hatch in its place rather
+   than an empty gap, same rule as everywhere else in the app. */
+.ed-meta {
+  grid-column: 2; grid-row: 2;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0 var(--bt-space-2);
+  font-size: var(--bt-fs-mini); color: var(--bt-text-muted);
+}
+.ed-meta .sep { color: var(--bt-text-faint); }
+.ed-isbn {
+  font-family: var(--bt-font-mono); font-size: var(--bt-fs-mini);
+  color: var(--bt-text-faint); letter-spacing: .02em;
+  font-variant-numeric: tabular-nums;
+}
+.ed-pick { grid-column: 3; grid-row: 1 / span 2; align-self: center; flex: 0 0 auto; }
+
+/* The edition already pinned to this item. A left marker rather than a fill,
+   so it survives the hover background without a second colour. */
+.edrow.picked { background: var(--bt-brass-wash); }
+.edrow.picked::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+  width: var(--bt-marker-w); background: var(--bt-brass);
+}
+.edrow.picked .ed-pub { font-weight: 600; }
+
+.editions-more {
+  flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center; gap: var(--bt-space-3);
+  padding: var(--bt-space-4);
+  border-top: var(--bt-rule-w) solid var(--bt-line-hairline);
+  background: var(--bt-surface-sunk);
+  font-size: var(--bt-fs-mini); color: var(--bt-text-muted);
+}
+.editions-empty {
+  padding: var(--bt-space-6) var(--bt-space-4);
+  text-align: center; font-size: var(--bt-fs-mini); color: var(--bt-text-muted);
+}
+#edSentinel { height: 1px; }
+
+/* ══ THE PILE ═════════════════════════════════════════════════════════════
+   `user.pile` is the ownership axis — null / 'sell' / 'sold' — and it is
+   deliberately independent of reading status: a book can be finished and kept,
+   unread and going, or sold and still on the want list as a better edition.
+   This view is just the 'sell' slice, and it is the one place in the app where
+   multi-select is the point rather than a convenience.
+
+   The selectbar floats over the list instead of pushing it. Selecting a row
+   must not reflow the rows you are still selecting — that is how you end up
+   ticking the wrong book — so the bar is taken out of flow and the scroll
+   region pays for it with a matching bottom pad. Keep --pile-foot in step with
+   .selectbar's height in 03-components; it is the one number that has to
+   agree across the two files. */
+.pileview {
+  --pile-foot: 52px;
+  position: relative;
+  display: flex; flex-direction: column;
+  min-height: 0; height: 100%;
+}
+.pileview__scroll {
+  flex: 1 1 auto; min-height: 0;
+  overflow-y: auto; overscroll-behavior: contain;
+  padding-bottom: var(--pile-foot);
+  scroll-padding-bottom: var(--pile-foot);
+}
+.pileview > .selectbar {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  z-index: var(--bt-z-bar);
+}
+/* Running total for the slice. Monospace because the number changes as rows
+   are ticked and a proportional face makes it shuffle. */
+.pilesum {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: var(--bt-space-2) var(--bt-space-5);
+  padding: var(--bt-space-3) var(--bt-space-6);
+  border-bottom: var(--bt-rule-w) solid var(--bt-line-hairline);
+  background: var(--bt-surface-sunk);
+  font-size: var(--bt-fs-mini); color: var(--bt-text-muted);
+}
+.pilesum b {
+  font-family: var(--bt-font-mono); font-size: var(--bt-fs-sm); font-weight: 600;
+  color: var(--bt-text-primary); font-variant-numeric: tabular-nums;
+}
+.pileview__empty {
+  padding: var(--bt-space-7) var(--bt-space-6);
+  max-width: 48ch;
+  font-size: var(--bt-fs-base); color: var(--bt-text-muted); line-height: 1.6;
+}
