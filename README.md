@@ -85,9 +85,14 @@ and every subsequent push redeploys.
 
 ## Sync across machines
 
-Your library is encrypted **in the browser** and committed to this repository as
-`data/library.enc.json`. Enter the same passphrase anywhere else and everything
-comes back.
+**Entirely optional, and off until you turn it on.** BookTrak is a local-first
+library: a browser that has never set a passphrase never sees a sign-in screen,
+never fetches anything from GitHub, and behaves exactly as it does below. Turn it
+on under **Settings → Sync across machines**.
+
+Once you do, your library is encrypted **in the browser** and committed to this
+repository as `data/library.enc.json`. Enter the same passphrase anywhere else
+and everything comes back — books, reading progress, follows and activity.
 
 There is no password stored anywhere — not even a hash. The passphrase derives
 an AES-256 key via PBKDF2 (600,000 iterations); if the file decrypts, the
@@ -95,15 +100,22 @@ passphrase was right. That is why publishing the file is safe, and also why
 **there is no way to recover a forgotten passphrase.** Keep it in your password
 manager.
 
-To enable publishing you need a GitHub token, created once per machine:
+To enable publishing you need a GitHub token, created **once** — not once per
+machine. It is stored inside the encrypted file as well as locally, so signing in
+elsewhere with the passphrase hands that device write access too.
 
 1. [Create a fine-grained token](https://github.com/settings/personal-access-tokens/new)
 2. Repository access: **Only select repositories** → this one
 3. Permissions: **Contents → Read and write**
 4. Set an expiry date
-5. Paste it into Settings → Sync
+5. Paste it into Settings → Sync across machines
 
 Reading needs no token at all — the file is public, and it is ciphertext.
+
+Two devices that both edited between syncs are **merged**, per record, rather than
+one being made to win: the newer edit to any given book wins, deletions are
+honoured through tombstones, and reading history is unioned. If BookTrak cannot
+read the published file it refuses to publish over it rather than guessing.
 
 > The token can write to the repository that serves this page, so anyone who
 > stole it could also commit code into the site. Scope it to this one
@@ -169,11 +181,17 @@ js/00-05            config, date/text utilities, the single network layer
 js/10-16            IndexedDB, the repository facade, encryption, GitHub sync
 js/20-38            Open Library / Google Books clients, and normalization
 js/40-48            recommender, change detection, refresh scheduling
-js/49-70            router, shared components, the scanner, one file per screen
+js/49-75            router, shared components, the scanner, one file per screen
+js/90              boot: routes, the sync gate, the debounced publish
 ```
 
 Files load in numeric order and the number *is* the dependency: nothing may
-reach forwards. `BT.net` is the only thing that calls `fetch()`, and views
+reach forwards. Two deliberate exceptions, both commented where they happen:
+`js/70-follows.js` is a logic module and loads early, and `js/48-sync.js` is the
+refresh scheduler rather than the cloud sync its name suggests (that is 15/16).
+`BT.net` is the only thing that calls `fetch()` — apart from the GitHub Contents
+API calls in `js/16-cloud.js`, which are exempt because none of BT.net's rate
+limiting, caching or error classification applies to our own file. Views
 never touch `BT.db` directly — they go through `BT.repo`. CSS is layered the
 same way, with `05-responsive.css` last so its media queries win against
 equal-specificity component rules.

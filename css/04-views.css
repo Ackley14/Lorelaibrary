@@ -890,6 +890,31 @@ a.src:hover { background: var(--bt-surface-hover); }
   border-top: var(--bt-rule-w) solid var(--bt-line-hairline);
 }
 
+/* The gate BORROWS .field, .actions, .warnbox, .errorbox and .deck from
+   Settings rather than growing a parallel set of its own. Those blocks are
+   already the app's vocabulary for "a labelled input with help text under it",
+   and a second vocabulary for one screen is how two things that look the same
+   start drifting apart.
+
+   What it does need is its own vertical rhythm. Settings' spacing is tuned for
+   a 720px column that scrolls freely; this is a 520px card that has to hold a
+   passphrase, a confirmation and a token on a phone without the primary button
+   falling below the fold — and a button nobody scrolls to is a button that
+   looks dead. Everything below tightens; nothing changes colour, and no value
+   here is a literal. */
+.gate .field { margin-bottom: var(--bt-space-5); }
+.gate .field:last-of-type { margin-bottom: var(--bt-space-4); }
+.gate .warnbox,
+.gate .errorbox,
+.gate .deck { margin-bottom: var(--bt-space-5); }
+/* Load-bearing rather than decorative: the actions row is the only element on
+   these panels with nothing above it to space it away from, and the buttons sit
+   directly under a .field__state that can be one line or three. */
+.gate .actions { margin-top: var(--bt-space-5); }
+/* The checkbox row is a label, not a .field, so it needs the gap the fields
+   below it get for free. */
+.gate__check { margin-top: var(--bt-space-4); }
+
 /* ══ PROGRESS ═════════════════════════════════════════════════════════════
    How far into a book you are. Two renderings of one number.
 

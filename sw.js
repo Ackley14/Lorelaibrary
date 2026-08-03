@@ -44,8 +44,11 @@
         nobody receives it. Bumping VERSION is what makes a deploy a deploy.
    ══════════════════════════════════════════════════════════════════════════ */
 
-/* Bump on EVERY shell change. See obligation 2 above. */
-const VERSION = 'v1';
+/* Bump on EVERY shell change. See obligation 2 above.
+   v2 — M5 sync: 15-crypto, 16-cloud, 48-sync and 71-view-unlock joined the
+   shell, and 45-alerts, 69-view-settings, 90-boot and index.html all changed
+   with them. */
+const VERSION = 'v2';
 
 /* ── The prefix is load-bearing ───────────────────────────────────────────
    Cache Storage is scoped to the ORIGIN, not to the worker's scope, and
@@ -116,12 +119,15 @@ const SHELL = [
   'js/05-net.js',
   'js/10-db.js',
   'js/12-repo.js',
+  'js/15-crypto.js',
+  'js/16-cloud.js',
   'js/20-openlibrary.js',
   'js/25-googlebooks.js',
   'js/38-normalize.js',
   'js/39-scan.js',
   'js/70-follows.js',
   'js/45-alerts.js',
+  'js/48-sync.js',
   'js/49-router.js',
   'js/50-ui-core.js',
   'js/55-tree.js',
@@ -134,6 +140,7 @@ const SHELL = [
   'js/67-view-people.js',
   'js/68-view-stats.js',
   'js/69-view-settings.js',
+  'js/71-view-unlock.js',
   'js/75-view-scan.js',
   'js/90-boot.js',
 
@@ -147,6 +154,22 @@ const SHELL = [
   'icon-512.png',
   'icon-maskable-512.png',
   'manifest.json',
+
+  /* DELIBERATELY ABSENT: 'data/library.enc.json'.
+
+     It is same-origin, in scope, and it is the one file here that must never
+     be answered from a cache. It is the encrypted library, and js/16-cloud.js
+     compares its `updatedAt` against what this device last wrote to decide
+     whether another device has published since. Serve a cached copy and that
+     comparison is made against a stale timestamp: either every save reports a
+     conflict with a copy of itself, or — worse — a merge runs against
+     yesterday's library and quietly republishes it over today's.
+
+     Nothing needs to be done to keep it out beyond leaving it off this list:
+     the fetch handler answers navigations and SHELL_URLS and nothing else, so
+     an unlisted same-origin GET reaches the network exactly as it would with
+     no worker installed. This comment exists so that the next person tidying
+     the list does not "fix" the omission. */
 ];
 
 /* Resolved once, against this worker's own URL, so a match is a cheap Set

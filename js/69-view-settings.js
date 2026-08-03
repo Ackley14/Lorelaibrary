@@ -27,8 +27,12 @@
    actually do something (a Google Books key and a contact address), the
    region, what storage we ended up with, and the export/import/erase trio.
 
-   NOT here, deliberately: the encrypted GitHub sync UI. See the M5 seam at the
-   foot of the file — half-wired sync is worse than none.
+   M5 added the encrypted GitHub sync panel — see syncSection() below. It is
+   the one block on this screen that can reach the network on your behalf and
+   the one that can lose data if it is wrong, so it says out loud what it does
+   and refuses to render controls it cannot honour: no cloud module on the
+   page, no panel; no repository, no publish; not signed in, no
+   change-passphrase form. Half-wired sync is worse than none.
    ══════════════════════════════════════════════════════════════════════════ */
 
 BT.viewSettings = (function () {
@@ -976,6 +980,11 @@ BT.viewSettings = (function () {
        publishes a RATE, not a quota, so budgetState() correctly returns null
        for it and there is no gauge to draw. */
     const gb = BT.config.hasKey('googlebooks') ? await BT.net.budgetState('googlebooks') : null;
+    /* Guarded, like every other seam in this app: 16-cloud.js failing to parse
+       must cost the sync panel and nothing else on this screen. `status()` is
+       local — two meta reads — and never touches the network, so it is safe to
+       await on the render path. */
+    const sync = (BT.cloud && BT.cloud.status) ? await BT.cloud.status() : null;
     if (alive && !alive()) return;
     stats = s;
 
@@ -1001,10 +1010,11 @@ BT.viewSettings = (function () {
 
         ${genreSection(s)}
         ${keySection(gb)}
+        ${syncSection(sync)}
         ${contactSection()}
         ${regionSection()}
         ${diagnosticsSection(items, cache, onGithubIo)}
-        ${dataSection(items)}
+        ${dataSection(items, sync)}
 
         <section class="section">
           ${BT.ui.groupHead('About')}
@@ -1152,6 +1162,160 @@ BT.viewSettings = (function () {
       </section>`;
   }
 
+  /* ── Sync across machines ──────────────────────────────────────────────
+     The encrypted library, and the only block on this screen that can publish
+     anything anywhere.
+
+     THE MODEL IN ONE SENTENCE: the library is encrypted in this browser with a
+     key derived from a passphrase, committed to a JSON file in the repository
+     that serves this page, and read back by any device that knows the
+     passphrase.
+
+     THE PASSPHRASE IS NEVER STORED, NOT EVEN AS A HASH. There is nothing in
+     the repository to crack and no reset, because there is no verifier: the
+     file either decrypts or it does not, and AES-GCM's authentication tag
+     failing IS the wrong-password answer. That property is the reason the file
+     can be public at all, and it is the reason this panel says "there is no
+     way to reset this" rather than offering a recovery flow that could not
+     exist.
+
+     THE TOKEN LIVES INSIDE THE ENCRYPTED FILE, which is what makes signing in
+     on a new device need only a passphrase — decrypting hands you the write
+     access as well. The cost is stated in the warnbox and is real: that token
+     can write to the repository that serves this page.
+
+     Rendered from `status()` rather than from live module calls so every line
+     is one consistent snapshot; a panel that read `unlocked` at the top and
+     again at the bottom could draw itself half signed in. */
+  function syncSection(sync) {
+    /* No cloud module on the page — 16-cloud.js absent or broken. Say so
+       plainly instead of drawing dead controls. Everything else on this screen
+       is unaffected, which is the whole point of the guard. */
+    if (!sync) {
+      return `
+        <section class="section">
+          ${BT.ui.groupHead('Sync across machines')}
+          <div class="field__help">
+            The sync module is not loaded on this page, so BookTrak is running as a local-only
+            library. Everything else works exactly as it does with sync switched on — your books
+            are in this browser, and Export still moves them.
+          </div>
+        </section>`;
+    }
+
+    const statusWord = sync.unlocked ? 'Signed in'
+      : sync.enrolled ? 'Locked — signed out of this device'
+      : 'Not set up — this browser only';
+
+    return `
+      <section class="section">
+        ${BT.ui.groupHead('Sync across machines')}
+        <div class="field__help" style="margin-bottom:var(--bt-space-4);max-width:70ch">
+          Your library is encrypted in this browser and saved to your repository as
+          <span class="num">${esc(sync.path)}</span>. Sign in with the same passphrase on any
+          device and you get the same single library — the same books, the same reading progress,
+          the same follows and the same activity — including the GitHub token, which is stored
+          inside the encrypted file so you only ever enter it once.
+          <br><br>
+          The passphrase is never stored anywhere, not even as a hash, so there is nothing in the
+          repository that could be cracked — and no way to reset it if you forget it.
+          <b>Optional in every sense</b>: BookTrak works completely without this, and a browser
+          that has never signed in never sees a passphrase screen.
+        </div>
+
+        <div class="deck" style="margin-bottom:var(--bt-space-4)">
+          <dl>
+            <dt>Status</dt><dd>${esc(statusWord)}</dd>
+            <dt>Repository</dt><dd>${esc(sync.repo || 'not set')}</dd>
+            <dt>Last published</dt><dd>${esc(BT.util.timeAgo(sync.lastPushAt))}</dd>
+            <dt>Last loaded</dt><dd>${esc(BT.util.timeAgo(sync.lastPullAt))}</dd>
+          </dl>
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="gh-repo">Repository</label>
+          <div class="field__help">
+            Owner and name, e.g. <span class="num">Ackley14/Lorelaibrary</span>. Detected
+            automatically when the app is served from GitHub Pages — the published copy at
+            <span class="num">ackley14.github.io/Lorelaibrary</span> infers exactly that — so this
+            field is only needed when running from <span class="num">file://</span>, from a LAN
+            address, or when the library should live in a different repository from the site.
+          </div>
+          <input id="gh-repo" type="text" spellcheck="false" value="${esc(sync.repo)}"
+                 placeholder="owner/repository">
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="gh-token">GitHub token</label>
+          <div class="field__help">
+            Needed only to <b>publish</b> — reading is public and needs nothing at all. Create a
+            <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token ↗</a>
+            scoped to <b>only this repository</b>, with <b>Contents: read and write</b>, and give
+            it an expiry date. Once you are signed in it also travels inside the encrypted file,
+            so other devices get it by signing in rather than by you pasting it again.
+          </div>
+          <input id="gh-token" type="password" spellcheck="false" autocomplete="off"
+                 placeholder="${sync.hasToken ? '•••••••• already available' : 'github_pat_…'}">
+          <div class="field__state ${sync.hasToken ? 'field__state--ok' : ''}" id="gh-state">
+            ${sync.hasToken
+              ? (sync.tokenFromVault ? '● Token available (from your encrypted library)' : '● Token stored in this browser')
+              : '○ No token — read-only'}
+          </div>
+          <p class="actions" style="margin-top:var(--bt-space-2)">
+            <button class="btn btn--sm" id="gh-save">Save &amp; test</button>
+            ${sync.hasToken ? '<button class="btn btn--sm btn--ghost" id="gh-clear">Remove from this browser</button>' : ''}
+          </p>
+        </div>
+
+        <div class="warnbox">
+          <strong>One thing to know about the token</strong>
+          Because it can write to the repository that serves this page, anyone who got hold of it
+          could also commit code into the site. Scope it to this one repository, give it an expiry,
+          and remove it from any machine you do not control. Its safety otherwise rests entirely on
+          the strength of your passphrase, because the encrypted file it sits in is public.
+        </div>
+
+        ${sync.unlocked ? `
+        <div class="field" style="margin-top:var(--bt-space-6)">
+          <label class="field__label">Change passphrase</label>
+          <div class="field__help">
+            Re-encrypts the whole library with a new passphrase and saves it. Every other device is
+            signed out and will need the new one. The old passphrase stops working the moment this
+            succeeds — and if it fails, nothing changes and the old one still works, because the
+            new key is only adopted after GitHub has accepted the write.
+          </div>
+          <div id="pw-open"><button class="btn btn--sm" id="pw-start">Change it</button></div>
+          <div id="pw-form" hidden>
+            <input id="pw-new" type="password" autocomplete="new-password" spellcheck="false"
+                   placeholder="New passphrase" style="margin-bottom:var(--bt-space-2)">
+            <input id="pw-new2" type="password" autocomplete="new-password" spellcheck="false"
+                   placeholder="Confirm new passphrase">
+            <div class="field__state" id="pw-msg"></div>
+            <p class="actions" style="margin-top:var(--bt-space-3)">
+              <button class="btn btn--primary btn--sm" id="pw-go">Change passphrase</button>
+              <button class="btn btn--ghost btn--sm" id="pw-cancel">Cancel</button>
+            </p>
+          </div>
+        </div>` : ''}
+
+        <div class="field__help" style="margin-top:var(--bt-space-4)">
+          <b>What travels, and what does not.</b> Books, follows, dismissals, activity, the alert
+          ledger, deletion records and your <b>reading history</b> — so page counts and finish
+          dates follow you between devices. Subject lists, descriptions and candidate ISBNs are
+          stripped on the way out: they are heavy, every save stores a whole fresh copy because
+          encrypted files cannot be delta-compressed by git, and all of it can be fetched again
+          from a work id. Which printing you <em>own</em> is kept, because a scanned barcode is
+          something you told us and nothing can re-derive it.
+        </div>
+
+        <p class="actions" style="margin-top:var(--bt-space-5)">
+          ${sync.unlocked
+            ? '<button class="btn btn--ghost" id="sync-lock">Sign out of this device</button>'
+            : `<a class="btn btn--primary" href="#/unlock">${sync.enrolled ? 'Sign in' : 'Set up sync'}</a>`}
+        </p>
+      </section>`;
+  }
+
   /* ── Contact address ─────────────────────────────────────────────────── */
   function contactSection() {
     const email = String(BT.config.get('contactEmail') || '');
@@ -1263,7 +1427,7 @@ BT.viewSettings = (function () {
   }
 
   /* ── Data ────────────────────────────────────────────────────────────── */
-  function dataSection(items) {
+  function dataSection(items, sync) {
     return `
       <section class="section">
         ${BT.ui.groupHead('Your data')}
@@ -1310,7 +1474,18 @@ BT.viewSettings = (function () {
         <div class="warnbox">
           <strong>Erase everything</strong>
           Removes the library, follows, activity, reading history and cache from this browser.
-          There is no server copy and no undo. Export first.
+          ${sync && sync.unlocked
+            /* Said only when it is true. Erasing is LOCAL — it never publishes —
+               but it also clears the marker that records which version of the
+               shared library this device last saw, so the next save refuses
+               until you sign in again rather than publishing an empty library
+               over a full one. Better a save that asks than a save that
+               erases. */
+            ? 'It does <b>not</b> erase your published library, and it does not publish anything. '
+              + 'Saving stops until you sign in again, because after an erase this browser can no '
+              + 'longer tell what the shared library contains.'
+            : 'There is no server copy and no undo.'}
+          Export first.
           <p class="actions" style="margin-top:var(--bt-space-3)">
             <button class="btn btn--danger" id="doWipe">Erase everything</button>
           </p>
@@ -1394,6 +1569,104 @@ BT.viewSettings = (function () {
       if (rep.upgraded) BT.ui.toast(`${BT.util.pluralize(rep.upgraded, 'book')} now has an exact date`);
     });
 
+    /* ── Sync ─────────────────────────────────────────────────────────────
+       Every handler here is attached with `on()`, which is a no-op when the
+       element is absent — so the whole block is inert on a page where
+       syncSection() drew the "not loaded" notice, with no extra guard. */
+    const repoInput = document.getElementById('gh-repo');
+    on('gh-repo', 'onchange', () => {
+      BT.cloud.setRepo(repoInput.value);
+      BT.ui.toast('Repository saved');
+      /* Re-rendered rather than left alone: the repository is what the token
+         is tested against and what the status deck reports, so a stale panel
+         would be describing a different repository from the one now in use. */
+      BT.router.resolve();
+    });
+
+    on('gh-save', 'onclick', async () => {
+      const t = document.getElementById('gh-token');
+      const state = document.getElementById('gh-state');
+      const btn = document.getElementById('gh-save');
+      if (repoInput) BT.cloud.setRepo(repoInput.value);
+      if (t.value.trim()) BT.cloud.setToken(t.value.trim());
+      btn.disabled = true;
+      state.textContent = '… testing';
+      state.className = 'field__state';
+      const res = await BT.cloud.verifyToken();
+      btn.disabled = false;
+      state.textContent = (res.ok ? '● ' : '✕ ') + res.reason;
+      state.className = 'field__state ' + (res.ok ? 'field__state--ok' : 'field__state--bad');
+      /* CLEARED WHETHER OR NOT IT WORKED. A rejected token left sitting in a
+         password field is a secret on screen with nothing useful to do, and the
+         stored copy is the one that matters from here on. */
+      t.value = '';
+      if (res.ok) BT.ui.toast('Token works — changes will be saved to ' + BT.cloud.repo());
+    });
+
+    on('gh-clear', 'onclick', () => {
+      BT.cloud.clearToken();
+      /* The browser copy only. If a library is open, the copy that came out of
+         the encrypted payload is still in memory and saving continues — which
+         is the honest behaviour and worth saying, because "Remove" that does
+         not stop saves would otherwise look broken. */
+      BT.ui.toast(BT.cloud.hasWriteToken()
+        ? 'Removed from this browser — your encrypted library still carries one, so saving continues'
+        : 'Token removed from this browser');
+      BT.router.resolve();
+    });
+
+    /* ── Change passphrase ────────────────────────────────────────────── */
+    on('pw-start', 'onclick', () => {
+      document.getElementById('pw-open').hidden = true;
+      document.getElementById('pw-form').hidden = false;
+      document.getElementById('pw-new').focus();
+    });
+    on('pw-cancel', 'onclick', () => {
+      document.getElementById('pw-form').hidden = true;
+      document.getElementById('pw-open').hidden = false;
+    });
+    on('pw-go', 'onclick', async () => {
+      const pwGo = document.getElementById('pw-go');
+      const a = document.getElementById('pw-new').value;
+      const b = document.getElementById('pw-new2').value;
+      const msg = document.getElementById('pw-msg');
+      const say = (t, cls) => { msg.textContent = t; msg.className = 'field__state ' + (cls || ''); };
+
+      if (a !== b) return say('✕ The two passphrases do not match.', 'field__state--bad');
+      /* The same bar the setup screen sets, and for the same reason: this
+         passphrase protects a repository-write token inside a world-readable
+         file. */
+      const st = BT.crypto.strength(a);
+      if (st.score < 3) return say('✕ Too weak. ' + st.hint, 'field__state--bad');
+
+      pwGo.disabled = true;
+      pwGo.textContent = 'Re-encrypting…';
+      say('Deriving the new key, re-encrypting and saving…');
+      try {
+        await BT.cloud.changePassphrase(a);
+        BT.ui.toast('Passphrase changed. Other devices will need the new one.');
+        BT.router.resolve();
+      } catch (e) {
+        pwGo.disabled = false;
+        pwGo.textContent = 'Change passphrase';
+        say('✕ ' + ((e && e.message) || String(e)) + ' — your old passphrase still works.',
+            'field__state--bad');
+      }
+    });
+
+    on('sync-lock', 'onclick', () => {
+      if (!BT.ui.confirmDialog(
+        'Sign out of this device?\n\n'
+        + 'The passphrase will be needed to sign in again, and until then changes stay in this '
+        + 'browser only.\n\nYour library in the repository is not touched, and the copy on this '
+        + 'device is not erased.')) return;
+      /* BT.cloud rather than BT.gate: the state change lives with the module
+         that owns the state, and this screen must not depend on the gate's file
+         having parsed to be able to sign out of a broken one. */
+      BT.cloud.signOut();
+      location.reload();
+    });
+
     /* ── Contact, region, language ────────────────────────────────────── */
     on('contact', 'onchange', e => {
       BT.config.set('contactEmail', (e.target.value || '').trim());
@@ -1452,8 +1725,16 @@ BT.viewSettings = (function () {
          way out instead of repeating the question. */
       if (!BT.ui.confirmDialog(
         'Erase your library, follows, activity and reading history from this browser?')) return;
-      if (!BT.ui.confirmDialog(
-        'There is no server copy and no undo. Export first if there is any chance you want this back. Erase everything?')) return;
+      /* The second question names the consequence, so it has to name the RIGHT
+         one. "There is no server copy" is false for a signed-in device and
+         false in the direction that matters — someone who believed it would
+         not realise their published library survives, nor that saving is about
+         to stop until they sign in again. */
+      const syncing = !!(BT.crypto && BT.crypto.isUnlocked && BT.crypto.isUnlocked());
+      if (!BT.ui.confirmDialog(syncing
+        ? 'This erases THIS BROWSER only. Your published library is not touched and nothing is '
+          + 'published — but saving will stop until you sign in again. Erase everything here?'
+        : 'There is no server copy and no undo. Export first if there is any chance you want this back. Erase everything?')) return;
       await BT.repo.wipe();
       /* The undo ledger describes records that no longer exist. */
       lastRun = null; ask = null;
@@ -1541,28 +1822,28 @@ BT.viewSettings = (function () {
     }
   }
 
-  /* ══ M5 SEAM — encrypted GitHub sync ══════════════════════════════════════
-     Deliberately absent, not forgotten. When 15-crypto.js and 16-cloud.js land,
-     a "Sync across machines" section belongs between the key section and the
-     region section, and it needs: repository (owner/name), a fine-grained
-     GitHub token scoped to that one repository with Contents: read and write,
-     status and last-published lines, a change-passphrase form, and a sign-out.
-
-     The two things worth writing down now, because both are easy to get wrong
-     the first time:
+  /* ══ M5 — the sync seam, filled ═══════════════════════════════════════════
+     What used to be a note here is now syncSection() and its wiring above.
+     Two things the note asked for are worth restating as shipped facts:
 
        · The passphrase is never stored anywhere, not even as a hash. There is
          nothing in the repository that could be cracked, and no reset. The
          GitHub token lives INSIDE the encrypted file so it is entered once
          rather than once per device.
        · That token can write to the repository that serves this page, so
-         anyone holding it could commit code into the site. Scope it to the one
-         repository, give it an expiry, and remove it from machines you do not
-         control.
+         anyone holding it could commit code into the site. The warnbox in the
+         panel says so; scope it to the one repository, give it an expiry, and
+         remove it from machines you do not control.
 
-     Nothing here is stubbed out in the meantime. A sync panel that renders but
-     does not publish is indistinguishable from one that is quietly failing,
-     and the footer already says "Saved …" only when signed in. */
+     And one the note did not anticipate, which turned out to be the load-
+     bearing decision: THE PANEL RENDERS FOR EVERYONE, BUT SYNC STARTS FOR
+     NOBODY. Being served from github.io is enough for BT.cloud to infer a
+     repository, so "a repository exists" cannot be the trigger for anything —
+     a reader who has never wanted sync would otherwise meet a passphrase
+     screen on first load. The trigger is BT.cloud.enrolled(), which only this
+     screen and the gate can set, and 90-boot.js checks it before the gate is
+     ever constructed. Nothing here starts publishing until somebody presses
+     "Set up sync". */
 
   return { render };
 })();

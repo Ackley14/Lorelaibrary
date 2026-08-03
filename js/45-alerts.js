@@ -675,5 +675,19 @@ BT.alerts = (function () {
     checkItem, scanStored, checkFollow,
     sweep, cancel, isSweeping,
     SEVERITY,
+    /* EXPORTED SO THERE IS ONE CONTAINMENT RULE, not two — the same argument
+       38-normalize.js makes for exporting its precision ladder.
+
+       48-sync.js records date DRIFT on the item (`release.history`, which is
+       what BT.ui.driftBadge and the inspector's "Date history" block draw). It
+       has to answer the identical question this file answers above: did the
+       date move, or did we merely learn a finer version of the date we already
+       had? A year-precision key anchors to January 1, so the moment a hydrate
+       turns "1991" into "September 1991" the sort key jumps 243 days without
+       anything about the book changing. A private copy of this test in the
+       sweeper would be free to drift out of step with the one the feed uses,
+       and then the badge and the activity row would disagree about the same
+       event — with the badge, being wordless, having no way to explain itself. */
+    withinWindow,
   };
 })();

@@ -4,14 +4,22 @@
    M3 note — /scan now has a real view (BT.viewScan, in 75-view-scan.js) and
    the mechanism below did what it was built to do a second time: the route
    line did not have to change at all. Every route is still registered exactly
-   once, here, and the ones whose views are not written yet (/up, /unlock) go
-   on rendering a short placeholder naming the milestone they arrive in.
+   once, here, and the one whose view is not written yet (/up) goes on
+   rendering a short placeholder naming the milestone it arrives in.
 
    M5 also puts the service worker registration in this file — see
    registerServiceWorker() below. It is boot's business rather than the
    scanner's or the router's, but index.html is what CALLS it, because offline
-   access must not end up behind the encryption gate that lands between start()
-   and startApp().
+   access must not end up behind the encryption gate that now lands between
+   start() and startApp().
+
+   M5 note — the two seams this file has been holding open since M1 are filled:
+   schedulePush() publishes the encrypted library, and start() opens the gate.
+   Both are written so that a library with no sync configured takes the exact
+   same path through this file that it took before either existed — see the
+   comment above each. That is not politeness; it is the requirement. Sync is
+   something a reader opts into, and everything it touches has to be a no-op
+   until they do.
 
    Resolution happens at NAVIGATION time rather than at registration, which is
    why adding a view is a one-word change: the day the module lands on the page
@@ -163,9 +171,20 @@ BT.boot = (function () {
       ['System', 'Settings'], 'Settings', 'M5',
       'Recalculate genres after a rules change, add genres of your own, an optional Google Books key, region and language, diagnostics, and Export / Import. Part of')));
 
+    /* Real as of M5, and the name was READ OFF THE FILE rather than taken from
+       the plan: `71-view-unlock.js` closes with `BT.viewUnlock = {` and a
+       `render`. Seventy-ONE, because 70 is the follows logic module — the file
+       carries the same note, and index.html has promised this number since M4.
+
+       The stub behind it is no longer a promise; it is the answer to "that view
+       file failed to parse". Which is a case worth thinking about here more
+       than anywhere else: if 71 is broken, `canGate` in start() is false, the
+       gate never opens, and the app runs local-first with this sentence on
+       #/unlock. That is the right degradation — a sync layer that cannot draw
+       its own screen must not be able to hold the library shut. */
     BT.router.on('/unlock', viewOr('viewUnlock', stub(
       ['System', 'Sync'], 'Sign in', 'M5',
-      'A passphrase encrypts your library in this browser and publishes it to a GitHub repository you own, so another device can pick it up. Arrives in')));
+      'A passphrase encrypts your library in this browser and publishes it to a GitHub repository you own, so another device can pick it up. Part of')));
 
     /* An item is not a page. It selects into the inspector and leaves the list
        underneath it intact — the route survives only so that links still
@@ -304,25 +323,98 @@ BT.boot = (function () {
     });
   }
 
-  /* ── Encrypted publish · M5 SEAM ──────────────────────────────────────
-     Deliberately inert until M5. The shape it will take is settled and worth
-     writing down now, because half of it is a rate-limit argument that is easy
-     to get wrong twice:
+  /* ── Encrypted publish · M5 ───────────────────────────────────────────
+     Saves must feel immediate, but every one is a git commit, and GitHub's
+     binding limit here is the SECONDARY one — 80 content-generating requests a
+     minute, not the 5,000/hour primary. So: fire quickly after a change
+     (SAVE_DELAY), but never closer together than MIN_GAP. A burst of edits
+     coalesces into one commit; a single edit lands in about a second.
 
-       Saves must feel immediate, but every one is a git commit, and GitHub's
-       binding limit here is the SECONDARY one — 80 content-generating requests
-       a minute, not the 5,000/hour primary. So: fire quickly after a change
-       (about 900ms), but never closer together than a 4s floor. A burst of
-       edits coalesces into one commit; a single edit lands in about a second.
-       A pagehide listener flushes anything still pending, or closing the tab
-       straight after an edit loses it.
+     Rating a book, ticking a status and typing a page number are three writes
+     in five seconds on one interaction, and the reading-progress control
+     commits on every blur — so this debounce is not a nicety. Without the
+     floor, a session of shelving a bag of charity-shop paperbacks would post a
+     commit per book and be throttled halfway through.
 
-     Two call sites re-attach in M5 and nowhere else: the repo subscription in
-     startApp(), and the pagehide flush. Until then this is exported as a no-op
-     so that any caller written against it is already correct — a half-wired
-     save path that sometimes publishes is far worse than one that never
-     does. */
-  function schedulePush() { /* M5 */ }
+     THE FIRST LINE IS THE WHOLE "SYNC IS ADDITIVE" GUARANTEE. Not unlocked, no
+     write token, no repository, or the cloud module simply absent from the
+     page: return, silently, having done nothing. Every mutation in the app
+     calls this, so anything else here would turn a local-first library into
+     one that logs errors on every edit. */
+  const SAVE_DELAY = 900;
+  const MIN_GAP = 4000;
+  let lastPushAt = 0;
+  let pendingPush = false;
+  let pushTimer = null;
+
+  function canPublish() {
+    return !!(BT.cloud && BT.crypto && BT.crypto.isUnlocked() &&
+              BT.cloud.hasWriteToken() && BT.cloud.configured());
+  }
+
+  function schedulePush() {
+    if (!canPublish()) return;
+    pendingPush = true;
+    clearTimeout(pushTimer);
+    const since = Date.now() - lastPushAt;
+    const wait = Math.max(SAVE_DELAY, MIN_GAP - since);
+    pushTimer = setTimeout(async () => {
+      lastPushAt = Date.now();
+      refreshFooter('saving');
+      try {
+        await BT.cloud.publish();
+        refreshFooter();
+      } catch (e) {
+        refreshFooter('error');
+        /* THREE FAILURES, AND TWO OF THEM NEED A DIFFERENT SCREEN. Everything
+           that reaches here stops changes being saved, but only a passing
+           network failure fixes itself, so the other two get an action rather
+           than a sentence the reader has to decode:
+
+             token rejected     expired or revoked. 16-cloud maps GitHub's 401
+                                and 403 to plain English before it gets here.
+                                → the token screen.
+             re-encrypted       somebody changed the passphrase on another
+                                device, so this one holds a key that no longer
+                                opens the file. 16-cloud refuses to publish over
+                                it rather than silently reverting the change.
+                                → drop the stale key and sign in again, which
+                                  picks up the NEW salt from the new envelope.
+             anything else      usually a network that will be back. Said once,
+                                in the banner, not repeated per edit. */
+        const msg = (e && e.message) || '';
+        const dead = /token|401|rejected|expired|Bad credentials/i.test(msg);
+        const rekeyed = /re-encrypted/i.test(msg);
+        BT.ui.banner(
+          rekeyed
+            ? 'The passphrase was changed on another device, so this one can no longer save. Sign in again with the new one — nothing has been lost.'
+          : dead
+            ? 'Your GitHub token was rejected, so changes are no longer being saved. Enter a new one to start saving again.'
+            : 'Could not save to your repository: ' + msg,
+          rekeyed ? { actionLabel: 'Sign in', onAction: () => { BT.crypto.lock(); BT.gate.open(); } }
+          : dead ? { actionLabel: 'Fix it', onAction: () => BT.gate.open({ mode: 'token' }) }
+          : {});
+      } finally {
+        pendingPush = false;
+      }
+    }, wait);
+  }
+
+  /* Closing the tab straight after an edit would otherwise lose it: the timer
+     above is still counting down when the page goes. `pagehide` rather than
+     `beforeunload` because it is the one that fires on iOS, which is where a
+     PWA is most likely to be dismissed mid-edit. The request is fire-and-
+     forget — there is no time to await it and nothing useful to do with the
+     answer — and a rejection is swallowed rather than left to surface as an
+     unhandled rejection in a page that is already gone. */
+  function flushOnExit() {
+    window.addEventListener('pagehide', () => {
+      if (!pendingPush || !canPublish()) return;
+      clearTimeout(pushTimer);
+      pendingPush = false;
+      BT.cloud.publish().catch(() => {});
+    });
+  }
 
   /* ══ The service worker, and the update it is not allowed to force ═══════
      sw.js precaches the app shell so that an installed BookTrak opens in a
@@ -500,11 +592,64 @@ BT.boot = (function () {
        to drop a stale row is before anything has read it. */
     BT.repo.cachePurge().then(n => n && console.info(`[boot] purged ${n} expired cache rows`));
 
-    /* M5 SEAM — the gate opens here. It will resume a remembered device key,
-       pull the encrypted library down, and only then call startApp(); if there
-       is no repository configured the app stays local and starts as it does
-       now. Nothing about the call below changes. */
-    await startApp();
+    /* ── M5 · the gate ─────────────────────────────────────────────────
+       Everything below decides ONE thing: does a passphrase screen come
+       between storage being ready and the app being drawn?
+
+       THE DEFAULT ANSWER IS NO, AND THAT IS THE POINT. BookTrak is a
+       local-first library that offers sync; it is not an app with accounts.
+       The test is BT.cloud.enrolled() — a local, synchronous "has anybody on
+       THIS device ever chosen to sync?" — and deliberately NOT
+       BT.cloud.configured(), which is true for every visitor to the published
+       site because owner/repo can always be inferred from a github.io URL.
+       Gating on `configured` would put a passphrase prompt in front of a
+       stranger who followed a link, on an app that needs no signup at all.
+
+       The whole block is also feature-detected. If 15/16/71 are missing or
+       failed to parse, `BT.cloud` is undefined and this falls straight through
+       to startApp() — the same shape 50-ui-core and 39-scan use around
+       BT.sync.retier, and for the same reason: a missing sync layer means
+       "nothing to sync", never a dead app. */
+    const canGate = !!(BT.cloud && BT.crypto && BT.gate);
+    if (!canGate || !BT.cloud.enrolled()) { await startApp(); return; }
+
+    /* A device that chose "stay signed in" holds the derived key, so it can go
+       straight to the current library without asking again. */
+    let resumed = false;
+    let unreachable = false;
+    if (BT.crypto.available() && BT.crypto.isRemembered()) {
+      try {
+        if (await BT.crypto.restoreFromDevice()) {
+          try {
+            await BT.cloud.syncDown();
+            resumed = true;
+          } catch (e) {
+            /* THE KEY IS IN HAND AND THE NETWORK IS NOT. Start anyway, on the
+               copy this device already holds — which is the last state that
+               was synced down, not a fragment. Dropping to the gate here would
+               be the worst of both: it cannot reach the file either, so it
+               would have nothing to sign in to, and the reader would be locked
+               out of their own books by an aeroplane. The banner below says
+               what happened; the next successful publish merges. */
+            console.warn('[boot] library unreachable, using the local copy', e && e.message);
+            resumed = true;
+            unreachable = true;
+          }
+        }
+      } catch (e) {
+        console.warn('[boot] could not resume session', e);
+        BT.crypto.lock();
+      }
+    }
+
+    if (resumed) {
+      await startApp();
+      if (unreachable) {
+        BT.ui.banner('Could not reach your library just now, so this is the copy stored on this device. Changes will be saved and merged as soon as it is reachable again.');
+      }
+      return;
+    }
+    await BT.gate.open();
   }
 
   /* Everything from here needs a populated store. */
@@ -519,9 +664,24 @@ BT.boot = (function () {
     await BT.tree.refresh();
 
     BT.repo.subscribe((ev, detail) => {
-      /* M5 SEAM — item:put / item:delete / follow:change / feed:change call
-         schedulePush() from here. Until the cloud is wired there is nothing to
-         push, and the tree already refreshes itself on those same events. */
+      /* M5 — the ONLY place a save is triggered. Four events, and the list is
+         exactly the set that changes something the repository holds:
+         `item:put` and `item:delete` cover the library, `follow:change` covers
+         who you follow, and `feed:change` covers activity being read or
+         coalesced (which matters, because "read anywhere is read everywhere"
+         is only true if the read travels).
+
+         Deliberately NOT here: `import:done`, `wipe` and `sync:merged`. Import
+         and merge are followed by an explicit publish on their own path, and
+         republishing from the event as well would race the write that raised
+         it. `wipe` is an erase of THIS BROWSER, and turning that into a commit
+         would make "clear this device" quietly mean "delete the library
+         everywhere" — see the Settings copy, which promises it does not.
+
+         schedulePush is a no-op whenever sync is not set up, so this line
+         costs a function call on a local-only library and nothing else. */
+      if (ev === 'item:put' || ev === 'item:delete' ||
+          ev === 'follow:change' || ev === 'feed:change') schedulePush();
 
       /* A merge happened during a save: say so plainly and refresh what is on
          screen, because the library just changed underneath the reader. */
@@ -545,6 +705,7 @@ BT.boot = (function () {
     refreshFooter();
     noteOriginOnce();
     scheduleSweeps();
+    flushOnExit();
 
     /* The origin is on this line on purpose. BookTrak ships to
        ackley14.github.io/Lorelaibrary and MovieTrak to /entertainmentwatch —

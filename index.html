@@ -216,8 +216,19 @@
 <script src="js/05-net.js"></script>
 <script src="js/10-db.js"></script>
 <script src="js/12-repo.js"></script>
-<!-- Later milestones slot in here, still in numeric order: 15-crypto and
-     16-cloud (encrypted passphrase sync). -->
+<!-- Encrypted passphrase sync, in two halves and in this order because the
+     second uses the first: 15-crypto owns the key derivation and the envelope,
+     16-cloud owns the GitHub file and the merge. Both sit directly under
+     12-repo because BT.cloud publishes through BT.repo.exportAll/importAll and
+     never serializes the stores itself.
+
+     They load UNCONDITIONALLY and start nothing. A browser that has never
+     signed in never derives a key, never fetches the library file and never
+     sees a passphrase screen — 90-boot.js checks BT.cloud.enrolled(), which is
+     a local synchronous flag, before the gate exists. Loading them anyway is
+     what lets Settings offer the panel and #/unlock work on demand. -->
+<script src="js/15-crypto.js"></script>
+<script src="js/16-cloud.js"></script>
 <script src="js/20-openlibrary.js"></script>
 <!-- Optional enrichment behind a user-supplied key, never a fallback. It is
      loaded unconditionally and does nothing at all until a key is pasted into
@@ -253,8 +264,20 @@
      while writing an item — the cold baseline that stops the first sighting of
      a follow emitting 190 alerts is only correct if it can be taken at the
      moment the item lands, not on the next sweep.
-     Still to come on this line: 40-recommend / 48-sync. -->
+     Still to come on this line: 40-recommend. -->
 <script src="js/45-alerts.js"></script>
+<!-- The item-refresh scheduler, and NOT cloud sync despite the name — that is
+     15/16 above. It carries MovieTrak's filename because two files already call
+     `BT.sync.retier` by name (50-ui-core.js and 39-scan.js) and 90-boot.js
+     calls `BT.sync.sweep`; renaming it would mean renaming a seam three files
+     were written against.
+
+     BELOW 45-alerts, because the sweep hands every refreshed book to
+     BT.alerts.checkItem and asks BT.alerts.withinWindow whether a moved sort
+     key is real movement or only a precision gain. Both are resolved inside
+     function bodies so nothing here would break if it moved — but load order IS
+     the dependency graph in this file, and it should tell the truth. -->
+<script src="js/48-sync.js"></script>
 <script src="js/49-router.js"></script>
 <script src="js/50-ui-core.js"></script>
 <script src="js/55-tree.js"></script>
@@ -288,13 +311,18 @@
      than at parse time, so nothing here would break if it moved — but load
      order IS the dependency graph in this file, and it should tell the truth. -->
 <script src="js/69-view-settings.js"></script>
+<!-- The gate — 71, not 70, exactly as this file has said since M4: 70 is taken
+     by the follows logic module loaded above, and renumbering a shipped file is
+     worse than one deliberate offset. It is a view like the others and is
+     resolved by name at navigation time (BT.viewUnlock), but it is ALSO called
+     directly by 90-boot.js before the app starts — which is the one reason its
+     position here is load-bearing rather than tidy. -->
+<script src="js/71-view-unlock.js"></script>
 <!-- The scan screen: the scan log, manual ISBN entry, and the button that
      opens the overlay above. Numbered 75 rather than 63 because it is a
      destination of its own rather than another way of listing the library. -->
 <script src="js/75-view-scan.js"></script>
-<!-- …and the remaining view files after these, in numeric order: 64-view-up,
-     71-view-unlock (71, not 70 — 70 is taken by the follows logic module
-     loaded above). -->
+<!-- …and the remaining view file after these, in numeric order: 64-view-up. -->
 <script src="js/90-boot.js"></script>
 
 <!-- ── The service worker ──────────────────────────────────────────────────
