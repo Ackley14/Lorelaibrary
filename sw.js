@@ -61,8 +61,19 @@
    installed Firefox copy is exactly the copy that cannot navigate to anything
    — including any screen that might have told it to update — so without this
    line the browser worst affected is the one that would never receive the
-   fix. */
-const VERSION = 'v4';
+   fix.
+   v5 — first-load weight on a phone. No file joined or left the SHELL list
+   except the wasm, which moved OUT of the atomic precache and onto the two
+   lazy paths below; and install() now revalidates rather than re-downloading.
+   Measured on Slow 4G with a 4x CPU throttle, cold: a first visit cost 84
+   requests and 1467 KB, of which 489 KB was a second copy of files the page
+   had just fetched and 443 KB was a decoder most first visits never reach.
+   Both are gone; the visit is 83 requests and 538 KB, a 63% cut. Nothing about
+   what renders changed — first paint and the tree are within noise of where
+   they were, because none of this was ever on the critical path; it was the
+   reader's data plan. Bumping VERSION is what makes it reach an installed
+   copy — obligation 2. */
+const VERSION = 'v5';
 
 /* ── The prefix is load-bearing ───────────────────────────────────────────
    Cache Storage is scoped to the ORIGIN, not to the worker's scope, and
@@ -109,21 +120,11 @@ const SHELL = [
      path exists. */
   'js/vendor/barcode-detector-3.2.1.min.js',
 
-  /* THE ONLY ENTRY WITHOUT A TAG IN index.html, and it is not optional.
-     BarcodeDetector does not exist on Chrome or Edge for Windows or Linux
-     desktop, or in Safari — so on most machines this megabyte of wasm IS the
-     scanner, not a fallback for it. 58-scanner.js fetches it lazily, by URL,
-     the first time a camera opens (js/vendor/zxing_reader-3.1.1.wasm, resolved
-     against document.baseURI). Leave it out and the installed app still opens
-     offline and still shows the scan screen — and then fails at the one moment
-     a phone-first, install-to-scan app exists for. It is worth the megabyte;
-     it is fetched once, at install, and never again.
+  /* DELIBERATELY ABSENT: 'js/vendor/zxing_reader-3.1.1.wasm'. See WASM_PATH
+     below — it is still cached, still works offline, just not on the first
+     visit. Do not add it back here without reading that comment.
 
-     The version is in the filename on purpose: upgrading the decoder is a
-     visible diff here as well as in index.html. */
-  'js/vendor/zxing_reader-3.1.1.wasm',
-
-  /* BookTrak's own scripts, in index.html's order — which is the dependency
+     BookTrak's own scripts, in index.html's order — which is the dependency
      graph, there being no modules to express it. Two of them are out of
      numeric sequence (70-follows.js above 45-alerts.js) and that is deliberate
      there; this list simply follows. */
@@ -191,6 +192,39 @@ const SHELL = [
 const SHELL_URLS = new Set(SHELL.map(p => new URL(p, self.location.href).pathname));
 const SHELL_DOC = new URL('./', self.location.href).pathname;
 
+/* ── The decoder wasm, cached but NOT on the first visit ──────────────────
+   A megabyte on disk, 443 KB down the wire, and it used to be the largest
+   single thing a first-time visitor paid for. Measured cold on Slow 4G with a
+   4x CPU throttle: the first visit cost 1467 KB, and 443 KB of it was this
+   file — fetched by the install below, seconds after the page had finished
+   rendering, for a camera the visitor had not opened and might never open.
+
+   It cannot simply be dropped: BarcodeDetector does not exist on Chrome or
+   Edge for Windows or Linux desktop, or in Safari, so on most machines this IS
+   the scanner rather than a fallback for it, and an installed app that cannot
+   scan offline has lost the thing it was installed for. So it keeps both
+   properties by being fetched on two lazy paths instead of one eager one:
+
+     1 · ON FIRST USE. The fetch handler answers this URL cache-first and
+         stores what it gets, so the first scan on a working connection warms
+         the cache as a side effect. 58-scanner.js is untouched and does not
+         know this happens — it asks for the file by URL exactly as before.
+     2 · ON THE SECOND VISIT, in the background. sw.js never calls
+         clients.claim(), so the FIRST visit's navigation is never seen by the
+         fetch handler at all — which makes "a navigation reached this worker"
+         a free and exact signal that the reader has come back. By then the
+         shell costs nothing to serve and the link is otherwise idle, so the
+         download has it to itself.
+
+   What is given up: someone who opens BookTrak exactly once, goes offline
+   forever, and then opens the camera for the first time gets the manual-ISBN
+   path instead of a decoder. Everyone who opens the app twice, or scans once
+   with a connection, is where they were before — and every first visit is
+   443 KB lighter. */
+const WASM_PATH = 'js/vendor/zxing_reader-3.1.1.wasm';
+const WASM_URL = new URL(WASM_PATH, self.location.href).href;
+const WASM_PATHNAME = new URL(WASM_URL).pathname;
+
 /* 404.html is deliberately absent, and the navigation branch below covers its
    job instead — see the redirect there for why serving the shell at the
    mistyped path is not the same thing. */
@@ -208,17 +242,31 @@ const SHELL_DOC = new URL('./', self.location.href).pathname;
    catch re-probes them individually and names it. That is the difference
    between a five-second fix and an afternoon.
 
-   `cache: 'reload'` bypasses the browser's HTTP cache for these fetches. Skip
-   it and a deploy can precache the PREVIOUS version of a script straight out
-   of the disk cache, sealing yesterday's bug into a versioned cache that by
-   design will never revalidate — a bug that survives every reload and clears
-   only when the user wipes site data. */
+   `cache: 'no-cache'` — REVALIDATE, and deliberately not `'reload'`.
+
+   The thing being defended against is real and unchanged: a deploy must never
+   precache the PREVIOUS version of a script straight out of the disk cache,
+   sealing yesterday's bug into a versioned cache that by design will never
+   revalidate — a bug that survives every reload and clears only when the user
+   wipes site data. `'reload'` prevented that by refusing to look at the disk
+   cache at all. `'no-cache'` prevents it by refusing to USE the disk cache
+   without asking the server first: every entry goes out as a conditional
+   request, and a 304 is the server's word that the bytes already on disk are
+   the bytes it would have sent. Nothing stale can be stored either way.
+
+   The difference is what it costs. This install runs seconds after the page
+   has finished fetching thirty-seven of these forty-five entries, so under
+   `'reload'` all thirty-seven were downloaded a SECOND time, in full, on a
+   phone, on the same connection — 489 KB of the 1467 KB a first visit cost,
+   measured cold on Slow 4G. Under `'no-cache'` they come back 304 with an
+   empty body (verified against GitHub Pages itself, which honours
+   If-None-Match). Same guarantee, half the visit. */
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
     let requests;
     try {
-      requests = SHELL.map(p => new Request(p, { cache: 'reload' }));
+      requests = SHELL.map(p => new Request(p, { cache: 'no-cache' }));
     } catch (_) {
       /* Older WebKit rejects the cache option in the Request constructor.
          Precaching a possibly-stale copy beats not installing at all. */
@@ -276,6 +324,39 @@ async function fromShell(request) {
   return cache.match(request, { ignoreSearch: true });
 }
 
+/* Path 2 of the two described at WASM_PATH: the background top-up, called from
+   the navigation branch — which only ever runs on a repeat visit.
+
+   `saveData` is honoured because it means the reader has told their browser,
+   in settings, not to spend data they did not ask to spend, and a megabyte
+   fetched behind their back for a camera they have not opened is exactly what
+   that switch is for. Skipping it is not a failure: path 1 still warms the
+   cache the first time they actually scan. Same for a 2g link, where this
+   download would be minutes of radio.
+
+   Every failure here is swallowed on purpose. Offline, blocked, out of quota —
+   there is nothing to report and nothing to do, because the next navigation
+   simply tries again and the scanner works regardless as long as there is a
+   connection at the moment it opens. */
+async function topUpWasm() {
+  try {
+    const cache = await caches.open(CACHE);
+    if (await cache.match(WASM_URL)) return;
+    const conn = self.navigator && self.navigator.connection;
+    if (conn) {
+      if (conn.saveData) return;
+      if (conn.effectiveType === 'slow-2g' || conn.effectiveType === '2g') return;
+    }
+    let req;
+    try {
+      req = new Request(WASM_URL, { cache: 'no-cache' });
+    } catch (_) {
+      req = WASM_URL;                      /* older WebKit; see install() */
+    }
+    await cache.add(req);
+  } catch (_) { /* try again next visit */ }
+}
+
 /* ── Fetch ────────────────────────────────────────────────────────────────
    Three decisions, in order, and the default is always "do nothing":
 
@@ -289,6 +370,14 @@ async function fromShell(request) {
                                  a hash router, so every screen is this file;
                                  serving it from disk is what makes the
                                  installed app open without a network.
+     the decoder wasm          → cache first, and STORED on the way past if it
+                                 was not there. The one runtime-cached file in
+                                 this worker, and it is still a shell file: it
+                                 is ours, it is static, its version is in its
+                                 filename, and it is deleted with the rest of
+                                 the shell when VERSION changes. It is not, and
+                                 must never become, a precedent for caching a
+                                 response from openlibrary.org.
      a precached shell file    → cache first.
      anything else same-origin → not answered at all. Only this app's scope
                                  reaches here at all — MovieTrak's pages, on
@@ -309,6 +398,13 @@ self.addEventListener('fetch', event => {
   if (url.origin !== self.location.origin) return;
 
   if (req.mode === 'navigate') {
+    /* Path 2 at WASM_PATH. Reaching this line at all means the reader has come
+       back — a first visit's navigation is never handled by this worker,
+       because sw.js does not claim clients. waitUntil, not a bare call: the
+       response below is served from disk in milliseconds and the worker would
+       otherwise be free to be killed halfway through the download. */
+    event.waitUntil(topUpWasm());
+
     event.respondWith((async () => {
       /* The exact URL first: './' and 'index.html' are both precached, so a
          launch from the home screen and a typed link each get their own entry
@@ -341,6 +437,31 @@ self.addEventListener('fetch', event => {
          so the network is the only honest answer — and redirecting here
          instead would be an infinite loop through this same branch. */
       return fetch(req);
+    })());
+    return;
+  }
+
+  /* Path 1 at WASM_PATH: the first scan on a working connection warms the
+     cache as a side effect. It sits ABOVE the SHELL_URLS test because the wasm
+     is deliberately not in that list any more, and the test below would
+     otherwise hand it back to the network every single time.
+
+     The put is not awaited before the response is returned — the scanner is
+     waiting on these bytes and a camera is already open — but it IS handed to
+     waitUntil, or the worker could be killed with a megabyte half-written. */
+  if (url.pathname === WASM_PATHNAME) {
+    event.respondWith((async () => {
+      const hit = await fromShell(req);
+      if (hit) return hit;
+      const res = await fetch(req);
+      /* Only a real 200. An opaque or errored response cached here would be
+         served to the decoder forever, and it fails as a corrupt module rather
+         than as a network error. */
+      if (res && res.ok && res.status === 200) {
+        const copy = res.clone();
+        event.waitUntil(caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {}));
+      }
+      return res;
     })());
     return;
   }

@@ -221,7 +221,10 @@ and every subsequent push redeploys.
   bounded number of requests is spent per sweep.
 - **Installable, and works offline.** The service worker precaches the app
   shell; it never caches an API response, because the network layer already owns
-  freshness.
+  freshness. The barcode decoder's megabyte of wasm is the one thing left out of
+  that first download — it arrives in the background the second time you open
+  BookTrak, or the first time you actually scan, whichever comes first, so a
+  first visit on mobile data does not pay for a camera nobody has opened.
 
 ### Settings
 

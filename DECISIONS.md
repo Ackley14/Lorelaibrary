@@ -187,6 +187,12 @@ stray `mt.` prefix does not fail loudly — it reaches into the other app's data
 | `/search/authors.json` | Returns a **bare OLID**; every other endpoint returns a path |
 | `BarcodeDetector` on Chrome/Edge, Windows desktop | Does not exist. The vendored ZXing wasm is the primary decoder, not a fallback |
 | The `barcode-detector` ponyfill | Contains a hardcoded `fastly.jsdelivr.net` wasm URL; must be overridden via `locateFile` against `document.baseURI` |
+| First load on a phone (Slow 4G, 4x CPU, 390x844, cold, **live** GitHub Pages) | First paint **3.6 s**, tree **3.8 s**, 36 requests, **494 KB** on the wire. A local HTTP/2 harness reproduced this within 4%; an HTTP/1.1 one did not, and flattered first paint by two seconds |
+| What blocks that first paint | The stylesheets — and `css/04-views.css` lands **last of all 36 responses** (3.56 s), because H2 shares the throttled pipe round-robin between 5 stylesheets and 448 KB of script. Serve the CSS alone and first paint is **1.47 s** |
+| `defer` / `fetchpriority="low"` on the 31 script tags | **No effect whatsoever** (first paint 3472 ms vs 3476 ms). Neither Fastly nor any H2 server here honours stream priority, so a hint cannot reorder what a round-robin is already sharing. The only lever is not *issuing* the requests |
+| What a first visit actually cost | **84 requests, 1458 KB** — not 494 KB. `sw.js` registers at end of parse and its install downloaded every shell file a **second** time (`cache:'reload'`, 503 KB) plus the **450 KB** decoder wasm, none of it visible in the page's own resource timing |
+| `cache:'no-cache'` in place of `'reload'` | 37 of those files come back **304, zero bytes**, from GitHub Pages itself (verified with `If-None-Match` against production). Same staleness guarantee, 503 KB cheaper |
+| A repeat visit, once the worker is installed | First paint **96 ms**, tree **~150 ms**, **zero** network requests. The precached shell was already doing its job and needed no change |
 
 ## Open
 

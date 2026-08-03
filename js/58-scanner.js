@@ -574,11 +574,24 @@ BT.scanner = (function () {
      right clock: it does not run while the tab is hidden, it does not run
      while the stream is stalled, and it never decodes the same frame twice.
 
-     Firefox does not implement it at all, so requestAnimationFrame is the
-     fallback — same shape, one frame of extra latency, and the DECODE_MS
+     WEBKIT is the engine that does not implement it, so requestAnimationFrame
+     is the fallback — same shape, one frame of extra latency, and the DECODE_MS
      throttle below makes the difference invisible. Feature-detected on the
      ELEMENT rather than on HTMLVideoElement.prototype, because that is the
-     object the call is made against. */
+     object the call is made against.
+
+     This comment used to name Firefox, and naming the wrong engine here is not
+     a typo — it is the instruction for whoever tests this next, and it would
+     have sent them to the one browser where the fallback CANNOT be observed.
+     MEASURED across all three engines rather than assumed: chromium 147 and
+     firefox 148 both expose requestVideoFrameCallback (Firefox has shipped it
+     since 132, so the branch below has not been the Firefox path for some
+     time); webkit 26.4 exposes neither the element method nor the prototype
+     one, so Safari — and therefore the phone this app is scanned on — is the
+     engine actually running the rAF line. Forcing the fallback by hiding rVFC
+     from the prototype decoded a live EAN-13 off a synthetic camera in 202ms
+     (chromium) and 207ms (firefox), against 200ms and 205ms on the rVFC path:
+     the fallback engages and is not silently doing nothing. */
   function schedule() {
     if (!opened || !video) return;
     if (typeof video.requestVideoFrameCallback === 'function') {
