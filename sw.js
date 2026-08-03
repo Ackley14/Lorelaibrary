@@ -53,8 +53,16 @@
    61-view-search, 62-view-list, 66-view-alerts, 67-view-people, 68-view-stats,
    71-view-unlock, 90-boot, plus three stylesheets). Without this bump every
    installed copy would go on serving the shell whose scan-add deletes the
-   wrong book — obligation 2 exactly: the fix is deployed and nobody gets it. */
-const VERSION = 'v3';
+   wrong book — obligation 2 exactly: the fix is deployed and nobody gets it.
+   v4 — the cross-browser boot fix. No file joined or left the shell; two
+   changed (index.html and 90-boot). Obligation 2 is the whole point of this
+   bump: the shell being replaced is the one where Firefox parks forever on
+   navigator.storage.persist() and never draws a tree, a router or a view. An
+   installed Firefox copy is exactly the copy that cannot navigate to anything
+   — including any screen that might have told it to update — so without this
+   line the browser worst affected is the one that would never receive the
+   fix. */
+const VERSION = 'v4';
 
 /* ── The prefix is load-bearing ───────────────────────────────────────────
    Cache Storage is scoped to the ORIGIN, not to the worker's scope, and

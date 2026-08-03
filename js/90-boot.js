@@ -231,10 +231,49 @@ BT.boot = (function () {
     } catch (_) {}
   }
 
+  /* Ask the browser not to evict the library. Best-effort hygiene: the answer
+     changes nothing this app then does, so NOTHING may wait on it.
+
+     THE BARE `await` THIS REPLACES COST FIREFOX THE ENTIRE APP.
+     navigator.storage.persist EXISTS in Firefox, so the feature detect passed
+     — but Firefox answers it out of the persistent-storage permission prompt,
+     and until that prompt is answered the promise is not rejected, it is
+     PENDING, indefinitely. A try/catch cannot see a promise that never settles,
+     so nothing threw, nothing rejected, and nothing logged: start() simply
+     parked on that line, one statement before the round-trip probe and three
+     before startApp(). The shell drew, `window.BT` was fully built, and there
+     was no tree, no router, no view and not one line in the console — the same
+     bricked app the try/catch around BT.tree.refresh() was written to prevent,
+     reached one step earlier and completely silently. Measured, not assumed:
+     stubbing persist() to resolve and changing nothing else took Firefox from
+     0 tree rows to the same 32 Chromium draws.
+
+     So: fire it, never await it, and say so out loud if it does not answer.
+     Absent altogether on WebKit — Safari exposes no navigator.storage at all
+     (checked in all three engines, not assumed) — which the guard covers. */
+  function requestPersistence() {
+    const store = navigator.storage;
+    if (!store || typeof store.persist !== 'function') return;
+    /* The point of this timer is the next engine, not this one: a persist()
+       that never answers now announces itself in one console line instead of
+       costing another bisect through the boot sequence. */
+    const nag = setTimeout(() => {
+      console.warn('[boot] navigator.storage.persist() has not answered after 5s — this browser is '
+        + 'probably holding it behind a permission prompt. Boot did not wait for it, by design.');
+    }, 5000);
+    /* Promise.resolve().then(...) so a synchronous throw from persist() lands
+       in the same rejection path as an asynchronous one. */
+    Promise.resolve().then(() => store.persist()).then(ok => {
+      clearTimeout(nag);
+      if (!ok) console.info('[boot] storage is not persistent here; the browser may evict the library under pressure');
+    }, e => {
+      clearTimeout(nag);
+      console.warn('[boot] could not ask for persistent storage', e);
+    });
+  }
+
   async function probeStorage() {
-    if (navigator.storage && navigator.storage.persist) {
-      try { await navigator.storage.persist(); } catch (_) {}
-    }
+    requestPersistence();          // deliberately not awaited — see above
     try {
       await BT.repo.metaSet('boot.probe', Date.now());
       if (!(await BT.repo.metaGet('boot.probe'))) throw new Error('write did not round-trip');
@@ -574,7 +613,40 @@ BT.boot = (function () {
      chosen to work offline). Splitting it this way means no view ever renders
      against a half-populated store — which is why the seam exists from M1,
      even though today the two halves run back to back. */
+  /* ── The boot watchdog ────────────────────────────────────────────────
+     The Firefox persist() hang was invisible for exactly one reason: a boot
+     that has stopped half way looks identical to a boot that is still going.
+     Nothing in start() said how far it had got, so the only way to find the
+     parked await was to bisect the sequence by hand against three browsers.
+
+     This is the line that would have found it on the first reload. Each stage
+     stamps its name as it completes; if startApp() has still not run some
+     seconds later, the stamp names the last stage that finished — and whatever
+     comes after it in the source is the thing that never came back.
+
+     Longer than the 10s guard inside BT.db.open(), on purpose: an IndexedDB
+     open that is slow but still going to degrade cleanly at ten seconds is not
+     a hang, and a watchdog that cries during normal recovery is a watchdog
+     everybody learns to ignore.
+
+     The gate is the one legitimate unbounded wait — it is holding for someone
+     to type a passphrase, which may take as long as it takes — so reaching it
+     disarms the watchdog rather than accusing it. */
+  const BOOT_WATCHDOG_MS = 15000;
+  let bootPhase = 'scripts parsed';
+  let watchdog = null;
+  const phase = name => { bootPhase = name; };
+  function armWatchdog() {
+    watchdog = setTimeout(() => {
+      if (appStarted) return;
+      console.error(`[boot] the app still has not started ${BOOT_WATCHDOG_MS / 1000}s after boot began. `
+        + `Last stage to complete: "${bootPhase}". Whatever follows it never returned.`);
+    }, BOOT_WATCHDOG_MS);
+  }
+  function disarmWatchdog() { clearTimeout(watchdog); watchdog = null; }
+
   async function start() {
+    armWatchdog();
     window.addEventListener('error', e => console.error('[uncaught]', e.error || e.message));
     window.addEventListener('unhandledrejection', e => {
       const r = e.reason;
@@ -586,9 +658,13 @@ BT.boot = (function () {
       console.error('[unhandled promise]', r);
     });
 
+    phase('error handlers bound');
     BT.theme.init();
+    phase('theme');
     await BT.db.open();
+    phase('database open');
     await probeStorage();
+    phase('storage probe');
 
     /* Open Library's data is openly licensed and carries no retention limit,
        so unlike a TMDB-backed app this purge is hygiene rather than
@@ -620,6 +696,7 @@ BT.boot = (function () {
 
     /* A device that chose "stay signed in" holds the derived key, so it can go
        straight to the current library without asking again. */
+    phase('encryption gate reached');
     let resumed = false;
     let unreachable = false;
     if (BT.crypto.available() && BT.crypto.isRemembered()) {
@@ -654,6 +731,8 @@ BT.boot = (function () {
       }
       return;
     }
+    /* Waiting on a human now, not on the browser. */
+    disarmWatchdog();
     await BT.gate.open();
   }
 
@@ -662,6 +741,7 @@ BT.boot = (function () {
   async function startApp() {
     if (appStarted) return;
     appStarted = true;
+    disarmWatchdog();
 
     routes();
     /* BEFORE BT.tree.init(), and the order is not cosmetic. rowNav binds its

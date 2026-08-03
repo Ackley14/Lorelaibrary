@@ -3,7 +3,39 @@
      is a viewport-height flex chain, and quirks mode resolves those heights
      differently. One line here is cheaper than debugging that later. -->
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<!-- `interactive-widget` is NOT in this tag, and its absence is deliberate.
+     That key is what stops the on-screen keyboard resizing the layout out from
+     under the viewport-height flex chain — 55-tree.js's resize handler is
+     written around the behaviour it produces — so Chromium and Firefox Android
+     both want it. WebKit does not implement it, and unlike every other engine
+     it does not pass over an unknown viewport key quietly: Safari logs
+       Viewport argument key "interactive-widget" not recognized and ignored.
+     as a console ERROR on every load. Safari is the closest proxy we have for
+     the phone this app is held up to a barcode with, so a permanent red line
+     in its console is exactly where a real error is most likely to be missed.
+
+     So the key is appended below instead, on the engines that read it. WebKit
+     loses nothing by not receiving it: it never implemented the behaviour, so
+     the only difference is the error it no longer logs. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script>
+(function () {
+  /* WebKit, and deliberately not "Safari": Chrome and Firefox on iOS are
+     WebKit underneath and warn identically. navigator.vendor is
+     'Apple Computer, Inc.' on every WebKit build, and GestureEvent is a
+     WebKit-only global that has been there since iOS 2. Either alone would do;
+     both are checked because this is the first script on the page and must
+     never be the thing that breaks it. */
+  var webkit = navigator.vendor === 'Apple Computer, Inc.'
+    || typeof window.GestureEvent === 'function';
+  if (webkit) return;
+  var m = document.querySelector('meta[name=viewport]');
+  /* Synchronous, in <head>, before the body is parsed and before the first
+     layout — so the viewport the engine finally resolves already carries the
+     key, exactly as if it had been written in the markup. */
+  if (m) m.content += ', interactive-widget=resizes-content';
+})();
+</script>
 <title>BookTrak</title>
 <meta name="description" content="A local-first library for the books you want to read, are reading, and have finished.">
 
