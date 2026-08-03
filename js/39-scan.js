@@ -323,6 +323,31 @@ BT.scan = (function () {
 
   /* ══ 4 · WRITES ══════════════════════════════════════════════════════════ */
 
+  /* ── THE STATUS A SCAN LANDS ON ──────────────────────────────────────────
+     `have`, not `want`, and it is stated here once so all three add paths
+     below cannot disagree about it.
+
+     The reasoning is the barcode itself: you were holding the book, under a
+     lens, close enough to read a thirteen-digit code off its back cover. That
+     is an OWNERSHIP observation, and it is the strongest one this app ever
+     gets — stronger than anything the reader could type. `want` means the
+     opposite thing ("I do not have this and would like to"), so defaulting a
+     scanned shelf to it filed every book the reader physically owns onto a
+     wishlist, which is precisely the muddle the `have` rung was added to end.
+
+     The SEARCH door defaults to `want` for the mirror-image reason and must
+     stay that way — see BT.ui.addItem. Two doors, two different facts, and the
+     difference is the whole point of having both.
+
+     Overridable: `opts.status` still wins, so a view that knows better (a
+     reader scanning a stack they are already partway through) can say so. */
+  const SCAN_STATUS = 'have';
+
+  /* Stated at every call site rather than left to createClosedItem's default,
+     so the choice is visible where the write is made and a future add path
+     cannot inherit `want` by forgetting to think about it. */
+  const scanOpts = opts => Object.assign({ status: SCAN_STATUS }, opts || {});
+
   /* Create a NEW closed item for a scanned code.
 
      `scope: 'closed'` is stated, never inferred. The reader held one printing
@@ -334,7 +359,7 @@ BT.scan = (function () {
     base.uid = await freeUid(base.uid || BT.normalize.uidOf('isbn', isbn13));
 
     const item = BT.normalize.withDefaults(
-      base, opts.status || 'want', opts.source || 'scan', 'closed');
+      base, opts.status || SCAN_STATUS, opts.source || 'scan', 'closed');
 
     /* THE SCANNED CODE IS THE CLAIM, and it is restated here rather than
        trusted to the payload. Field presence on Open Library edition records
@@ -394,6 +419,14 @@ BT.scan = (function () {
      They are not adding a book, they are ANSWERING A QUESTION about a book
      they already have — "which copy is it?" — and losing months of progress to
      that answer would be unforgivable.
+
+     Which is also why `user.status` is NOT touched here, even though the same
+     barcode on a NEW book lands it in `have`. That default is for a record
+     this app is minting; this record already exists and is already filed, by
+     the reader, possibly as `reading` or `finished`. Answering "which copy?"
+     is not a statement about how far through it they are, and a pin that
+     quietly re-filed a book they were halfway through would be the scanner
+     editing a shelf it was only asked to identify.
 
      WHAT HAPPENS TO THE OLD INDEX ROWS IS THE WHOLE FUNCTION. An open item can
      carry hundreds of candidate ISBNs (The Hobbit's work yields 310 distinct
@@ -495,7 +528,10 @@ BT.scan = (function () {
      choice instead, so the lookup goes through the queue with everything
      else. */
   async function addSeparateCopy(isbn13, edition, opts) {
-    return createClosedItem(isbn13, edition || blindStub(isbn13), opts);
+    /* `have` like every other scan: a second physical copy is still a copy in
+       the reader's hands, and it is if anything the clearest case of the rule
+       — you are holding the paperback while the hardback sits on the shelf. */
+    return createClosedItem(isbn13, edition || blindStub(isbn13), scanOpts(opts));
   }
 
   /* ── Remove by scan, with a way back ─────────────────────────────────────
@@ -730,7 +766,7 @@ BT.scan = (function () {
     /* New. The lookup goes through the queue; the write happens the moment it
        lands, so the row resolves in place however far behind the reader it is. */
     const stub = await queue.push(() => lookup(isbn13));
-    const item = await createClosedItem(isbn13, stub, opts);
+    const item = await createClosedItem(isbn13, stub, scanOpts(opts));
     return {
       result: isBlind(stub) ? 'not-found' : 'added',
       uid: item.uid, title: item.title, added: 1, blind: isBlind(stub) ? 1 : 0,
@@ -769,7 +805,7 @@ BT.scan = (function () {
          reader's hand, so shelve it rather than reporting a pin onto nothing. */
       if (!pinned) {
         const stub = await queue.push(() => lookup(isbn13));
-        const fresh = await createClosedItem(isbn13, stub, opts);
+        const fresh = await createClosedItem(isbn13, stub, scanOpts(opts));
         return { result: 'added', action: 'separate', uid: fresh.uid, title: fresh.title };
       }
       fillPinnedEdition(scanId, uid, isbn13);

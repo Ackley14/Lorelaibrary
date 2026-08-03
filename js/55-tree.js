@@ -40,6 +40,16 @@ BT.tree = (function () {
      the work is tracked and no edition has been chosen yet (scope 'open'). */
   const formatOf = it => (it.facets && it.facets.format) || 'unspecified';
 
+  /* One reading of the reading ladder, ui-core's. The fallback matters for the
+     same reason bucketOf's does: a record whose status this build does not
+     recognise — an older export, a device mid-schema-change — must still land
+     on a shelf. It counts as `want`, the bottom rung, rather than vanishing
+     from every row while still counting toward "All books", because a tree
+     whose numbers do not add up is a tree nobody trusts. Nothing is written:
+     this is a display reading, and the stored value is left alone. */
+  const statusOf = it => (BT.ui && BT.ui.statusOf ? BT.ui.statusOf(it)
+    : ((it.user && it.user.status) || 'want'));
+
   /* Rows for the three formats a reader actually distinguishes. `unspecified`
      deliberately has NO row: for most libraries it is the largest group by far
      and selecting it answers no question — "books I have not yet said how I
@@ -60,7 +70,7 @@ BT.tree = (function () {
     const follows = await BT.repo.allFollows();
     const unread = await BT.repo.unreadCount();
 
-    const byStatus = { want: 0, reading: 0, finished: 0, dropped: 0 };
+    const byStatus = { want: 0, have: 0, reading: 0, finished: 0, dropped: 0 };
     const byGenre = {};
     const byFormat = {};
     const byPile = { sell: 0, sold: 0 };
@@ -70,7 +80,8 @@ BT.tree = (function () {
     let upcoming = 0;
 
     for (const it of items) {
-      byStatus[it.user.status] = (byStatus[it.user.status] || 0) + 1;
+      const st = statusOf(it);
+      byStatus[st] = (byStatus[st] || 0) + 1;
       const g = bucketOf(it);
       byGenre[g] = (byGenre[g] || 0) + 1;
       const f = formatOf(it);
@@ -106,6 +117,16 @@ BT.tree = (function () {
       { id: 'library', label: 'Library', children: [
         { id: 'all', label: 'All books', route: '#/library', n: items.length },
         { id: 'st-want', label: 'Want', route: '#/library?status=want', n: byStatus.want, dot: 'want' },
+        /* Between Want and Reading, because that is the order the shelf goes
+           in: you wanted it, then you got it, then you opened it. It is also
+           the row a scanned library fills up — 39-scan defaults every barcode
+           to `have` — so burying it under Reading would hide the largest group
+           in a scan-first shelf. The route is `?status=have` and 62-view-list
+           filters on exactly that string; the two names have to stay in step,
+           because a drift here does not error, it opens an empty list that
+           reads as "you own nothing", which is the most convincing wrong
+           answer this app can give. */
+        { id: 'st-have', label: 'Have', route: '#/library?status=have', n: byStatus.have, dot: 'have' },
         { id: 'st-reading', label: 'Reading', route: '#/library?status=reading', n: byStatus.reading, dot: 'reading', fill: 1 },
         { id: 'st-finished', label: 'Finished', route: '#/library?status=finished', n: byStatus.finished, dot: 'finished' },
         { id: 'st-dropped', label: 'Dropped', route: '#/library?status=dropped', n: byStatus.dropped, dot: 'dropped' },

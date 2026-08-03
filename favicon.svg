@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="BookTrak">
+  <!-- Three spines on a shelf, one pulled forward.
+
+       Chosen over an open book because an open book at 16px is two grey
+       lozenges and reads as a butterfly, and over a single closed book because
+       that is indistinguishable from a plain rounded rectangle once the cover
+       detail falls below a pixel. A shelf survives the only size that matters
+       for a tab: the bars step in height so the silhouette still says SHELF
+       even when every edge has been rounded away by the rasteriser.
+
+       Everything here is an axis-aligned rounded rect on purpose. favicon.ico
+       and icon-180.png are generated from these same five numbers, so the SVG
+       and the raster copies cannot drift apart — a diagonal or a curve would
+       have meant hand-drawing each one and hoping.
+
+       Colours are literals, not tokens: an SVG loaded through <link rel="icon">
+       gets no stylesheet, so :root custom properties resolve to nothing.
+       #0B6F62 is --bt-teal and #EDB556 is the brand gold that 90-boot.js
+       already prints its banner in; changing either means changing both. -->
+  <rect width="64" height="64" rx="14" fill="#0B6F62"/>
+  <g fill="#F4F7F6">
+    <rect x="13" y="13" width="11" height="37" rx="2"/>
+    <rect x="27" y="17" width="11" height="33" rx="2"/>
+    <rect x="11" y="50" width="42" height="5" rx="2"/>
+  </g>
+  <rect x="41" y="11" width="11" height="39" rx="2" fill="#EDB556"/>
+</svg>

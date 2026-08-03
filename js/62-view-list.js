@@ -134,7 +134,13 @@ BT.viewLibrary = (function () {
        most convincing wrong answer the app can give. The tree's own
        FILTER_PARAMS['/library'] is the checklist: status, genre, format, tag,
        pile. */
-    if (q.status) rows = rows.filter(i => i.user.status === q.status);
+    /* Five rungs since `have` was split out of `want`: want | have | reading |
+       finished | dropped. Read through BT.ui.statusOf rather than off the
+       record, so a book whose stored status this build does not recognise
+       counts as `want` here exactly as it does in the tree's Want total and on
+       its own row. Three places reading the field three ways is how a shelf
+       ends up listing a different number of books than the row you clicked. */
+    if (q.status) rows = rows.filter(i => BT.ui.statusOf(i) === q.status);
 
     /* Genre matches the INDEXED ids rather than a single bucket, so a novel
        filed as both Fantasy & SF and Fiction appears under both — which is what
@@ -196,9 +202,17 @@ BT.viewLibrary = (function () {
     view.innerHTML = `
       <div class="toolbar">
         <div class="chips" id="statusChips">
-          ${[['', 'All'], ['want', 'Want'], ['reading', 'Reading'],
-             ['finished', 'Finished'], ['dropped', 'Dropped']].map(([k, l]) =>
-            `<button class="chip" type="button" data-status="${k}" aria-pressed="${(q.status || '') === k}">${l}</button>`).join('')}
+          ${/* Ids AND labels come from ui-core's ladder rather than being typed
+                out here, for the reason the tree gives about its genre rows:
+                the day the ladder changed, a hand-written copy of it in a
+                second file was one more place to forget. That is not
+                hypothetical — `have` was added to the ladder after this screen
+                shipped, and a literal list here would have left the library's
+                own filter bar unable to reach the shelf the tree was pointing
+                at. BT.ui.STATUSES is in shelf order (want → have → reading →
+                finished → dropped), which is the order to read them in. */
+            [['', 'All']].concat(BT.ui.STATUSES.map(s => [s, BT.ui.STATUS_WORD[s]])).map(([k, l]) =>
+            `<button class="chip" type="button" data-status="${k}" aria-pressed="${(q.status || '') === k}">${esc(l)}</button>`).join('')}
         </div>
         <div class="seg" id="pileSeg">
           ${[['', 'Any'], ['sell', 'To sell'], ['sold', 'Sold']].map(([v, l]) =>

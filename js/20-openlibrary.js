@@ -441,10 +441,31 @@ BT.openlibrary = (function () {
         workCount: (d && d.work_count != null) ? Number(d.work_count) : null,
         topSubjects: Array.isArray(d && d.top_subjects) ? d.top_subjects : [],
         alternateNames: Array.isArray(d && d.alternate_names) ? d.alternate_names : [],
-        /* Portraits live under /a/ rather than /b/ and take the same
-           ?default=false treatment — without it a photo-less author renders a
-           43-byte transparent GIF that <img onerror> never catches. */
-        photoUrl: id ? BT.OL.authorPhoto(id, 'sm') : null,
+        /* NULL, AND DELIBERATELY SO. A portrait URL here would be a GUESS:
+           `/search/authors.json` returns no photo field of any kind, so the
+           only way to build one is to assume every author has a picture and
+           let the ones who do not 404.
+
+           They mostly do not. A single search for an author fired ten
+           `covers.openlibrary.org/a/olid/…?default=false` requests and got ten
+           404s back, each one an error-level line in the console — and a
+           browser logs a failed image response whether or not anything is
+           listening, so `onerror` cannot suppress it. `?default=false` was
+           chosen over the 43-byte transparent GIF precisely so that a missing
+           photo could be detected, and the cost of that choice turned out to
+           be a console full of red on the one screen this milestone added.
+           Following an author is a feature people will use repeatedly; a
+           screen that shouts ten fake errors every time it paints is a screen
+           where the eleventh, real, error is invisible.
+
+           67-view-people.js already draws a `.chipart` gradient behind this
+           and treats a null as "no portrait", which is what the roster below
+           the results has always rendered — so nothing is lost but the
+           request. BT.OL.authorPhoto() stays as it is and stays correct: the
+           full `/authors/{olid}.json` record DOES carry a `photos` array, so a
+           caller with that record in hand can build the URL on evidence rather
+           than on hope. */
+        photoUrl: null,
       };
     }).filter(a => a.olid && a.name && a.workCount !== 0);
 

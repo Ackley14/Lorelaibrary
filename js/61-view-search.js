@@ -34,6 +34,15 @@
    "Results", so the row you just added leaps into the other group and the next
    row slides up under your finger. Adding four books in a row was unusable
    before that. See the note in paint().
+
+   FOLLOWING AN AUTHOR HAPPENS HERE TOO, and that is a deliberate answer to a
+   reported bug rather than a spare button. The complaint was "I couldn't
+   figure out how to follow an author", from someone who had a Following page
+   the whole time — because a search result is where you are standing when the
+   thought arrives, and a feature that lives only on the page named after it is
+   a feature nobody finds. So the byline's author names are the affordance. See
+   byline(); the OLID rule it enforces is FAILURE 2 in rerank(), which is the
+   measured reason a follow may never be keyed on a name.
    ══════════════════════════════════════════════════════════════════════════ */
 
 BT.viewSearch = (function () {
@@ -56,6 +65,10 @@ BT.viewSearch = (function () {
   let stale = null;         // set when results came from cache during an outage
   let touchStart = null;
   let moved = false;
+  /* Follow ids, so a byline can be drawn with the right state without a repo
+     read per author per row. Loaded once per render and mutated in place by
+     toggleFollow — the same surgical-swap discipline the Add button uses. */
+  let followSet = new Set();
 
   /* True when the click we are handling is the tail of a scroll gesture. */
   function suppressTap() {
@@ -118,8 +131,10 @@ BT.viewSearch = (function () {
      list of the wrong author. Name-scoped `author=` is fuzzy matching over a
      name index and cannot be trusted with a user's query. Only OLID-scoped
      author queries (`author=OL1394865A`, which is what authorWorks() sends)
-     mean what they say — worth remembering when the author-following feature
-     lands, because that one MUST resolve a name to an OLID first.
+     mean what they say. The author-following feature has since landed and is
+     built on exactly that: BT.follows.toggleAuthor REFUSES a follow it cannot
+     key on an OLID, and byline() below renders an id-less author as plain text
+     rather than offering a Follow that would watch the wrong person.
 
      The model, in order of authority:
 
@@ -451,6 +466,7 @@ BT.viewSearch = (function () {
     BT.ui.paneActions('<a class="btn btn--sm" href="#/scan">Scan a barcode</a>');
 
     const count = await BT.repo.countItems();
+    await loadFollows();
     if (alive && !alive()) return;
 
     view.innerHTML = `
@@ -814,6 +830,15 @@ BT.viewSearch = (function () {
        handler itself, so a scroll that ended in a tap silently added whatever
        was under your thumb. */
     host.onclick = async e => {
+      /* FIRST, and it has to be: a follow chip sits INSIDE the row, so the
+         `[data-uid]` branch below would match it too and open the inspector
+         over the list every time someone followed an author. */
+      const followBtn = e.target.closest('[data-fa]');
+      if (followBtn) {
+        if (suppressTap()) return;
+        await toggleFollow(followBtn);
+        return;
+      }
       const addBtn = e.target.closest('[data-add]');
       if (addBtn) {
         if (suppressTap()) return;
@@ -919,12 +944,133 @@ BT.viewSearch = (function () {
     </div>`;
   }
 
+  /* ══ FOLLOWING, FROM A RESULT ROW ═══════════════════════════════════════
+     ── SEAM ──────────────────────────────────────────────────────────────
+     70-follows.js is optional to this screen. Feature-detected the same way
+     the catalogue client is: without it the byline renders as plain text and
+     nothing else changes, because a search that stops working because a
+     following module failed to parse would be a bad trade. */
+  function canFollow() {
+    /* All three, because a byline draws with authorId(), fills its state from
+       all() and acts through toggleAuthor(). Checking one and calling another
+       is how a half-loaded module turns a search into a blank screen instead
+       of a search with no Follow buttons. */
+    return !!(BT.follows
+      && typeof BT.follows.toggleAuthor === 'function'
+      && typeof BT.follows.authorId === 'function'
+      && typeof BT.follows.all === 'function');
+  }
+
+  async function loadFollows() {
+    if (!canFollow()) { followSet = new Set(); return; }
+    try {
+      followSet = new Set((await BT.follows.all()).map(f => f.id));
+    } catch (e) {
+      /* A follow list we could not read is not a reason to fail a search. The
+         chips simply render unpressed, and pressing one still works — the
+         toggle asks the repo itself rather than trusting this set. */
+      console.warn('[search] could not read follows', e);
+      followSet = new Set();
+    }
+  }
+
+  /* AUTHOR NAMES AND AUTHOR KEYS ARE PARALLEL ARRAYS, and keeping them aligned
+     is the whole correctness story of this function.
+
+     `author_name[i]` belongs to `author_key[i]`. The previous version of this
+     byline opened with `.filter(Boolean)` on the names alone, which is
+     harmless while it only prints text and is a silent mis-attribution the
+     moment a name carries an id: one empty entry shifts every following name
+     up by one, so pressing Follow on the second author of an anthology would
+     start watching the third author's catalogue. Nothing about the row would
+     look wrong. Pairs are built by INDEX first and filtered afterwards.
+
+     An author with no key is shown as plain text with the reason on hover,
+     never as a Follow that quietly falls back to the name — see FAILURE 2 in
+     rerank(): `author=gwendolyn+kiste` returns Laird Barron's bibliography at
+     HTTP 200, so a name-keyed follow is not a degraded follow, it is a
+     confident feed of the wrong writer. */
   function byline(d) {
-    const names = Array.isArray(d.author_name) ? d.author_name.filter(Boolean) : [];
-    if (!names.length) return '<span class="faint">Author not recorded</span>';
-    const shown = names.slice(0, 2).join(', ');
-    const more = names.length > 2 ? ` +${names.length - 2}` : '';
-    return `<span>${esc(shown)}${esc(more)}</span>`;
+    const rawNames = Array.isArray(d.author_name) ? d.author_name : [];
+    const rawKeys = Array.isArray(d.author_key) ? d.author_key : [];
+    const people = [];
+    for (let i = 0; i < rawNames.length; i++) {
+      const name = String(rawNames[i] || '').trim();
+      if (!name) continue;
+      people.push({ name, olid: BT.util.olid(rawKeys[i] || '') });
+    }
+    if (!people.length) return '<span class="faint">Author not recorded</span>';
+
+    /* Two, as before. A row is one line and an omnibus can credit nine people;
+       the rest are counted rather than listed, and are reachable from the
+       item's own detail pane. */
+    const shown = people.slice(0, 2);
+    const more = people.length > shown.length
+      ? `<span class="faint">+${people.length - shown.length}</span>` : '';
+
+    if (!canFollow()) {
+      return `<span>${esc(shown.map(p => p.name).join(', '))}</span>${more}`;
+    }
+    return shown.map(authorChip).join('') + more;
+  }
+
+  function authorChip(p) {
+    if (!p.olid) {
+      return `<span title="Open Library has no author id on this record. Following by name is not offered because a name-scoped author query returns a different author’s books.">${
+        esc(p.name)}</span>`;
+    }
+    const id = BT.follows.authorId(p.olid);
+    const on = followSet.has(id);
+    /* .chip already styles [aria-pressed="true"] as the teal "on" state, so the
+       state is carried by the attribute a screen reader reads rather than by a
+       class the stylesheet and this file would both have to agree about. */
+    return `<button class="chip" type="button" data-fa="${esc(p.olid)}" data-fid="${esc(id)}"
+      data-fn="${esc(p.name)}" aria-pressed="${on ? 'true' : 'false'}"
+      title="${on ? 'Unfollow' : 'Follow'} ${esc(p.name)} — new works in their Open Library catalogue"
+      >${esc(p.name)}<b>${on ? '✓' : '+'}</b></button>`;
+  }
+
+  async function toggleFollow(btn) {
+    const olid = btn.dataset.fa;
+    const name = btn.dataset.fn || '';
+    btn.disabled = true;
+    let res = null;
+    try {
+      res = await BT.follows.toggleAuthor(olid, name);
+    } catch (e) {
+      console.warn('[search] follow failed', e);
+    } finally {
+      btn.disabled = false;
+    }
+    if (!res) {
+      BT.ui.toast('That record carries no usable author id, so it cannot be followed reliably.', { bad: true });
+      return;
+    }
+    if (res.following) followSet.add(res.id); else followSet.delete(res.id);
+    markFollowButtons(res.id, res.following, res.name);
+    BT.ui.toast(res.following ? `Following ${res.name}` : `Unfollowed ${res.name}`);
+  }
+
+  /* EVERY chip for this author, not only the one that was pressed. A search
+     for an author's name returns thirty of their books, so one press means
+     thirty chips are now wrong — a list that shows the same person as followed
+     on one row and not on the next reads as a bug in the app.
+
+     Scanned and compared rather than matched with an attribute selector: a
+     follow id is `author:openlibrary:OL1394865A`, and a colon is a combinator
+     in CSS. A selector built from one needs CSS.escape and fails SILENTLY
+     without it — no error, just buttons left saying the opposite of the truth. */
+  function markFollowButtons(id, on, name) {
+    for (const b of document.querySelectorAll('#results [data-fid]')) {
+      if (b.dataset.fid !== id) continue;
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      b.title = `${on ? 'Unfollow' : 'Follow'} ${name} — new works in their Open Library catalogue`;
+      b.innerHTML = `${esc(b.dataset.fn || name)}<b>${on ? '✓' : '+'}</b>`;
+    }
+    /* The DOM no longer matches the signature paint() recorded, so the next
+       real paint must not skip itself. Same rule as the Add-button swap. */
+    const host = document.getElementById('results');
+    if (host) host.dataset.sig = '';
   }
 
   /* "first recorded", never "published", and the wording is the whole point.

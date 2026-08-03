@@ -1173,6 +1173,21 @@ BT.normalize = (function () {
     item.scope = scope || item.scope || 'open';
 
     item.user = Object.assign({
+      /* THE CALLER'S WORD, TAKEN AS GIVEN. The two add doors disagree on
+         purpose and this is not the place to second-guess either of them:
+         BT.ui.addItem passes 'want' (you looked a title up — a wishlist entry),
+         39-scan passes 'have' (you were holding the object under the lens, so
+         you own it). 'want' is the FALLBACK, for a caller that says nothing.
+
+         NOTHING HERE REWRITES AN EXISTING RECORD. `item.user` is assigned OVER
+         these defaults, so a status already on the item always survives — which
+         is what makes the ladder gaining a rung a non-event for stored data.
+         Every book saved before `have` existed still reads want|reading|
+         finished|dropped and stays exactly where the reader filed it; deciding
+         on their behalf which of their `want` books they secretly own would be
+         inventing ownership out of nothing. A value this build does not know
+         is read as `want` at DISPLAY time only (BT.ui.statusOf) and is one tap
+         from being corrected by the person who actually knows. */
       status: status || 'want',
       priority: 0,
       notes: '',

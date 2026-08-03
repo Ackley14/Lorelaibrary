@@ -261,10 +261,70 @@ BT.ui = (function () {
     return chips + formatIcon(item);
   }
 
-  const STATUS_WORD = { want: 'Want', reading: 'Reading', finished: 'Finished', dropped: 'Dropped' };
+  /* ── The reading ladder ────────────────────────────────────────────────
+     want → have → reading → finished → dropped, in shelf order, and the two
+     rungs at the front are genuinely different facts about a book:
+
+       want    you do not own it. This is a wishlist.
+       have    it is on your shelf and you have not started it.
+
+     Collapsing those is what this ladder was rebuilt to stop — "I have books
+     I'm not yet reading" — and it is also why the two ADD doors disagree on
+     purpose. Search-add lands on `want`, because looking a title up is not
+     acquiring it. Scan-add lands on `have`, because you were holding the
+     object under the lens; see SCAN_STATUS in 39-scan.js.
+
+     `have` is NOT `user.pile`. Pile is ownership DISPOSITION — null | 'sell' |
+     'sold' — and the two axes are independent: a book can be `finished` and
+     marked `sell` at the same time, which is the ordinary state of a shelf
+     clear-out. Anything that folds one into the other loses a fact the reader
+     entered by hand.
+
+     MIGRATION, and this is the part not to "tidy up" later: NOTHING IN THIS
+     APP REWRITES A STORED STATUS. Every record written before `have` existed
+     still says want|reading|finished|dropped, and those are left exactly as
+     the reader filed them — a sweep that decided which of somebody's `want`
+     books they secretly own would be inventing ownership out of nothing. An
+     unknown or missing value is read as `want` at DISPLAY time only, which is
+     the honest bottom rung and is one tap from being re-filed by the person
+     who actually knows. */
+  const STATUSES = ['want', 'have', 'reading', 'finished', 'dropped'];
+  const STATUS_WORD = {
+    want: 'Want', have: 'Have', reading: 'Reading',
+    finished: 'Finished', dropped: 'Dropped',
+  };
+
+  /* The ONE reading of `user.status`, so a row, a count and a filter can never
+     disagree about what an unrecognised value means. Views call this rather
+     than reaching for `item.user.status` directly: a record restored from an
+     old export, or one merged mid-schema-change from another device, must land
+     on a shelf rather than fall out of every list while still drawing a row.
+
+     Membership is tested against the LADDER ARRAY rather than by indexing the
+     label map, and that is not pedantry: `STATUS_WORD['toString']` is a
+     truthy inherited function, so a record carrying a stray `'constructor'` or
+     `'toString'` would pass a truthiness check, emit `class="dot c-toString"`,
+     and render a function's source text into the row. An array lookup has no
+     prototype chain to fall down. */
+  function statusOf(item) {
+    const s = item && item.user && item.user.status;
+    return STATUSES.indexOf(s) >= 0 ? s : 'want';
+  }
+  const statusWord = s => (STATUSES.indexOf(s) >= 0 ? STATUS_WORD[s] : STATUS_WORD.want);
+
+  /* The rungs that a recorded page position promotes out of — see setProgress.
+     `finished` and `dropped` are deliberately absent: both are decisions the
+     reader made, and re-opening a book to check a quotation must not undo
+     either of them. */
+  const PROMOTES_TO_READING = ['want', 'have'];
+
+  /* `fill` on `reading` alone. Every other rung is a hollow ring because
+     reading is the one state the app is actually about, and a second filled
+     dot beside it would spend that distinction for nothing. `have` is told
+     apart by hue instead — .c-have, alongside .c-want in 03-components.css. */
   function statusCell(item) {
-    const s = (item.user && item.user.status) || 'want';
-    return `<span class="stat"><span class="dot c-${s} ${s === 'reading' ? 'fill' : ''}"></span>${STATUS_WORD[s]}</span>`;
+    const s = statusOf(item);
+    return `<span class="stat"><span class="dot c-${s}${s === 'reading' ? ' fill' : ''}"></span>${STATUS_WORD[s]}</span>`;
   }
 
   /* ── The ownership axis ────────────────────────────────────────────────
@@ -486,14 +546,23 @@ BT.ui = (function () {
       const empty = !Object.keys(p).filter(key => key !== 'updatedAt').length;
       cur.user.progress = empty ? null : Object.assign(p, { updatedAt: Date.now() });
 
-      /* Recording progress on something still filed as "want" is a statement
-         that you have started it. Never the reverse: finishing is a decision,
-         not something inferred from reaching the last page.
+      /* Recording progress on something still filed as "want" or "have" is a
+         statement that you have started it. Never the reverse: finishing is a
+         decision, not something inferred from reaching the last page.
+
+         BOTH front rungs promote, and `have` is now the one that matters most:
+         a scanned shelf lands there by default, so the ordinary route into
+         "reading" starts from a book the reader already owns rather than from
+         a wishlist entry. Leaving `have` out would have quietly stranded every
+         barcode-added book on the shelf it started on, no matter how far into
+         it the reader got.
 
          Gated on a real position rather than on the record being non-empty:
          typing in the page count of a book you have not opened is bookkeeping,
          not reading, and it must not move the book. */
-      if (p.currentPage > 0 && cur.user.status === 'want') cur.user.status = 'reading';
+      if (p.currentPage > 0 && PROMOTES_TO_READING.indexOf(cur.user.status) >= 0) {
+        cur.user.status = 'reading';
+      }
 
       await BT.repo.putItem(cur);
       return cur;
@@ -704,8 +773,15 @@ BT.ui = (function () {
     const existingUid = await BT.repo.resolveUid(BT.repo.idKeysFor(stub));
     if (existingUid) {
       const existing = await BT.repo.getItem(existingUid);
-      if (existing) { toast(`Already on your shelves as “${STATUS_WORD[existing.user.status]}”.`); return existing; }
+      /* statusWord, not a bare lookup: a record carrying a status this build
+         does not know about (an older export, a device mid-schema-change) used
+         to render “Already on your shelves as “undefined”.” here. */
+      if (existing) { toast(`Already on your shelves as “${statusWord(statusOf(existing))}”.`); return existing; }
     }
+    /* `want` by default, because this is the SEARCH door: looking a title up
+       says you would like to read it, not that a copy is on your shelf. The
+       scan door defaults to `have` for the opposite reason — you were holding
+       the book. Both are overridable by the caller. */
     const item = BT.normalize.withDefaults(stub, opts.status || 'want', opts.source || 'search');
     item.scope = opts.scope || stub.scope || 'open';
     retier(item);
@@ -779,11 +855,22 @@ BT.ui = (function () {
     if (!item) return null;
     const before = item.user.status;
     item.user.status = status;
+    /* `reading` is the only rung that stamps a start date, and `have` stamps
+       NOTHING on purpose. Acquiring a book is not an event in the reading of
+       it: there is no day you started, and writing `startedAt` the moment
+       someone says "this is on my shelf" would drop every unopened book into
+       "started this year" — which is exactly the muddle the rung was added to
+       clear up. `user.addedAt` already records when it arrived.
+
+       Nothing is CLEARED on the way back down either. Moving a book from
+       reading to have (put it down, still own it) keeps `startedAt`, because
+       you did start it; erasing that would rewrite the reader's history to
+       make the field agree with the current rung. */
     if (status === 'reading' && !item.user.startedAt) item.user.startedAt = Date.now();
     if (status === 'finished') { item.user.finishedAt = Date.now(); BT.repo.addHistory(uid, 'finished'); }
     retier(item);
     await BT.repo.putItem(item);
-    toast(`Moved to ${STATUS_WORD[status]}`, {
+    toast(`Moved to ${statusWord(status)}`, {
       actionLabel: 'Undo',
       onAction: async () => {
         const it = await BT.repo.getItem(uid);
@@ -873,13 +960,13 @@ BT.ui = (function () {
   return {
     esc, dateField, waterline, precisionTag, dateCell, whenText, driftBadge, shortWhen,
     poster, posterUrl, chipart, hues,
-    genresOf, genreTag, formatOf, formatIcon, statusCell, pileTag, pileLabel,
+    genresOf, genreTag, formatOf, formatIcon, statusCell, statusOf, statusWord, pileTag, pileLabel,
     upcomingRelease, publishedKey, hasPublished,
     progressOf, progressFraction, progressText, progressBar, totalPagesOf, pagesCell, setProgress,
     table, tableRow, grid, COLUMNS,
     emptyState, errorBox, skeletonGrid, groupHead, toast, banner, crumb, paneActions,
     selection,
     addItem, hydrate, setStatus, setPile, bulkSetPile, confirmDialog,
-    STATUS_WORD, PILE_WORD, FORMAT_LABEL,
+    STATUSES, STATUS_WORD, PILE_WORD, FORMAT_LABEL,
   };
 })();

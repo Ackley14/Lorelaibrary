@@ -7,12 +7,18 @@
    dark palette. Everything else in the app is opaque or plainly translucent,
    because a blur behind every row is the first thing to stutter.
 
-   It is also the app's only EDIT surface — status, progress, ownership, the
-   rating and the notes are all written from here — and those two facts fight
-   each other. Every control in this file used to rebuild the blurred sheet
-   under the reader's thumb, so the rules below are not micro-optimisation:
-   `paint()` replaces the CONTENTS of `.sheet` and never `.sheet` itself, and
-   skips a byte-identical rebuild outright. See the comment on `invalidate`.
+   It is also the app's only EDIT surface — status, genre, progress, ownership,
+   the rating, the notes and the follow toggles are all written from here — and
+   those two facts fight each other. Every control in this file used to rebuild
+   the blurred sheet under the reader's thumb, so the rules below are not
+   micro-optimisation: `paint()` replaces the CONTENTS of `.sheet` and never
+   `.sheet` itself, and skips a byte-identical rebuild outright. See the comment
+   on `invalidate`.
+
+   Three of those controls arrived after the pane was finished, and each one
+   respects the rule in the same way: the status segment, the genre picker and
+   the follow pills all redraw the ONE block they changed and leave the rest of
+   the sheet — and the backdrop-filtered layer behind it — untouched.
 
    Below 1180px it detaches into a right-hand drawer, sharing one scrim with
    the index tree.
@@ -47,6 +53,72 @@ BT.inspector = (function () {
     published: 'Published',
   };
   const prettyStatus = s => PUB_STATUS[s] || (s ? String(s) : 'Unknown');
+
+  /* ══ THE READING LADDER ═══════════════════════════════════════════════════
+     Five rungs, and the second one is the whole reason this list is not the
+     four it started as:
+
+       want      you do not own it and would like to read it — a wishlist
+       have      it is on the shelf and you have not started it
+       reading   in progress
+       finished  done
+       dropped   abandoned
+
+     `want` and `have` were one rung for the first three milestones, and that
+     collapse is what made the shelf unusable: a physical library is mostly
+     books you own and have not opened, and filing them under the same word as
+     the ones you have not bought yet means the wishlist can never be read as a
+     wishlist. Scanning a barcode defaults to `have` for exactly this reason —
+     if the book is in your hand, you own it — while search-adding stays `want`.
+     Neither of those decisions is made here; 39-scan and 61-view-search own
+     them. This file only has to draw all five and never reorder them.
+
+     Do NOT confuse this with `user.pile` (null | 'sell' | 'sold'), which is the
+     OWNERSHIP DISPOSITION axis drawn a few blocks further down. A book can be
+     `finished` and `sell` at the same time. See the block above PILES.
+
+     Kept as a literal rather than read from a shared constant because that is
+     how the rest of the app spells it too; if it ever moves to 00-config, this
+     is one of five places that has to follow. STATUS_WORD lives in BT.ui so the
+     table, the tree and this pane cannot disagree about the noun — read through
+     it, and only fall back when it has not learned the new rung yet. */
+  const STATUS_LADDER = ['want', 'have', 'reading', 'finished', 'dropped'];
+
+  /* "Have", not "Owned" and not "TBR". "Owned" invites the reading of pile as
+     the same axis, and an initialism has to be learned. */
+  const STATUS_FALLBACK = {
+    want: 'Want', have: 'Have', reading: 'Reading',
+    finished: 'Finished', dropped: 'Dropped',
+  };
+  const statusWord = s =>
+    (BT.ui.STATUS_WORD && BT.ui.STATUS_WORD[s]) || STATUS_FALLBACK[s] || s;
+
+  /* MIGRATION, and the rule is: read forgivingly, write nothing.
+
+     Every record written before `have` existed carries one of the original four,
+     and all four are still on the ladder — so there is no migration to run and
+     none is run. What this guards is the other case: a record with no
+     `user.status` at all (a hand-edited import, a sync from a future ladder).
+     Those read as `want`, which leaves the segment control showing something
+     rather than five unpressed buttons and no clue what is stored.
+
+     It is display-only and is never written back. Rewriting somebody's shelf so
+     the UI looks tidy is a silent data edit they never asked for, and `want` is
+     the safest possible guess to put in front of them: it claims the least. */
+  const statusOf = u => {
+    const s = u && u.status;
+    return STATUS_LADDER.indexOf(s) >= 0 ? s : 'want';
+  };
+
+  /* The same fold 38-normalize uses for its slugs, restated because publishers
+     are matched by NAME on both sides of the comparison below and a fold that
+     only ran on one of them would answer "not following" for a publisher the
+     reader is following. */
+  function slugOf(s) {
+    let t = String(s == null ? '' : s).toLowerCase();
+    try { t = t.normalize('NFD').replace(/[̀-ͯ]/g, ''); } catch (_) {}
+    return t.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  }
 
   async function show(uid, opts) {
     opts = opts || {};
@@ -156,21 +228,24 @@ BT.inspector = (function () {
       <div class="itype">${BT.ui.genreTag(item)}${BT.ui.precisionTag(rel)}${BT.ui.driftBadge(rel)}</div>
       <div class="ititle">${esc(item.title)}</div>
 
+      <div class="iby">${authorLine(item)}</div>
+
       <div class="isub">
-        ${authorLine(item)}
-        <span>·</span>${BT.ui.dateField(rel)}
+        ${BT.ui.dateField(rel)}
         ${total ? `<span>· ${esc(BT.util.pagesStr(total))}</span>` : ''}
       </div>
 
       ${item._transient ? `
       <div class="blk"><button class="btn btn--primary" data-act="add">Add to library</button></div>` : `
       <div class="blk">
-        <div class="blk-h">Status</div>
-        <div class="seg" role="group" aria-label="Reading status">
-          ${['want', 'reading', 'finished', 'dropped'].map(s =>
-            `<button type="button" data-status="${s}" aria-pressed="${u.status === s}">${BT.ui.STATUS_WORD[s]}</button>`).join('')}
+        <div class="blk-h">Status <span class="why">want is a wishlist · have is on the shelf</span></div>
+        <div class="seg seg--wrap" role="group" aria-label="Reading status">
+          ${STATUS_LADDER.map(s =>
+            `<button type="button" data-status="${s}" aria-pressed="${statusOf(u) === s}">${esc(statusWord(s))}</button>`).join('')}
         </div>
       </div>
+
+      ${genreBlock(item)}
 
       ${progressBlock(item)}
 
@@ -244,14 +319,242 @@ BT.inspector = (function () {
      contributors and the fourth name has already stopped identifying the book.
      A missing author is stated rather than left blank — a large share of Open
      Library's older records genuinely have none, and an empty slot reads as a
-     rendering fault. */
+     rendering fault.
+
+     Each name now carries a Follow pill, and WHERE it sits is the actual fix.
+     The complaint that produced this was "I couldn't figure out how to follow
+     an author", not "following does not work": #/people existed and nobody
+     found it. A follow control that lives only on a page called Following can
+     only be used by someone who has already followed something. So it goes
+     where the author's name is — here, in search results, and on the Following
+     page — and this is the copy of it that most people will meet first.
+
+     The separator is a middle dot rather than a comma because the units are
+     name-plus-control, and a comma sitting between a button and the next name
+     reads as belonging to the button. */
   function authorLine(item) {
-    const names = (item.authors || [])
-      .map(a => (typeof a === 'string' ? a : (a && a.name)))
-      .filter(Boolean);
-    if (!names.length) return '<span class="faint">Author not recorded</span>';
-    const shown = names.slice(0, 3).join(', ');
-    return `<span>${esc(shown)}${names.length > 3 ? ' <span class="faint">+' + (names.length - 3) + '</span>' : ''}</span>`;
+    const list = (item.authors || [])
+      .map(a => (typeof a === 'string' ? { name: a, olid: '' } : a))
+      .filter(a => a && (a.name || a.olid));
+    if (!list.length) return '<span class="faint">Author not recorded</span>';
+
+    const shown = list.slice(0, 3);
+    const more = list.length - shown.length;
+    const units = shown.map(a => {
+      /* A work record gives author KEYS and never author NAMES (see the block
+         above authorsFromKeys in 38-normalize), so an olid with no name is an
+         ordinary state and not a fault. The olid is shown rather than a blank,
+         because it is still enough to follow by — which is the point. */
+      const name = a.name || (a.olid ? `Author ${a.olid}` : '');
+      return `<span class="byname">${esc(name)}${followPill('author', BT.util.olid(a.olid || a.id || ''), a.name || name)}</span>`;
+    });
+
+    return units.join('<span class="bysep">·</span>')
+      + (more > 0 ? ` <span class="faint">+${more} more</span>` : '');
+  }
+
+  /* ══ FOLLOW ═══════════════════════════════════════════════════════════════
+     ── SEAM ────────────────────────────────────────────────────────────────
+     70-follows.js owns everything about a follow except where the button is
+     drawn. Two functions are asked for and both are feature-detected, because
+     this pane has to survive that file being absent or having failed to parse —
+     a bare BT.follows.toggleAuthor(...) inside the one shared click handler
+     would take the status segment, the genre picker, the rating and the notes
+     down with it:
+
+       BT.follows.toggleAuthor(olid, name)   -> follow/unfollow by OLID
+       BT.follows.togglePublisher(name)      -> follow/unfollow by name
+
+     When it is absent the pills are simply not emitted. An affordance whose
+     only possible outcome is an apology is worse than no affordance. */
+  const followsReady = type => {
+    const f = BT.follows;
+    if (!f) return false;
+    return typeof f[type === 'publisher' ? 'togglePublisher' : 'toggleAuthor'] === 'function';
+  };
+
+  /* AUTHORS ARE KEYED ON OLID AND NEVER ON NAME, and that is a verified rule
+     rather than a preference. Open Library's `search.json?author=gwendolyn+kiste`
+     comes back full of Laird Barron's books: the name filter is fuzzy, and a
+     follow built on it would report somebody else's new releases as yours. An
+     author with no OLID on this record therefore gets NO pill and a one-word
+     reason, which is the honest answer — following them would produce a feed
+     that is confidently wrong rather than empty.
+
+     `aria-pressed` starts at "false" for everyone and is corrected in place by
+     refreshFollowState. It cannot be baked into the markup: the follow list is
+     an IndexedDB read, so it is not available at the moment the string is
+     built, and blocking the whole paint on it to save one attribute write would
+     put a database round trip in front of every book you click. */
+  function followPill(type, key, name) {
+    if (!followsReady(type)) return '';
+    if (type === 'author' && !key) {
+      return ' <span class="fwna" title="Open Library has no author id on this record. Following by name matches the wrong writer often enough to be useless, so it is not offered.">no id</span>';
+    }
+    const title = type === 'publisher'
+      ? 'Follow this publisher. Matching is by name and is approximate — see the note below.'
+      : 'Follow this author. New works appearing in their Open Library catalogue turn up in Alerts.';
+    return ` <button type="button" class="fwbtn" aria-pressed="false"`
+      + ` data-follow="1" data-fw-type="${esc(type)}" data-fw-key="${esc(key)}"`
+      + ` data-fw-name="${esc(name || '')}" title="${esc(title)}">Follow</button>`;
+  }
+
+  /* Read from BT.repo, not from BT.follows.
+
+     The id format (`author:openlibrary:OL1394865A`) belongs to 70-follows.js,
+     and rebuilding it here to ask isFollowing() would put a second copy of that
+     rule in a file with no reason to know it — the day the two spellings drift
+     every pill in the pane silently reads "Follow" for an author you follow.
+     Matching on type plus identity cannot drift: an OLID is an OLID, and both
+     sides of the publisher comparison go through the same fold. */
+  function isFollowed(rows, type, key, name) {
+    const want = type === 'author' ? BT.util.olid(key) : slugOf(name || key);
+    if (!want) return false;
+    for (const f of rows || []) {
+      if (!f || f.type !== type) continue;
+      const got = type === 'author'
+        ? (BT.util.olid(f.sourceId || '') || BT.util.olid(f.id || ''))
+        : slugOf(f.sourceId || f.name || '');
+      if (got && got === want) return true;
+    }
+    return false;
+  }
+
+  /* Corrects every pill in the pane in place. Never repaints: the pills are
+     scattered across two unrelated places — the by-line under the title and the
+     Publisher row of the edition dl — and rebuilding the whole sheet to flip one
+     attribute is the exact stutter this file exists to avoid.
+
+     `uid` is the book the caller was looking at. The follow list is an async
+     read, so by the time it lands the reader may have clicked a different book
+     and the whole sheet may have been rewritten — hence the re-query after the
+     await as well as the guard. */
+  async function refreshFollowState(uid) {
+    const host = el();
+    if (!host || !host.querySelector('[data-follow]')) return;
+    let rows = [];
+    try { rows = await BT.repo.allFollows(); }
+    catch (e) { console.warn('[inspector] could not read the follow list', e); return; }
+    if (uid && currentUid !== uid) return;
+
+    let changed = false;
+    for (const b of host.querySelectorAll('[data-follow]')) {
+      const on = isFollowed(rows, b.dataset.fwType, b.dataset.fwKey, b.dataset.fwName);
+      if (b.getAttribute('aria-pressed') === String(on)) continue;
+      b.setAttribute('aria-pressed', String(on));
+      /* The word changes, not just the colour. "Following" as a state and
+         "Follow" as an invitation are different sentences, and a pill that only
+         changed hue would be unreadable to anyone who cannot see the hue. */
+      b.textContent = on ? 'Following' : 'Follow';
+      changed = true;
+    }
+    /* The DOM no longer matches the string paint() recorded. Without this a
+       later repaint compares against a signature captured before these writes
+       and decides, wrongly, that nothing needs redrawing. */
+    if (changed) invalidate();
+  }
+
+  async function toggleFollow(btn) {
+    const f = BT.follows;
+    const type = btn.dataset.fwType;
+    if (!followsReady(type)) return;
+    const key = btn.dataset.fwKey;
+    const name = btn.dataset.fwName || '';
+    try {
+      if (type === 'publisher') await f.togglePublisher(name || key);
+      else await f.toggleAuthor(key, name);
+    } catch (e) {
+      BT.ui.toast((e && e.message) || 'Could not change that follow.', { bad: true });
+      return;
+    }
+    /* 12-repo emits `follow:change` on every write, and init() listens for it —
+       so the pills are usually corrected before this line runs. It is called
+       anyway because a follows module that batches or defers its write would
+       otherwise leave the button the reader just pressed saying the old word. */
+    await refreshFollowState(currentUid);
+  }
+
+  /* ══ GENRE ════════════════════════════════════════════════════════════════
+     The six buckets are DERIVED, by mapping Open Library's subjects through
+     BT.GENRE_RULES — and those subjects are whatever fell out of a MARC record,
+     an Internet Archive ingest or a bestseller-list scrape. The result is wrong
+     often enough that a reader must be able to say so, which is what this is.
+
+     THE ONE DETAIL THAT MATTERS is where the correction is stored. Writing
+     `item.genres` alone lasts exactly until the next background refresh: 38-
+     normalize's mergeItem takes the fresh payload's buckets over the stored
+     ones, so the reader's fix would vanish silently, hours later, with nothing
+     on screen to connect the two events. Overrides are the mechanism that
+     already exists for this — mergeItem reads `meta.manualOverrides` FIRST,
+     carries it across untouched, and replays every path in it over the merged
+     record as the last thing it does. So the fix is written twice, to the live
+     field and to the override ledger, and the ledger is what makes it permanent.
+
+     What this deliberately does NOT touch is `rec.terms`. The `g:` terms are
+     one input to the recommender among two dozen subject terms, they are
+     rebuilt from the payload on every hydrate, and a bucket is a far coarser
+     taste signal than 'Ecology in literature' anyway. Correcting the chip is a
+     statement about how the book is FILED, not a claim about what it is like. */
+  function genreBlock(item) {
+    return `
+      <div class="blk">
+        <div class="blk-h">Genre <span class="why">guessed from catalogue subjects</span></div>
+        <div class="gpick" id="genreBody">${genreBody(item)}</div>
+      </div>`;
+  }
+
+  function genreBody(item) {
+    const on = new Set(BT.ui.genresOf(item));
+    const fixed = !!(((item.meta || {}).manualOverrides || {}).genres);
+    return BT.GENRE_BUCKETS.map(g =>
+      `<button type="button" class="gchip tag ${esc(g)}" data-genre="${esc(g)}"
+         aria-pressed="${on.has(g)}">${esc(BT.GENRE_LABELS[g] || g)}</button>`).join('')
+      + (fixed
+        ? '<div class="gnote">Yours. A metadata refresh will not put it back.</div>'
+        : '');
+  }
+
+  async function toggleGenre(uid, id) {
+    if (BT.GENRE_BUCKETS.indexOf(id) < 0) return;
+    const cur = await BT.repo.getItem(uid);
+    if (!cur) return;
+
+    const on = new Set(BT.ui.genresOf(cur));
+    if (id === 'general') {
+      /* 'general' is the residue — the bucket a book lands in when nothing else
+         fit — so it is EXCLUSIVE. "General and Romance" is not a classification
+         anyone can explain, and 38-normalize refuses to produce it for the same
+         reason (there is no `general` rule in the table; you can only fall into
+         it). Picking it here means "none of the other five". */
+      on.clear();
+      on.add('general');
+    } else {
+      if (on.has(id)) on.delete(id); else on.add(id);
+      on.delete('general');
+      /* Never empty. 12-repo builds the multiEntry by_genre index from
+         idx.genreIds, and an empty array is skipped by that index entirely — the
+         book would vanish from every genre count in the tree while still showing
+         a chip on its own row. Deselecting the last bucket falls back to the
+         residue, which is what "I cannot classify this" already means. */
+      if (!on.size) on.add('general');
+    }
+
+    /* BT.GENRE_BUCKETS order, not click order: the chips, the tree and the
+       facet counts all read this array, and BT.ui.genreTag draws only the first
+       two — so the order the record stores decides which two a row shows. */
+    const list = BT.GENRE_BUCKETS.filter(g => on.has(g))
+      .map(g => ({ id: g, name: BT.GENRE_LABELS[g] || g, source: 'user' }));
+
+    cur.genres = list;
+    const meta = cur.meta || (cur.meta = {});
+    /* The path is the plain field name because mergeItem replays overrides with
+       setPath, which walks dotted paths — 'genres' is one segment and lands as
+       a whole-array assignment. Copied rather than mutated in place so a caller
+       still holding the old record does not see its ledger change underneath it,
+       the same rule mergeItem follows for `user`. */
+    meta.manualOverrides = Object.assign({}, meta.manualOverrides, { genres: list });
+    await BT.repo.putItem(cur);   // recomputes idx.genreIds on the way through
+    return cur;
   }
 
   /* ══ OWNERSHIP ════════════════════════════════════════════════════════════
@@ -374,17 +677,28 @@ BT.inspector = (function () {
         </div>`;
     }
 
+    /* The publisher's Follow pill rides in the dl rather than in a block of its
+       own, because the publisher IS a property of this edition and nothing else
+       on the record. An `open` item never reaches this branch and correctly
+       offers no publisher follow: it has not chosen a printing, so it has no
+       publisher to follow. */
+    const pubPill = publisher ? followPill('publisher', slugOf(publisher), publisher) : '';
+
     return `
       <div class="blk">
         <div class="blk-h">Edition <span class="why">the copy you hold</span></div>
         <dl class="kv">
           <dt>ISBN</dt><dd class="mono">${isbn ? esc(isbn) : '<span class="faint">·&nbsp;·</span>'}</dd>
-          <dt>Publisher</dt><dd>${publisher ? esc(publisher) : '<span class="faint">Not recorded</span>'}</dd>
+          <dt>Publisher</dt><dd>${publisher ? esc(publisher) + pubPill : '<span class="faint">Not recorded</span>'}</dd>
           <dt>Pages</dt><dd class="mono">${pages ? esc(String(pages)) : '<span class="faint">·&nbsp;·</span>'}</dd>
           <dt>Format</dt><dd>${esc(BT.ui.FORMAT_LABEL[fmt] || fmt)}</dd>
           ${editionOlid ? `<dt>Open Library</dt><dd><a href="${esc(BT.OL.base)}/books/${esc(editionOlid)}"
             target="_blank" rel="noopener" style="text-decoration:underline">${esc(editionOlid)} ↗</a></dd>` : ''}
         </dl>
+        ${pubPill ? `<div class="fwnote">Publishers have no id in Open Library, so a publisher
+          follow matches on the NAME and is approximate: “Tor” also catches Tor.com, Tor Science
+          Fiction and “A Tom Doherty Associates Book”. Authors are matched exactly, by their
+          catalogue id.</div>` : ''}
       </div>`;
   }
 
@@ -568,6 +882,14 @@ BT.inspector = (function () {
       const pile = e.target.closest('[data-pile]');
       const rate = e.target.closest('[data-rate]');
       const act = e.target.closest('[data-act]');
+      /* Genre chips and follow pills are read HERE, off the one delegated
+         handler, rather than being bound per element the way the progress form
+         is. That is what lets both blocks be redrawn with innerHTML and stay
+         live without a re-wire — delegation from the pane survives any number of
+         replacements of its descendants, and the progress form only binds
+         directly because it also owns keydown on its input. */
+      const gen = e.target.closest('[data-genre]');
+      const fw = e.target.closest('[data-follow]');
 
       if (st) {
         await BT.ui.setStatus(item.uid, st.dataset.status);
@@ -606,6 +928,28 @@ BT.inspector = (function () {
         invalidate();
       }
 
+      if (gen) {
+        const fresh = await toggleGenre(item.uid, gen.dataset.genre);
+        if (fresh) {
+          /* Two nodes, both well inside `.sheet`: the picker itself and the chip
+             row under the cover, which is the same buckets read back. Neither is
+             the backdrop-filtered element, so this costs two innerHTML writes
+             rather than a rebuilt blur layer. */
+          const box = document.getElementById('genreBody');
+          if (box) box.innerHTML = genreBody(fresh);
+          const itype = host.querySelector('.itype');
+          if (itype) {
+            const rel = fresh.release || {};
+            itype.innerHTML = `${BT.ui.genreTag(fresh)}${BT.ui.precisionTag(rel)}${BT.ui.driftBadge(rel)}`;
+          }
+          invalidate();
+          /* The list's Genre column and the tree's genre counts both moved. */
+          BT.router.resolve();
+        }
+      }
+
+      if (fw) await toggleFollow(fw);
+
       if (act && act.dataset.act === 'add') {
         delete item._transient;
         await BT.ui.addItem(item, { source: 'link', scope: item.scope || 'open' });
@@ -635,6 +979,12 @@ BT.inspector = (function () {
 
     wireProgress(item);
 
+    /* Fired, not awaited. The pills are already on screen saying "Follow"; this
+       only corrects the ones that should say "Following", and holding the paint
+       open for a database read to do it would put a round trip in front of every
+       book the reader clicks. */
+    refreshFollowState(item.uid).catch(e => console.warn('[inspector] follow state', e));
+
     const notes = document.getElementById('inspNotes');
     if (notes) {
       const save = BT.util.debounce(async () => {
@@ -662,7 +1012,7 @@ BT.inspector = (function () {
       /* The status segment can move as a SIDE EFFECT of recording progress —
          see the promotion rule below — so it is repainted here too. */
       for (const b of host.querySelectorAll('[data-status]')) {
-        b.setAttribute('aria-pressed', String(b.dataset.status === (fresh.user || {}).status));
+        b.setAttribute('aria-pressed', String(b.dataset.status === statusOf(fresh.user)));
       }
       invalidate();
       wireProgress(fresh);
@@ -696,9 +1046,11 @@ BT.inspector = (function () {
         return;
       }
       /* BT.ui.setProgress clamps against the extent and promotes a book still
-         filed as `want` to `reading`, because recording a position is a
-         statement that you have started it. Never the reverse, and never
-         beyond that: reaching the last page must NOT set `finished`, because
+         filed as `want` OR `have` to `reading`, because recording a position is
+         a statement that you have started it — and which of those two shelves
+         it was sitting on beforehand makes no difference to that. Never the
+         reverse, and never beyond that: reaching the last page must NOT set
+         `finished` and must not touch `have`, because
          finishing is a decision rather than something inferred from a number.
          The most this is allowed to do is ask — see offerFinish. */
       const fresh = await BT.ui.setProgress(item.uid, { currentPage: n });
@@ -791,6 +1143,14 @@ BT.inspector = (function () {
          What it cannot know about is the record disappearing underneath it. */
       if (ev === 'wipe' || ev === 'import:done') { empty(); return; }
       if (ev === 'item:delete' && detail && detail.uid === currentUid) empty();
+      /* The one write this pane DOES listen for, because it is the one that can
+         be made somewhere else about something on screen: following the same
+         author from #/people, or from a search result behind the drawer, must
+         not leave this pane's pill still saying "Follow". It costs one small
+         read and a handful of attribute writes — no repaint. */
+      if (ev === 'follow:change') {
+        refreshFollowState(currentUid).catch(e => console.warn('[inspector] follow state', e));
+      }
     });
 
     empty();

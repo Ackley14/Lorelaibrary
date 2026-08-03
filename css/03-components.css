@@ -101,8 +101,22 @@
    title; `reading` takes the brand teal because it is the one state the app is
    actually about. finished and dropped are BOTH faint on purpose — a
    closed book should recede, and the tree already distinguishes them by
-   section, so spending a hue here would only add noise to a long shelf. */
+   section, so spending a hue here would only add noise to a long shelf.
+
+   `have` — owned, not started — is MOSS, and the choice is a legibility one
+   before it is a semantic one. This dot is 7px, and `have` sits directly above
+   `reading` in the status section of the tree, so the two hues have to survive
+   being read at that size a row apart. Moss is the one hue in the set that was
+   derived for exactly that: see the note in 01-tokens, H 172 → H 127 off teal.
+   Amber was the other candidate and is deliberately not used — amber is the
+   caution hue, it means "read this", and a library where most books are owned
+   and unread would paint half the shelf as a warning.
+
+   It shares the hue with `.c-nonfiction`, which is fine and is the same trade
+   the tokens file already makes between genre and precision: the two never
+   appear in one badge, and they live in different sections of the tree. */
 .c-want { color: var(--bt-ice); }
+.c-have { color: var(--bt-moss); }
 .c-reading { color: var(--bt-teal); }
 .c-finished { color: var(--bt-text-faint); }
 .c-dropped { color: var(--bt-text-faint); }
@@ -172,6 +186,28 @@ kbd {
   box-shadow: var(--bt-shadow-inset-top), 0 1px 1px rgba(0, 0, 0, .09);
 }
 .seg svg { width: 12px; height: 12px; }
+
+/* A segmented control that is allowed to become two rows.
+
+   The reading ladder grew a fifth rung (want / have / reading / finished /
+   dropped) and five will not fit on one line where it is drawn: the inspector
+   is a 392px drawer below 1180px, capped at `100% - 44px`, so on a 320px phone
+   the sheet has about 244px of content width — and on a touch device every
+   segment is also 36px tall with 10px of side padding. Five of them need well
+   over 300px.
+
+   Wrapping rather than a <select>, because the whole value of this control is
+   that all five states are visible at once: a select hides four of them behind
+   a tap and turns "which shelf is this on" into a question you have to open
+   something to answer. Two rows of a segmented control is still one glance.
+
+   `flex: 1 1 auto` lets whatever lands on each row share the width, so a
+   3 + 2 wrap does not leave a ragged half-empty second row. No media query is
+   involved and none is wanted — the control wraps when its container is narrow,
+   which is the real condition, and it is inside a fixed-width drawer whose width
+   does not track the viewport. */
+.seg--wrap { flex-wrap: wrap; }
+.seg--wrap button { flex: 1 1 auto; justify-content: center; }
 
 .toolbar {
   display: flex; align-items: center; gap: var(--bt-space-3); flex-wrap: wrap;

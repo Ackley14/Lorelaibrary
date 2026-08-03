@@ -106,13 +106,24 @@ BT.boot = (function () {
       ['Discover', 'Scan'], 'Scan a barcode', 'M3',
       'Point a scanner or a camera at an ISBN and BookTrak adds that exact printing — publisher, page count and cover — rather than the work in general. Arrives in')));
 
+    /* Both of these are REAL views now, and both names were read off the file
+       rather than taken from the plan — `66-view-alerts.js` opens
+       `BT.viewAlerts = (function () {` and `67-view-people.js` opens
+       `BT.viewPeople = (function () {`. That check is the whole reason this
+       file has a paragraph about `viewList`/`viewLibrary` at the top: a name
+       that does not match does not throw, it silently leaves a placeholder
+       promising a milestone that already shipped.
+
+       The stubs stay behind them on purpose. They are no longer a promise —
+       they are now the answer to "that view file failed to parse", which is a
+       sentence in the pane instead of a blank screen and a TypeError. */
     BT.router.on('/alerts', viewOr('viewAlerts', stub(
       ['Shelf', 'Activity'], 'Activity', 'M4',
-      'What changed since you last looked: dates that moved, editions that appeared, authors you follow publishing something new. Arrives in')));
+      'What changed since you last looked: dates that moved, and works that appeared in the catalogue of an author or publisher you follow. Arrives in')));
 
     BT.router.on('/people', viewOr('viewPeople', stub(
       ['Discover', 'Following'], 'Following', 'M4',
-      'Authors you follow, and anything of theirs that has been announced but is not in your library yet. Arrives in')));
+      'Authors and publishers you follow, and what has turned up in their catalogues that is not in your library yet. Arrives in')));
 
     BT.router.on('/stats', viewOr('viewStats', stub(
       ['Shelf', 'Stats'], 'Stats', 'M4',
@@ -140,7 +151,19 @@ BT.boot = (function () {
     try {
       const el = document.getElementById('footMeta');
       if (!el) return;
-      const sweep = await BT.repo.metaGet('sync.lastSweepAt');
+      /* TWO sweep clocks, and the footer reports the later of them.
+         `sync.lastSweepAt` belongs to the item-refresh sweeper in 48-sync.js
+         (M5); `alerts.lastSweepAt` belongs to the follow-activity sweep in
+         45-alerts.js, which exists today. 45-alerts.js keeps them apart
+         deliberately — two writers on one key means whichever ran last erases
+         the other's cooldown — so reading only the first one made the footer
+         say "checked never" for ever, on an app that had just spent a request
+         budget checking. Read both, show the freshest. */
+      const sweeps = await Promise.all([
+        BT.repo.metaGet('sync.lastSweepAt'),
+        BT.repo.metaGet('alerts.lastSweepAt'),
+      ]);
+      const sweep = Math.max(sweeps[0] || 0, sweeps[1] || 0) || null;
       const saved = await BT.repo.metaGet('cloud.lastPushAt');
       const bits = [];
       if (signedIn()) {
@@ -186,20 +209,61 @@ BT.boot = (function () {
      keyless, so there is no "not configured yet" state that would make a sweep
      pointless — the catalogue is reachable for every user from the first boot.
      The guard is on the sweeper module instead, because it is not part of the
-     M1 shell. */
+     M1 shell.
+
+     TWO sweepers hang off this one trigger, and they are separate jobs on
+     separate budgets and separate cooldown keys:
+
+       BT.alerts.sweep  — 45-alerts.js. Re-reads stored items for dates that
+                          moved, then polls a HANDFUL of follows (three) for
+                          works that were not in the catalogue last time.
+       BT.sync.sweep    — 48-sync.js, M5. Refreshes stale item metadata.
+
+     Each is called only if it exists, and each is called with `{}` so its own
+     cooldown decides whether it actually does anything. The previous shape of
+     this function was `if (!BT.sync || !BT.sync.sweep) return;` on the first
+     line, which was correct while nothing else swept and became a silent
+     no-op the moment alerts landed: 48-sync.js does not exist yet, so the
+     guard returned before the sweeper that DID exist was ever reached, and
+     the activity feed would only ever have filled when someone pressed
+     "Check now" by hand.
+
+     Failures are warnings, never throws. A sweep is opportunistic background
+     work; Open Library being unreachable is a normal Tuesday and must not
+     surface as an uncaught rejection in the console of a working app. */
   function scheduleSweeps() {
-    if (!BT.sync || !BT.sync.sweep) return;
-    const kick = () => {
-      BT.sync.sweep({}).then(r => {
-        if (r && r.alerts) {
-          BT.tree.refresh();
-          BT.ui.toast(`${r.alerts} update${r.alerts === 1 ? '' : 's'} since last time`, {
-            actionLabel: 'See', onAction: () => BT.router.go('#/alerts'),
-          });
-        }
-        refreshFooter();
-      }).catch(e => console.warn('[boot] sweep failed', e));
+    const sweepers = () => [
+      BT.alerts && BT.alerts.sweep && (() => BT.alerts.sweep({})),
+      BT.sync && BT.sync.sweep && (() => BT.sync.sweep({})),
+    ].filter(Boolean);
+
+    const kick = async () => {
+      const runs = sweepers();
+      if (!runs.length) return;
+      let alerts = 0;
+      /* Serialized, not Promise.all. Both sweepers draw on the same ~1 req/sec
+         Open Library allowance through BT.net, and firing them together only
+         means the queue behind them is twice as deep while the user is trying
+         to search for a book. */
+      for (const run of runs) {
+        try {
+          const r = await run();
+          if (r && r.alerts) alerts += r.alerts;
+        } catch (e) { console.warn('[boot] sweep failed', e && e.message); }
+      }
+      if (alerts) {
+        /* The tree also refreshes itself on the repo's `feed:change`, so this
+           is redundant on the happy path and deliberately kept: a sweep that
+           coalesced into existing feed rows can raise the count without
+           emitting a new one. */
+        BT.tree.refresh();
+        BT.ui.toast(`${alerts} update${alerts === 1 ? '' : 's'} since last time`, {
+          actionLabel: 'See', onAction: () => BT.router.go('#/alerts'),
+        });
+      }
+      refreshFooter();
     };
+
     if ('requestIdleCallback' in window) requestIdleCallback(kick, { timeout: 6000 });
     else setTimeout(kick, 2500);
 

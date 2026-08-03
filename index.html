@@ -209,7 +209,28 @@
      layer, because it is the half that has to be testable without hardware —
      everything below can be driven by hand from the console. -->
 <script src="js/39-scan.js"></script>
-<!-- …and here: 40-recommend / 45-alerts / 48-sync. -->
+<!-- OUT OF NUMERIC ORDER, AND THAT IS THE POINT. 70-follows.js is a LOGIC
+     module, not a view — it owns the follow id scheme, the follows CRUD and
+     worksOf(). It carries a 70 because MovieTrak's 70 slot was `70-view-unlock`
+     and renumbering an existing file is worse than one deliberate exception,
+     but its real position in the dependency graph is here: 45-alerts.js diffs
+     what worksOf() returns, and 61/67 both draw Follow controls on top of it.
+
+     Numeric order alone would load it AFTER every one of those. That is not
+     currently fatal — every reference to BT.follows sits inside a function body
+     or behind a typeof guard, so nothing resolves it at parse time — but it is
+     fatal the first time someone writes a sensible-looking top-level
+     `const ID = BT.follows.authorId(...)` in a view, and the failure would be a
+     bare TypeError at load with no hint that the cause is a line in this file.
+     Load order IS the dependency graph here; make it tell the truth. -->
+<script src="js/70-follows.js"></script>
+<!-- Follow activity, and the diff that turns it into a feed. Above the router
+     because BT.ui.addItem() and 39-scan.js both call BT.alerts.snapshotOf()
+     while writing an item — the cold baseline that stops the first sighting of
+     a follow emitting 190 alerts is only correct if it can be taken at the
+     moment the item lands, not on the next sweep.
+     Still to come on this line: 40-recommend / 48-sync. -->
+<script src="js/45-alerts.js"></script>
 <script src="js/49-router.js"></script>
 <script src="js/50-ui-core.js"></script>
 <script src="js/55-tree.js"></script>
@@ -225,11 +246,17 @@
 <script src="js/59-editions.js"></script>
 <script src="js/61-view-search.js"></script>
 <script src="js/62-view-list.js"></script>
+<!-- The activity feed, and the Following page that fills it. Both are pure
+     views over the two modules loaded above the router — they read BT.alerts
+     and BT.follows and own no polling of their own, which is why the sweep
+     budget can be reasoned about in exactly one place (45-alerts.js). -->
+<script src="js/66-view-alerts.js"></script>
+<script src="js/67-view-people.js"></script>
 <!-- The scan screen: the scan log, manual ISBN entry, and the button that
      opens the overlay above. Numbered 75 rather than 63 because it is a
      destination of its own rather than another way of listing the library. -->
 <script src="js/75-view-scan.js"></script>
 <!-- …and the remaining view files after these, in numeric order: 64-view-up,
-     66-view-alerts, 67-view-people, 68-view-stats, 69-view-settings,
-     70-view-unlock. -->
+     68-view-stats, 69-view-settings, 71-view-unlock (71, not 70 — 70 is
+     taken by the follows logic module loaded above). -->
 <script src="js/90-boot.js"></script>

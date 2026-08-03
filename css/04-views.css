@@ -286,6 +286,124 @@
 }
 .blk-h .why { margin-left: auto; font-size: 9px; letter-spacing: .04em; text-transform: none; color: var(--bt-text-faint); }
 
+/* ── The by-line ───────────────────────────────────────────────────────────
+   Its own row under the title, rather than the head of .isub where the author
+   names used to live. The reason is the Follow pill: a name now carries a
+   control, and three name-plus-control units sharing one line with a ten-slot
+   date field and a page count wrapped into an unreadable pile at 392px — which
+   is the width the inspector actually is on anything below a laptop.
+
+   Separator is a middle dot, not a comma, because the units are compound: a
+   comma landing between a button and the next name reads as punctuation
+   belonging to the button. ────────────────────────────────────────────────── */
+.iby {
+  display: flex; align-items: center; flex-wrap: wrap;
+  /* Row gap is generous for a text line, and it is load-bearing rather than
+     taste: the follow pill extends its tap target past its own box (see
+     .fwbtn::after) and the extension has to fit inside HALF this gap, or a
+     wrapped second row of authors steals the taps of the row above it. */
+  gap: var(--bt-space-5) var(--bt-space-2);
+  margin-top: var(--bt-space-2);
+  font-size: var(--bt-fs-sm); color: var(--bt-text-secondary);
+}
+.byname { display: inline-flex; align-items: center; gap: var(--bt-space-2); min-width: 0; }
+.bysep { color: var(--bt-text-faint); }
+
+/* ── Follow ────────────────────────────────────────────────────────────────
+   A footnote to the name, never a peer of it. Teal when engaged, because
+   following is the one thing on this pane that reaches outside the record and
+   teal is what the app spends on "this is live".
+
+   THE STATE IS NOT CARRIED BY COLOUR. The word changes (Follow → Following)
+   and so does the glyph (+ → ✓); the tint is the third signal, not the only
+   one. 56-inspector writes the text, this file writes the glyph. ─────────── */
+.fwbtn {
+  position: relative; flex: 0 0 auto;
+  display: inline-flex; align-items: center; gap: 3px;
+  height: 20px; padding: 0 var(--bt-space-2);
+  border: var(--bt-rule-w) solid var(--bt-line-rule);
+  border-radius: var(--bt-radius-pill);
+  background: var(--bt-surface-raised); color: var(--bt-text-muted);
+  font-size: var(--bt-fs-micro); letter-spacing: .08em;
+  text-transform: uppercase; font-weight: 600; white-space: nowrap;
+}
+.fwbtn::before { content: "+"; font-size: 11px; line-height: 1; }
+.fwbtn:hover { border-color: var(--bt-teal-edge); color: var(--bt-teal-text); }
+.fwbtn[aria-pressed="true"] {
+  background: var(--bt-teal-wash); border-color: var(--bt-teal-edge); color: var(--bt-teal-text);
+}
+.fwbtn[aria-pressed="true"]::before { content: "✓"; font-size: 9px; }
+
+/* 20px is under the 44px touch floor, and this control deliberately does not
+   add a case to the touch overrides in 05-responsive.css: a pill inflated to
+   44px beside a 13px name stops reading as a footnote to the name and starts
+   reading as the main event. So the HIT AREA is extended past the box instead —
+   30px tall and 4px wider, ink still 20px.
+
+   The insets are bounded by the container's gaps, not chosen for feel. .iby is
+   12px row / 6px column, so 5px vertical and 2px horizontal are the largest
+   values that keep two neighbouring targets from overlapping — and an overlap
+   here is not cosmetic, it is one author's pill quietly eating the tap meant
+   for the next one's. Change one number and change the other. */
+.fwbtn::after { content: ""; position: absolute; inset: -5px -2px; }
+
+/* An author Open Library has no id for. Stated rather than silently omitted,
+   because the alternative reading of a missing pill is "this app forgot", and
+   the honest reason is worth one word plus a tooltip: name-scoped author
+   filtering on Open Library returns the wrong writer's books often enough that
+   offering it would be a feed that is confidently wrong. */
+.fwna {
+  font-size: var(--bt-fs-micro); letter-spacing: .08em; text-transform: uppercase;
+  color: var(--bt-text-faint);
+  border-bottom: 1px dotted var(--bt-line-rule); cursor: help;
+}
+
+/* The publisher caveat. Faint and set below the dl rather than in a .warnbox,
+   because it is a statement about how good the matching is, not a warning that
+   something went wrong — amber would overstate it. */
+.fwnote {
+  margin-top: var(--bt-space-3); padding-left: var(--bt-space-3);
+  border-left: 2px solid var(--bt-line-rule);
+  font-size: var(--bt-fs-micro); line-height: 1.5; color: var(--bt-text-faint);
+}
+
+/* ── The genre picker ──────────────────────────────────────────────────────
+   The same .tag chips the table and the tree draw, made pressable. Reusing the
+   tag rather than inventing a picker chip is the point: the control shows you
+   the exact mark the book will wear everywhere else, so choosing is choosing
+   the thing itself rather than a proxy for it.
+
+   Unselected buckets are the same chip at low opacity — the hue survives, so a
+   reader can see what "Fantasy & SF" would look like before committing to it,
+   which a greyed-out chip cannot show them. Opacity fades the ground, the ring
+   and the text together, which is why it is one declaration and not three.
+
+   The ✓ slot is always present and merely transparent when unpressed. Toggling
+   `content` instead would change the chip's width on every click, and a row of
+   six chips reflowing under the finger is how you press the wrong one. ───── */
+.gpick { display: flex; flex-wrap: wrap; gap: var(--bt-space-5) var(--bt-space-2); }
+.gchip {
+  position: relative; height: 22px; opacity: .45;
+  transition: opacity var(--bt-dur) var(--bt-ease);
+}
+.gchip::before { content: "✓"; margin-right: 4px; font-size: 9px; opacity: 0; }
+.gchip:hover { opacity: .8; }
+.gchip[aria-pressed="true"], .gchip[aria-pressed="true"]:hover { opacity: 1; }
+.gchip[aria-pressed="true"]::before { opacity: 1; }
+/* Same hit-area trick as the follow pill, bounded the same way: .gpick is 12px
+   row / 6px column, so 5px and 2px are the largest insets that keep six chips
+   on three wrapped rows from overlapping each other's targets. 32px tall. */
+.gchip::after { content: ""; position: absolute; inset: -5px -2px; }
+/* Sits on its own row inside the flex container. It is the only feedback that
+   the override actually took, and it is worth having: the whole value of the
+   picker is that a background metadata refresh cannot undo it, and that promise
+   is invisible until it is stated. */
+.gnote {
+  flex: 1 0 100%;
+  font-size: var(--bt-fs-micro); color: var(--bt-text-faint);
+  letter-spacing: 0; text-transform: none;
+}
+
 /* Ratings — native units, never averaged. Open Library rates out of 5 stars,
    Google Books out of 5 with a different population behind it, and turning
    either into a percentage invents precision nobody measured.
