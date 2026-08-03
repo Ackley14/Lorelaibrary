@@ -249,7 +249,11 @@ one mis-catalogued reprint drags back decades — *The Alloy of Law*, published
 **Entirely optional, and off until you turn it on.** BookTrak is a local-first
 library: a browser that has never set a passphrase never sees a sign-in screen,
 never fetches anything from GitHub, and behaves exactly as described above. Turn
-it on under **Settings → Sync across machines**.
+it on under **Settings → Sync across machines**. Open the sign-in screen on a
+device that has never synced and it asks whether you already have a library
+before it goes looking for one — nothing is requested until you answer, because
+asking a repository for a file nobody has published is a 404 and a console error
+in exchange for an answer already known.
 
 Once you do, your library is encrypted **in the browser** and committed to this
 repository as `data/library.enc.json`. Enter the same passphrase anywhere else

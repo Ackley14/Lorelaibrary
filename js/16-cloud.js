@@ -115,6 +115,44 @@ BT.cloud = (function () {
     } catch (_) {}
   }
 
+  /* ── "Is a published library expected to be there?" ─────────────────────
+     NOT the same question as configured(), and the gap between the two is a
+     bug that shipped to the live site.
+
+     configured() only says we can NAME a repository — and on the published
+     site that is true for every stranger who follows a link, because
+     inferRepo() reads owner/repo straight out of the github.io URL. Nobody
+     has published anything, so `data/library.enc.json` is not there, so
+     asking for it returns 404. THAT 404 IS DATA, NOT A FAULT: "no library has
+     been published yet" is the ordinary first-run state of a repository, and
+     pullEnvelope() has always reported it as an answer (`null`) rather than an
+     error.
+
+     The console cannot be told that. Chromium, Firefox and WebKit all print a
+     red "Failed to load resource: 404" for any fetch that 404s, before a line
+     of our code runs — and pullEnvelope() tries three urls, so ONE visit to
+     the sign-in screen on the published site printed three console errors for
+     an app that was working perfectly. Measured in all three engines. The only
+     way to a clean console is not to issue the request, which is exactly the
+     rule 05-net.js already applies to Google Books: with no key the app makes
+     ZERO googleapis requests rather than firing ones it knows will fail.
+
+     So the test is enrolled() — the same local, synchronous "has anybody on
+     THIS device ever chosen to sync?" that 90-boot.js gates the gate on. If
+     somebody has, a library is expected to exist, looking for it is worth a
+     request, and a 404 is worth reporting. If nobody has, there is nothing to
+     look for and the request is skipped entirely.
+
+     This deliberately does NOT gate pullEnvelope() itself, and must not:
+     71-view-unlock's setup() publishes the very first library BEFORE
+     setEnrolled(true) runs, so publish() → checkConflict() → pullEnvelope() is
+     a legitimate read from a device that is not yet enrolled. That read is a
+     deliberate write action by a reader who is configuring sync, and its
+     overwrite guard is the whole reason the read exists. The gate is on the
+     two paths that look on the APP's initiative instead — peek() and
+     syncDown(). */
+  function expectPublished() { return configured() && enrolled(); }
+
   /* ── Read ──────────────────────────────────────────────────────────────
      Deliberately unauthenticated and cache-busted. `cache: 'no-cache'` forces
      revalidation via ETag rather than re-downloading — appending ?v=Date.now()
@@ -134,19 +172,60 @@ BT.cloud = (function () {
     urls.push(`https://raw.githubusercontent.com/${r}/main/${path()}`);
     urls.push(`https://raw.githubusercontent.com/${r}/master/${path()}`);
 
-    let lastErr = null;
+    /* THREE OUTCOMES, AND ONLY ONE OF THEM IS A FAILURE.
+
+         an envelope     the library, decrypted by the caller.
+         null            every server we asked answered 404. Nothing has been
+                         published yet — an ANSWER, and the state the sign-in
+                         screen needs in order to offer "create a library"
+                         rather than "sign in". Never an error.
+         throw           anything else: a 500, a dead socket, a captive portal,
+                         or a file that came back and was not one of ours.
+
+     `absent` counts the urls that produced a real 404 rather than trusting
+     whichever error happened to be last, and null is returned only when EVERY
+     url said the same thing. A definitive 404 from one server plus a dead
+     socket from the next is not evidence that the file is absent, it is
+     evidence that we could not find out — and the two must not be confused,
+     because checkConflict() turns "absent" into "nobody else has written, so
+     publish freely". Getting that wrong overwrites another device's library.
+     (The old string compare on `lastErr.message === 'notfound'` accepted
+     exactly that mixed case, and would also have swallowed any genuine error
+     that happened to carry the same word.)
+
+     A 404 THEREFORE COUNTS AND SAYS NOTHING. It must never become an Error
+     object, because the thrown error is a DIAGNOSIS that the reader is shown
+     verbatim — under "What GitHub said" on the unlock screen, and inside
+     publish()'s "nothing was published (…)" banner via checkConflict(). The
+     urls are tried in order of authority and the 404s are the LAST two, so a
+     sentinel error written on a 404 overwrites the real diagnosis every time
+     the mix goes that way. Measured, before this was split apart: a 500 on the
+     same-origin url followed by two raw 404s reported "No library has been
+     published to this repository yet." under a heading reading "Could not
+     reach your library", and a file that came back and was not ours reported
+     the same thing instead of saying so.
+
+     That mix is not exotic — it is the shape of EVERY genuine fault on a Pages
+     site that publishes from a branch other than main/master, where the two
+     raw urls always 404 and the relative one is the only one that can speak.
+     So the real error is captured separately and the FIRST one wins: the urls
+     are ordered by authority, the relative url is the actual deployment, and
+     its answer is the one worth repeating. */
+    let realErr = null;
+    let absent = 0;
+    const note = e => { if (!realErr) realErr = e; };
     for (const u of urls) {
       try {
         const res = await fetch(u, { cache: 'no-cache', credentials: 'omit' });
-        if (res.status === 404) { lastErr = new Error('notfound'); continue; }
-        if (!res.ok) { lastErr = new Error(`HTTP ${res.status}`); continue; }
+        if (res.status === 404) { absent++; continue; }             // an answer, not an error
+        if (!res.ok) { note(new Error(`HTTP ${res.status}`)); continue; }
         const body = await res.json();
         if (body && body.kind === 'booktrak.encrypted') return body;
-        lastErr = new Error('That file is not an encrypted BookTrak library.');
-      } catch (e) { lastErr = e; }
+        note(new Error('That file is not an encrypted BookTrak library.'));
+      } catch (e) { note(e); }
     }
-    if (lastErr && lastErr.message === 'notfound') return null;    // nothing published yet
-    throw lastErr || new Error('Could not read the library file.');
+    if (absent === urls.length) return null;                       // nothing published yet
+    throw realErr || new Error('Could not read the library file.');
   }
 
   /* ── Write ─────────────────────────────────────────────────────────── */
@@ -693,6 +772,12 @@ BT.cloud = (function () {
      load for a device that has enrolled, because the repo — not this browser —
      is then the source of truth. */
   async function syncDown() {
+    /* Nobody on this device has opted into sync, so there is no library of
+       ours to bring down and a request for one is a guaranteed 404 with a
+       console error attached — see expectPublished(). 90-boot.js already tests
+       enrolled() before it gets here; this is the module defending its own
+       rule, so that the next caller inherits it without having to know. */
+    if (!expectPublished()) return { exists: false, unasked: true };
     const env = await pullEnvelope();
     if (!env) return { exists: false };
     const counts = await restore(env);
@@ -702,7 +787,33 @@ BT.cloud = (function () {
   /* Metadata readable WITHOUT the passphrase — updatedAt and counts live
      outside the ciphertext precisely so the unlock screen can say what it is
      about to restore. */
-  async function peek() {
+  async function peek(opts) {
+    opts = opts || {};
+
+    /* FOUR ANSWERS, and the caller must tell them apart — 71-view-unlock.js
+       draws a different screen for each, and conflating any two of them is the
+       one bug on that screen that can destroy a library:
+
+         { exists: true, … }              there it is.
+         { exists: false }                asked, and the repository definitively
+                                          holds nothing. Offer to create one.
+         { exists: false, error }         could NOT find out. Never offer to
+                                          create one — creating publishes over
+                                          whatever is really there.
+         { exists: false, unasked: true } did not ask, and nothing went wrong.
+
+       The last one is new and is the fix for a live-site console full of 404s.
+       Nobody on this device has ever chosen to sync, so there is nothing of
+       ours published under the inferred repo and asking for it costs three
+       guaranteed 404s — three red lines in every engine's console on an app
+       that is working perfectly. See expectPublished() for the whole argument.
+
+       `onDemand` is the reader overriding it by pressing a button: at that
+       point looking IS the action they asked for, so the request is made and
+       whatever comes back — including "nothing published yet" — is reported on
+       screen, where it belongs, rather than only in the console. */
+    if (!opts.onDemand && !expectPublished()) return { exists: false, unasked: true };
+
     try {
       const env = await pullEnvelope();
       if (!env) return { exists: false };
@@ -779,7 +890,7 @@ BT.cloud = (function () {
 
   return {
     repo, setRepo, token, setToken, hasToken, clearToken, path, configured,
-    enrolled, setEnrolled, signOut,
+    enrolled, setEnrolled, expectPublished, signOut,
     tokenForWrite, setVaultToken, hasWriteToken,
     pullEnvelope, push, publish, restore, syncDown, checkConflict, changePassphrase, mergeDocs,
     peek, status, verifyToken,

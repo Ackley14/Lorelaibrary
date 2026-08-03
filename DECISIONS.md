@@ -153,6 +153,20 @@ PBKDF2-SHA256 at 600,000 iterations (OWASP guidance; WebCrypto has no Argon2).
 Sync is additive throughout: unconfigured means no gate, no errors, and no
 behaviour change anywhere.
 
+That last clause was stated before it was true. Until 2026-08-03 the sign-in
+screen fetched `data/library.enc.json` for anybody who reached `#/unlock` on the
+published site, because `configured()` only means *we can name a repository* and
+`inferRepo()` names one for every visitor to a `github.io` URL. Nobody had
+published, so it 404'd — three times, once per fallback url — and every engine
+printed a console error for each before a line of our code could explain it. **A
+404 there is data, not a fault:** "no library has been published yet" is the
+ordinary first-run state of a repository, and the app was announcing it as a
+failure. Looking is now gated on `enrolled()`, the same local synchronous test
+the gate itself uses, and a device that has never synced is *asked* which it
+wants before anything is fetched. The rule is the one `05-net.js` already
+applies to Google Books: with nothing configured, issue **zero** requests rather
+than ones guaranteed to fail.
+
 **D15 — The service worker caches the app shell and nothing else.** API
 responses are passed straight through to the network. `BT.net` already owns
 caching, rate limiting, budgets and TTLs; a second HTTP cache underneath it
@@ -193,6 +207,7 @@ stray `mt.` prefix does not fail loudly — it reaches into the other app's data
 | What a first visit actually cost | **84 requests, 1458 KB** — not 494 KB. `sw.js` registers at end of parse and its install downloaded every shell file a **second** time (`cache:'reload'`, 503 KB) plus the **450 KB** decoder wasm, none of it visible in the page's own resource timing |
 | `cache:'no-cache'` in place of `'reload'` | 37 of those files come back **304, zero bytes**, from GitHub Pages itself (verified with `If-None-Match` against production). Same staleness guarantee, 503 KB cheaper |
 | A repeat visit, once the worker is installed | First paint **96 ms**, tree **~150 ms**, **zero** network requests. The precached shell was already doing its job and needed no change |
+| A first visit to `#/unlock` on the published site | **Three HTTP 404s** for `data/library.enc.json` — relative, then `raw.githubusercontent` `main` and `master` — and a console error for each, in all three engines, for a file that correctly does not exist. Invisible locally forever: `localhost` infers no repository, so `configured()` is false and the read never ran |
 
 ## Open
 

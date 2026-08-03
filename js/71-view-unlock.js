@@ -230,11 +230,27 @@ BT.gate = (function () {
       return;
     }
 
-    show(`<h1>Checking for your library…</h1><div class="skel skel--line" style="width:60%"></div>`);
+    show(checking);
     remote = await BT.cloud.peek();
 
     if (opts.mode === 'token') return replaceToken();
-    if (opts.mode === 'setup') return setup();
+    if (opts.mode === 'setup') return remote.unasked ? look('setup') : setup();
+
+    /* NOTHING WAS ASKED, AND NOTHING WENT WRONG. peek() declines to fetch on a
+       device where nobody has ever chosen to sync — see BT.cloud.expectPublished.
+       On the published site inferRepo() names a repository for every visitor, so
+       without this the sign-in screen fired three requests for a file that
+       cannot exist yet and every engine printed a 404 for each of them. A 404
+       here is data, not a fault, and the place to say so is this screen rather
+       than the console.
+
+       So the ambiguity peek() was being used to resolve — sign in, or set up? —
+       is put to the reader instead, and the request is made once they answer.
+       Guessing is not available: assuming "nothing published" would offer
+       "create a library" to the owner arriving on a new laptop, and creating one
+       is the single action that can publish over a library that is already
+       there. */
+    if (remote.unasked) return choose();
 
     if (remote.exists) return signIn();
 
@@ -261,6 +277,86 @@ BT.gate = (function () {
   }
 
   const brand = '<div class="gate__brand"><b>BookTrak</b><i>Tide</i></div>';
+  const checking = '<h1>Checking for your library…</h1><div class="skel skel--line" style="width:60%"></div>';
+
+  /* ── This device has never synced, so nothing has been fetched ───────────
+     The one screen here that exists because of a CONSOLE, and it is not a
+     cosmetic concern: the first thing anybody opening devtools on the live
+     site saw was a 404, which reads as a broken app and is the opposite of
+     true. `data/library.enc.json` is absent because nobody has published one,
+     which is an ordinary first-run state — but a browser prints a red line for
+     a 404 before any of our code can explain it, so the only fix is not to ask.
+
+     What is asked instead is the reader, and the two answers are the two
+     things the request was being used to guess between. Both then look, which
+     is the point: a 404 that arrives after somebody pressed "sign in" is
+     answered on screen by nothingPublished() below, and one that arrives on a
+     drive-by visit to #/unlock does not arrive at all. */
+  function choose() {
+    show(`
+      ${brand}
+      <h1>Sync this device</h1>
+      <p class="lede">
+        Nothing on this device has been synced yet, so BookTrak has not gone looking for a library
+        in <span class="mono">${esc(BT.cloud.repo())}</span> — there is no sense asking for a file
+        until somebody says they want one. Say which of these this is and it will look now.
+      </p>
+      <div class="actions">
+        <button class="btn btn--primary" id="gHasOne">I already have a library</button>
+        <button class="btn" id="gMakeOne">Set one up here</button>
+        <button class="btn btn--ghost" id="gWorkLocal">Not now</button>
+      </div>
+      <p class="gate__note">
+        Either way the books already in this browser stay exactly where they are. Signing in merges
+        them with what has been published; setting up publishes them, encrypted, for the first time.
+      </p>`);
+    document.getElementById('gHasOne').onclick = () => look('signin');
+    document.getElementById('gMakeOne').onclick = () => look('setup');
+    wireLocal();
+  }
+
+  /* The reader has asked, so now we look — `onDemand` is what tells BT.cloud
+     that this request was requested. `intent` decides only what an empty
+     repository MEANS: somebody who came to sign in is told there is nothing
+     published, and somebody who came to create one is handed the setup form.
+     An error is neither, and goes to unreachable() from both. */
+  async function look(intent) {
+    show(checking);
+    remote = await BT.cloud.peek({ onDemand: true });
+    if (remote.error) return unreachable();
+    if (remote.exists) return signIn();
+    if (intent === 'signin') return nothingPublished();
+    return setup();
+  }
+
+  /* ── The 404, said out loud ──────────────────────────────────────────────
+     A repository that answered and holds no library file is not a failure and
+     must not be dressed as one: it is the state every repository is in until
+     the first device publishes. It gets a screen rather than a console line
+     because it is the answer to something the reader just asked, and because
+     the one thing it CAN mean that is worth acting on — a typo in
+     owner/repository — is invisible from anywhere else. */
+  function nothingPublished() {
+    show(`
+      ${brand}
+      <h1>Nothing published yet</h1>
+      <p class="lede">
+        <span class="mono">${esc(BT.cloud.repo())}</span> answered, and there is no library file in
+        it — so there is nothing to sign in to. That is the ordinary state of a repository nobody
+        has synced to yet, not a fault: the file is created by the first device that sets sync up.
+      </p>
+      <div class="actions">
+        <button class="btn btn--primary" id="gMakeOne">Set one up here</button>
+        <button class="btn btn--ghost" id="gWorkLocal">Not now</button>
+      </div>
+      <p class="gate__note">
+        If you were expecting a library here, check the repository under <b>Settings → Sync across
+        machines</b> — a typo in <span class="mono">owner/repository</span> looks exactly like this,
+        as does a private repository this browser cannot read.
+      </p>`);
+    document.getElementById('gMakeOne').onclick = () => setup();
+    wireLocal();
+  }
 
   /* ── Returning, or a device that has never seen this library ─────────── */
   function signIn() {
