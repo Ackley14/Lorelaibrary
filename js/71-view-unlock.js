@@ -333,10 +333,25 @@ BT.gate = (function () {
      A repository that answered and holds no library file is not a failure and
      must not be dressed as one: it is the state every repository is in until
      the first device publishes. It gets a screen rather than a console line
-     because it is the answer to something the reader just asked, and because
-     the one thing it CAN mean that is worth acting on — a typo in
-     owner/repository — is invisible from anywhere else. */
+     because it is the answer to something the reader just asked.
+
+     TWO DIFFERENT SENTENCES, CHOSEN ON `remote.source`, and the difference is
+     the point rather than a flourish — see BT.cloud.repoSource:
+
+       'stored'    a human typed owner/repository into Settings, and a typo
+                   there produces a 404 that is byte-for-byte identical to
+                   "nothing published yet". Nothing else in the app can tell
+                   them apart, so this screen leads with it and puts the field
+                   one click away. An explicit setting that is wrong is worth
+                   telling somebody about.
+       'inferred'  the name was read out of the github.io URL this page is
+                   served from, so it is right by construction and CANNOT be a
+                   typo. Repeating "check what you typed" here would send a
+                   reader hunting for a mistake they had no opportunity to
+                   make — and on the published site that is every visitor. So
+                   it says where the name came from instead, and stops. */
   function nothingPublished() {
+    const stored = remote && remote.source === 'stored';
     show(`
       ${brand}
       <h1>Nothing published yet</h1>
@@ -347,14 +362,23 @@ BT.gate = (function () {
       </p>
       <div class="actions">
         <button class="btn btn--primary" id="gMakeOne">Set one up here</button>
+        ${stored ? '<a class="btn" href="#/settings" id="gNPSettings">Check the repository</a>' : ''}
         <button class="btn btn--ghost" id="gWorkLocal">Not now</button>
       </div>
-      <p class="gate__note">
-        If you were expecting a library here, check the repository under <b>Settings → Sync across
-        machines</b> — a typo in <span class="mono">owner/repository</span> looks exactly like this,
-        as does a private repository this browser cannot read.
+      <p class="gate__note">${stored ? `
+        You typed <span class="mono">${esc(BT.cloud.repo())}</span> in <b>Settings → Sync across
+        machines</b>, so if you were expecting a library here, that is the first thing to check —
+        a typo in <span class="mono">owner/repository</span> looks exactly like this, as does a
+        private repository this browser cannot read.` : `
+        BookTrak worked this name out from the address of this page rather than being told it, so
+        it is not something you can have mistyped. If your library lives somewhere else, set that
+        repository under <b>Settings → Sync across machines</b>.`}
       </p>`);
     document.getElementById('gMakeOne').onclick = () => setup();
+    const s = document.getElementById('gNPSettings');
+    /* The href alone would move the hash while the gate is still covering the
+       app, landing the reader on a Settings screen they cannot see. */
+    if (s) s.onclick = e => { e.preventDefault(); goto('#/settings'); };
     wireLocal();
   }
 

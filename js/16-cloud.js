@@ -64,19 +64,71 @@ BT.cloud = (function () {
      below. If that ever stops being true, `bt.gh.repo.v1` is the override and
      Settings has a field for it; a stored value always wins and its case is
      preserved exactly as typed. */
-  function inferRepo() {
-    let stored = '';
-    try { stored = localStorage.getItem(LS_REPO) || ''; } catch (_) {}
-    if (stored) return stored;
+
+  /* Trimmed on READ as well as on write. setRepo trims, so every value this
+     app writes is already clean — but a value put there by hand, by an import,
+     or by an older build is not, and an untrimmed ' ' is truthy: it would beat
+     inference and name a repository that cannot exist. Whitespace is not a
+     configuration. */
+  function storedRepo() {
+    try { return (localStorage.getItem(LS_REPO) || '').trim(); } catch (_) { return ''; }
+  }
+
+  function inferredRepo() {
     const m = /^([^.]+)\.github\.io$/i.exec(location.hostname);
-    if (m) {
-      const seg = location.pathname.split('/').filter(Boolean)[0];
-      if (seg) return `${m[1]}/${seg}`;
-      return `${m[1]}/${m[1]}.github.io`;
-    }
-    /* file://, localhost, a LAN address: nothing to infer. Sync stays off and
-       the app is local-first, which is its normal state. */
-    return '';
+    if (!m) return '';
+    const seg = location.pathname.split('/').filter(Boolean)[0];
+    if (seg) return `${m[1]}/${seg}`;
+    return `${m[1]}/${m[1]}.github.io`;
+  }
+
+  /* file://, localhost, a LAN address: nothing to infer, and no stored value.
+     Sync stays off and the app is local-first, which is its normal state. */
+  function inferRepo() { return storedRepo() || inferredRepo(); }
+
+  /* ── WHERE THE NAME CAME FROM, which is not the same question as what it is
+     ──────────────────────────────────────────────────────────────────────
+       'stored'    a human typed owner/repository into Settings. A STATEMENT
+                   OF INTENT: "my library is there."
+       'inferred'  read out of the github.io URL this page was served from. A
+                   statement about GEOGRAPHY: "if there were a library, it
+                   would be there." It says nothing about whether one exists.
+       'none'      neither. Sync is off.
+
+     THE WHOLE 404 BUG LIVES IN THE GAP BETWEEN THE FIRST TWO. `data/library.
+     enc.json` missing under an INFERRED repo is the ordinary, expected,
+     permanent first-run state of every fresh deployment — the visitor never
+     asked for that repository, they just followed a link to a Pages site, and
+     there is nothing for them to fix. Missing under a STORED one is a fact
+     about something a person typed, and a typo in owner/repository produces a
+     404 that is indistinguishable from "nothing published" unless somebody
+     says so out loud. So the two are treated differently, deliberately:
+
+       inferred + 404   silent. No error, no console line, no banner. Reported
+                        on screen ONLY if the reader asked us to look
+                        (71-view-unlock's nothingPublished), and phrased as the
+                        ordinary state it is.
+       stored   + 404   the same screen, but leading with the hypothesis that
+                        only applies here — check what you typed — and, on an
+                        enrolled device that has published to this repository
+                        before, a banner from 90-boot.js. A file that WAS there
+                        and now is not, under a name a human chose, is the one
+                        shape of this that is worth interrupting somebody for.
+
+     WHY NONE OF THIS WAS VISIBLE LOCALLY, which is the reason it shipped:
+     inferredRepo() reads location.hostname, so the answer depends on the
+     DEPLOYMENT URL and nowhere else. On 127.0.0.1, localhost, a LAN address
+     or file:// it returns '' — configured() is false, the request is never
+     made, and every local test passes for a reason that has nothing to do
+     with the code being tested. Only a github.io origin exercises the real
+     path. Reproduce it by serving the app under a github.io URL (Playwright
+     can route one to disk), or by setting `bt.gh.repo.v1` before boot so
+     storedRepo() supplies the name and inference is bypassed — the second is
+     the 'stored' half of the table above, and the first is the 'inferred'
+     half, so BOTH are needed to cover this function. */
+  function repoSource() {
+    if (storedRepo()) return 'stored';
+    return inferredRepo() ? 'inferred' : 'none';
   }
 
   const repo = () => inferRepo();
@@ -150,7 +202,16 @@ BT.cloud = (function () {
      deliberate write action by a reader who is configuring sync, and its
      overwrite guard is the whole reason the read exists. The gate is on the
      two paths that look on the APP's initiative instead — peek() and
-     syncDown(). */
+     syncDown().
+
+     AND IT IS enrolled(), NOT repoSource() === 'stored'. Typing a repository
+     into Settings is a statement of intent, and it is tempting to let it stand
+     in for enrolment — but the two are genuinely different: naming the
+     repository is step one of signing in and the passphrase is step two. A
+     device between the two steps has published nothing of its own and holds no
+     key to open anything it found, so looking on its behalf buys a 404 and
+     nothing else. What a stored repository DOES change is how that 404 is
+     described once somebody does look. See repoSource(). */
   function expectPublished() { return configured() && enrolled(); }
 
   /* ── Read ──────────────────────────────────────────────────────────────
@@ -777,9 +838,28 @@ BT.cloud = (function () {
        console error attached — see expectPublished(). 90-boot.js already tests
        enrolled() before it gets here; this is the module defending its own
        rule, so that the next caller inherits it without having to know. */
-    if (!expectPublished()) return { exists: false, unasked: true };
+    if (!expectPublished()) return { exists: false, unasked: true, source: repoSource() };
     const env = await pullEnvelope();
-    if (!env) return { exists: false };
+    /* ABSENT, AND WHO CHOSE THE NAME IT IS ABSENT FROM. 90-boot.js is the only
+       caller that runs unprompted on every launch, so it is the only place that
+       can nag — and the only shape worth nagging about is a file that this
+       device has published before, under a repository a human typed, which is
+       now gone. `everPublished` is that memory: cloud.knownRemoteAt is stamped
+       by restore() and publish() and by nothing else.
+
+       Deliberately NOT reported for an inferred repository, however enrolled
+       this device is. Setting a passphrase without a token enrols without
+       publishing, which is a perfectly ordinary way to use this app, and it
+       would otherwise earn a banner on every single launch about a file that
+       was never meant to exist yet. */
+    if (!env) {
+      return {
+        exists: false,
+        absent: true,
+        source: repoSource(),
+        everPublished: !!(await BT.repo.metaGet('cloud.knownRemoteAt')),
+      };
+    }
     const counts = await restore(env);
     return { exists: true, counts };
   }
@@ -795,12 +875,17 @@ BT.cloud = (function () {
        one bug on that screen that can destroy a library:
 
          { exists: true, … }              there it is.
-         { exists: false }                asked, and the repository definitively
+         { exists: false, absent: true }  asked, and the repository definitively
                                           holds nothing. Offer to create one.
          { exists: false, error }         could NOT find out. Never offer to
                                           create one — creating publishes over
                                           whatever is really there.
          { exists: false, unasked: true } did not ask, and nothing went wrong.
+
+       Every one of them carries `source` — 'stored', 'inferred' or 'none' —
+       because "there is no library file here" means two different things
+       depending on who chose "here", and the screen that says so needs to know
+       which. See repoSource().
 
        The last one is new and is the fix for a live-site console full of 404s.
        Nobody on this device has ever chosen to sync, so there is nothing of
@@ -812,26 +897,37 @@ BT.cloud = (function () {
        point looking IS the action they asked for, so the request is made and
        whatever comes back — including "nothing published yet" — is reported on
        screen, where it belongs, rather than only in the console. */
-    if (!opts.onDemand && !expectPublished()) return { exists: false, unasked: true };
+    const source = repoSource();
+    if (!opts.onDemand && !expectPublished()) return { exists: false, unasked: true, source };
 
     try {
       const env = await pullEnvelope();
-      if (!env) return { exists: false };
+      /* A 404 from every url. Not an error and never logged as one — the
+         browser's own red line for the request is exactly what the gate on the
+         line above exists to avoid, and this branch is only reached when the
+         reader asked us to look, at which point the answer belongs on screen
+         rather than in a console nobody has open. */
+      if (!env) return { exists: false, absent: true, source };
       return {
         exists: true,
+        source,
         updatedAt: env.updatedAt,
         counts: env.counts || null,
         salt: BT.crypto.saltFromEnvelope(env),
         envelope: env,
       };
     } catch (e) {
-      return { exists: false, error: e.message };
+      return { exists: false, error: e.message, source };
     }
   }
 
   async function status() {
     return {
       repo: repo(),
+      /* On the diagnostics deck because "which repository" and "who decided
+         that" are two different questions, and the second one is the whole
+         difference between "nothing published yet" and "that name is wrong". */
+      repoSource: repoSource(),
       path: path(),
       hasToken: hasWriteToken(),
       tokenFromVault: !!vaultToken,
@@ -889,7 +985,7 @@ BT.cloud = (function () {
   }
 
   return {
-    repo, setRepo, token, setToken, hasToken, clearToken, path, configured,
+    repo, setRepo, repoSource, token, setToken, hasToken, clearToken, path, configured,
     enrolled, setEnrolled, expectPublished, signOut,
     tokenForWrite, setVaultToken, hasWriteToken,
     pullEnvelope, push, publish, restore, syncDown, checkConflict, changePassphrase, mergeDocs,

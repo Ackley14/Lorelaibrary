@@ -699,12 +699,47 @@ BT.boot = (function () {
     phase('encryption gate reached');
     let resumed = false;
     let unreachable = false;
+    let vanished = false;
     if (BT.crypto.available() && BT.crypto.isRemembered()) {
       try {
         if (await BT.crypto.restoreFromDevice()) {
           try {
-            await BT.cloud.syncDown();
+            const down = await BT.cloud.syncDown();
             resumed = true;
+
+            /* ── THE ONE ABSENCE WORTH INTERRUPTING SOMEBODY FOR ───────────
+               syncDown() answering `absent` is normally silence, and must be:
+               on the published site BT.cloud infers owner/repo straight out of
+               the github.io URL, so a repository can always be NAMED and a
+               library has almost never been PUBLISHED under it. A 404 there is
+               the ordinary first-run state of a fresh deployment, and a banner
+               for it would greet every reader with a fault that does not
+               exist. It is not logged either — see BT.cloud.repoSource, and
+               note that the browser's own red 404 line is why the request is
+               skipped rather than merely quietened.
+
+               All three of these have to hold before anything is said:
+                 · absent          the file definitively is not there. A 500 or
+                                   a dead socket throws instead and lands in the
+                                   catch below, where it always has.
+                 · source 'stored' a human typed this repository into Settings.
+                                   An inferred name is right by construction and
+                                   cannot be the thing that is wrong.
+                 · everPublished   this device has read or written that file
+                                   before, so we know it existed. Without this,
+                                   a device that set a passphrase but never
+                                   added a token — enrolled, nothing published,
+                                   entirely normal — would be nagged on every
+                                   launch about a file that was never meant to
+                                   be there yet.
+
+               Together they say something specific and actionable: the library
+               this device was syncing with is no longer at the name it was
+               told to look under. That is a typo'd repository, a renamed one,
+               or a deleted file — and every one of them means saving has
+               quietly stopped, which is the failure this app must never let
+               pass in silence. */
+            vanished = !!(down && down.absent && down.source === 'stored' && down.everPublished);
           } catch (e) {
             /* THE KEY IS IN HAND AND THE NETWORK IS NOT. Start anyway, on the
                copy this device already holds — which is the last state that
@@ -728,6 +763,15 @@ BT.boot = (function () {
       await startApp();
       if (unreachable) {
         BT.ui.banner('Could not reach your library just now, so this is the copy stored on this device. Changes will be saved and merged as soon as it is reachable again.');
+      } else if (vanished) {
+        /* Deliberately not phrased as "your library is gone": it is not, the
+           app is running on it. What is gone is the published copy at the name
+           this device was given, and the name is the thing a reader can fix. */
+        BT.ui.banner(
+          `There is no library file in ${BT.cloud.repo()} any more, though this device has synced with `
+          + 'one there before. Your books are safe in this browser — check the repository is still '
+          + 'the right one, or sign in again to publish afresh.',
+          { actionLabel: 'Settings', onAction: () => BT.router.go('#/settings') });
       }
       return;
     }

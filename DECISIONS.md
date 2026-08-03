@@ -208,6 +208,7 @@ stray `mt.` prefix does not fail loudly — it reaches into the other app's data
 | `cache:'no-cache'` in place of `'reload'` | 37 of those files come back **304, zero bytes**, from GitHub Pages itself (verified with `If-None-Match` against production). Same staleness guarantee, 503 KB cheaper |
 | A repeat visit, once the worker is installed | First paint **96 ms**, tree **~150 ms**, **zero** network requests. The precached shell was already doing its job and needed no change |
 | A first visit to `#/unlock` on the published site | **Three HTTP 404s** for `data/library.enc.json` — relative, then `raw.githubusercontent` `main` and `master` — and a console error for each, in all three engines, for a file that correctly does not exist. Invisible locally forever: `localhost` infers no repository, so `configured()` is false and the read never ran |
+| Reproducing that inference locally | Serving the working tree at `https://ackley14.github.io/Lorelaibrary/` through Playwright request interception makes `location.hostname` genuinely `ackley14.github.io`, so `repoSource()` really returns `inferred`. Reverting the gate to `configured()` under that harness reproduces the production signature exactly — **3 requests, 3 × 4xx, 3 red console 404s** — where a `127.0.0.1` harness reports 0/0/0 whether the code is fixed or broken. A `bt.gh.repo.v1` override seeded before boot covers the other half (`stored`), which inference can never produce |
 
 ## Open
 
