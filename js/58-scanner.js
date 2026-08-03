@@ -102,6 +102,14 @@ BT.scanner = (function () {
   let opened = false;
   let session = null;          // { opts, resolve, codes, closing }
   let lastFocus = null;
+  let focusGuard = null;       // see the focus-trap note in paint()
+  /* WHICH open() A PENDING start() BELONGS TO.
+     `opened` alone cannot answer that. A second open() calls close() (opened
+     false) and then immediately sets opened true again for its own session, so
+     the FIRST getUserMedia — still in flight behind a permission prompt or a
+     slow camera — wakes up, sees `opened === true`, and adopts a stream that
+     belongs to nobody. See the guard in start(). */
+  let openSeq = 0;
   let rafId = 0;
   let vfcId = 0;
   let decoding = false;
@@ -348,6 +356,34 @@ BT.scanner = (function () {
       if (e.target === h) close();
     };
 
+    /* ── THE FOCUS TRAP ────────────────────────────────────────────────────
+       This element already claims `role="dialog"` and `aria-modal="true"`, and
+       until this guard existed both were a lie. The three panes underneath are
+       still fully tabbable, so ONE Tab off the close button walked out of the
+       camera and into the app behind it — measured: brand link, the two theme
+       buttons, the tree filter, then every row of the index tree in turn, with
+       the viewfinder still filling the screen. Shift+Tab landed in the footer's
+       attribution links. A sighted keyboard user was typing into a page they
+       could not see; a screen-reader user was told they were inside a modal
+       dialog while their focus was outside it.
+
+       Same rule and same implementation as 59-editions.js's picker, and for the
+       same reason stated there: rather than enumerate focusable children — the
+       torch button appears and disappears with the camera's capabilities, and
+       the status line rewrites itself ten times a second — pull focus back
+       whenever it lands outside the card. Tab, Shift+Tab and a stray click on
+       the page behind are all one rule.
+
+       Registered on `document` in the CAPTURE phase so it sees focus arriving
+       anywhere, and torn down by close() alongside the tracks. */
+    if (focusGuard) document.removeEventListener('focusin', focusGuard, true);
+    focusGuard = e => {
+      if (!opened || !host || host.contains(e.target)) return;
+      const back = host.querySelector('[data-scan-close]');
+      if (back) back.focus();
+    };
+    document.addEventListener('focusin', focusGuard, true);
+
     const btn = h.querySelector('[data-scan-close]');
     if (btn) btn.focus();
   }
@@ -407,6 +443,7 @@ BT.scanner = (function () {
     if (opened) close();
 
     const out = { codes: 0, reason: 'closed', error: null };
+    const seq = ++openSeq;
     return new Promise(resolve => {
       opened = true;
       session = { opts: o, resolve, out };
@@ -427,7 +464,7 @@ BT.scanner = (function () {
 
       paint(o);
       say('Starting the camera…');
-      start(o).catch(e => {
+      start(o, seq).catch(e => {
         console.warn('[scanner] the camera would not start', e);
         out.reason = 'error';
         out.error = e;
@@ -436,7 +473,7 @@ BT.scanner = (function () {
     });
   }
 
-  async function start(o) {
+  async function start(o, seq) {
     if (!isAvailable()) {
       /* Reached only when something opened the scanner without asking first —
          both callers hide their control on isAvailable() === false. Worth a
@@ -457,7 +494,7 @@ BT.scanner = (function () {
        640×480 its bars land under two pixels each and no decoder recovers
        that. 1920×1080 is ideal rather than required, so a 720p webcam simply
        gets 720p. */
-    stream = await navigator.mediaDevices.getUserMedia({
+    const got = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: { ideal: 'environment' },
         width: { ideal: 1920 },
@@ -465,10 +502,28 @@ BT.scanner = (function () {
       },
     });
 
-    /* Closed while the permission prompt was up. The stream still arrives, and
-       an unclosed one is a camera light nobody can explain. */
-    if (!opened) { stopTracks(); return; }
+    /* TWO WAYS THIS STREAM CAN ALREADY BE ORPHANED, and only the first was
+       covered. Both end the same way: stop the tracks we were handed and leave.
 
+       CLOSED while the permission prompt was up. The stream still arrives, and
+       an unclosed one is a camera light nobody can explain.
+
+       SUPERSEDED — a SECOND open() arrived while this one was still waiting for
+       the camera. open() answers re-entry with `if (opened) close()` and then
+       sets `opened` true again for its own session, so by the time this line
+       runs the flag says "open" and means somebody else's overlay. The old code
+       assigned this stream to the module's `stream` anyway; the newer start()
+       then overwrote that variable a moment later and close() stopped only the
+       last one. MEASURED: two open() calls 20ms apart leave one live video
+       track after the overlay is shut and hidden — a camera light with no
+       window attached to it, which is precisely what close()'s own step 2 says
+       cannot be skipped. Two taps on "Scan a barcode" is all it takes.
+
+       `openSeq` is what tells the two cases apart; `opened` on its own cannot,
+       because it is true in both the healthy case and this one. */
+    if (!opened || seq !== openSeq) { stopTracksOf(got); return; }
+
+    stream = got;
     track = stream.getVideoTracks()[0] || null;
 
     video = document.createElement('video');
@@ -752,6 +807,15 @@ BT.scanner = (function () {
     torchOn = false;
     decoding = false;
 
+    /* BEFORE the host is emptied, and before focus is handed back below: the
+       guard's whole job is to pull focus into the card, so leaving it attached
+       while the card is being destroyed would fight the `lastFocus.focus()`
+       that returns the reader to the button they pressed. */
+    if (focusGuard) {
+      document.removeEventListener('focusin', focusGuard, true);
+      focusGuard = null;
+    }
+
     if (host) {
       host.onclick = null;
       host.innerHTML = '';
@@ -780,9 +844,14 @@ BT.scanner = (function () {
     rafId = 0;
   }
 
-  function stopTracks() {
-    if (!stream) return;
-    for (const t of stream.getTracks()) {
+  function stopTracks() { stopTracksOf(stream); }
+
+  /* Takes the stream rather than reading the module variable, because the one
+     that has to be stopped is not always the one the module is holding — see
+     the `superseded` case in start(). */
+  function stopTracksOf(s) {
+    if (!s) return;
+    for (const t of s.getTracks()) {
       try { t.stop(); } catch (e) { console.warn('[scanner] a track would not stop', e); }
     }
   }

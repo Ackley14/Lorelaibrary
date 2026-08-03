@@ -74,11 +74,21 @@ BT.viewLibrary = (function () {
   };
   const progressFrac = it => BT.ui.progressFraction(it) || 0;
 
+  /* NEVER `it.user.x` in this file. `user` is stamped by normalize on the way
+     in, so every record the app writes has one — but a hand-edited export, a
+     row from a build that predates the field, and a half-written sync document
+     all reach `allItems()` without it, and a comparator throws INSIDE
+     Array.sort. The router catches it and paints its error state, so the whole
+     shelf disappears over one bad row: the same shape as the audit bug where a
+     `user`-less item threw in the tree's count loop and the router never
+     started at all. Both places now read through a default. */
+  const u = it => (it && it.user) || {};
+
   const SORTS = {
-    added:     { label: 'Recently added', fn: (a, b) => (b.user.addedAt || 0) - (a.user.addedAt || 0) },
+    added:     { label: 'Recently added', fn: (a, b) => (u(b).addedAt || 0) - (u(a).addedAt || 0) },
     title:     { label: 'Title',          fn: byTitle },
     published: { label: 'Published',      fn: (a, b) => pubKey(a) - pubKey(b) },
-    rating:    { label: 'Your rating',    fn: (a, b) => (b.user.rating || -1) - (a.user.rating || -1) },
+    rating:    { label: 'Your rating',    fn: (a, b) => (u(b).rating || -1) - (u(a).rating || -1) },
     progress:  { label: 'Progress',
                  fn: (a, b) => (progressRank(a) - progressRank(b))
                             || (progressFrac(b) - progressFrac(a))
@@ -123,11 +133,29 @@ BT.viewLibrary = (function () {
 
   /* ══ RENDER ═══════════════════════════════════════════════════════════════ */
 
-  async function render(params, query) {
+  /* `alive` is the router's "is this still the screen the reader asked for"
+     token, and it is threaded here for the reason every OTHER view in the app
+     already threads it (61-search, 66-alerts, 67-people, 68-stats, 69-settings,
+     75-scan all check it): the read below is the WHOLE LIBRARY out of
+     IndexedDB, and it is the only thing between a hash change and this
+     function writing over #view.
+
+     This screen was the one that did not, and it is the worst place for the
+     omission — it is the front door, it is what #/item/:uid renders underneath
+     the inspector, and it is the read that grows with the size of the shelf.
+     REPRODUCED with the read widened to 900ms: tap Title on a big library, tap
+     Stats before it lands, and the router ends on #/stats with the tree
+     highlighting Stats while #view holds the library table, the breadcrumb
+     reads "Library / All books" and the pane actions offer Select / Table /
+     Covers. Nothing recovers it but navigating away and back. On a fast machine
+     with 1,500 books the read is ~25ms and it never fired in eight attempts;
+     the window is a property of the device and the shelf, not of the bug. */
+  async function render(params, query, alive) {
     wireGlobal();
     const view = document.getElementById('view');
     const q = query || {};
     const all = await BT.repo.allItems();
+    if (alive && !alive()) return;
 
     if (!all.length) return firstRun(view);
 
@@ -177,9 +205,9 @@ BT.viewLibrary = (function () {
        holds entirely in memory for this screen, so an index would cost a write
        on every put to save a pass over an array we have already walked. */
     if (q.format) rows = rows.filter(i => BT.ui.formatOf(i) === q.format);
-    if (q.pile) rows = rows.filter(i => (i.user.pile || null) === q.pile);
+    if (q.pile) rows = rows.filter(i => (u(i).pile || null) === q.pile);
 
-    if (q.tag) rows = rows.filter(i => (i.user.tags || []).indexOf(q.tag) >= 0);
+    if (q.tag) rows = rows.filter(i => (u(i).tags || []).indexOf(q.tag) >= 0);
 
     /* The tree files "No date set" under #/up, where the timeline can say
        something useful about it. The param is honoured here too so that a
@@ -213,9 +241,17 @@ BT.viewLibrary = (function () {
     const [section, label] = crumbFor(q);
     BT.ui.crumb([section, label]);
 
+    /* `role="group"` + a name on every one of the three button clusters on this
+       screen, which is what 56-inspector already does for its Status and
+       Ownership segments ("Reading status", "Ownership"). This screen was the
+       one that did not, and the words inside these particular buttons are the
+       ones that need the frame most: "Any / To sell / Sold" and "Table /
+       Covers" are announced as three and two unrelated toggle buttons with no
+       statement of what they toggle, and "Any" on its own is not a sentence.
+       One attribute pair each; nothing about the layout changes. */
     BT.ui.paneActions(`
       <button class="chip" type="button" id="selBtn" aria-pressed="${selecting}">Select</button>
-      <div class="seg" id="modeSeg">
+      <div class="seg" id="modeSeg" role="group" aria-label="How to show the list">
         <button type="button" data-mode="table" aria-pressed="${mode() === 'table'}">Table</button>
         <button type="button" data-mode="grid" aria-pressed="${mode() === 'grid'}">Covers</button>
       </div>`);
@@ -223,7 +259,7 @@ BT.viewLibrary = (function () {
     const cur = BT.inspector.current;
     view.innerHTML = `
       <div class="toolbar">
-        <div class="chips" id="statusChips">
+        <div class="chips" id="statusChips" role="group" aria-label="Filter by reading status">
           ${/* Ids AND labels come from ui-core's ladder rather than being typed
                 out here, for the reason the tree gives about its genre rows:
                 the day the ladder changed, a hand-written copy of it in a
@@ -236,7 +272,7 @@ BT.viewLibrary = (function () {
             [['', 'All']].concat(BT.ui.STATUSES.map(s => [s, BT.ui.STATUS_WORD[s]])).map(([k, l]) =>
             `<button class="chip" type="button" data-status="${k}" aria-pressed="${(q.status || '') === k}">${esc(l)}</button>`).join('')}
         </div>
-        <div class="seg" id="pileSeg">
+        <div class="seg" id="pileSeg" role="group" aria-label="Filter by what you are doing with the book">
           ${[['', 'Any'], ['sell', 'To sell'], ['sold', 'Sold']].map(([v, l]) =>
             `<button type="button" data-pile="${v}" aria-pressed="${(q.pile || '') === v}">${l}</button>`).join('')}
         </div>
@@ -532,6 +568,13 @@ BT.viewLibrary = (function () {
          every tick is announced inconsistently, because the announcement is a
          property of a region that was already there when the text changed. */
       bar.setAttribute('aria-live', 'polite');
+      /* Named as well as live. "Keep" and "Clear selection" sitting on their own
+         in the tab order say nothing about WHAT is being kept — the count that
+         gives them their meaning is the live text two elements away, which a
+         screen reader has already announced and moved past by the time the
+         reader tabs into the buttons. */
+      bar.setAttribute('role', 'group');
+      bar.setAttribute('aria-label', 'Actions for the selected books');
       bar.onclick = onBar;
       bar.innerHTML = `
         <span class="n"></span>

@@ -39,6 +39,24 @@ BT.gate = (function () {
 
   const el = () => document.getElementById('gate');
 
+  /* ── THE FOCUS TRAP ──────────────────────────────────────────────────────
+     `aria-hidden` on `.app` hides the three panes from a screen reader and does
+     nothing whatever to the TAB ORDER, and that combination is worse than
+     neither. MEASURED before this existed: from the gate's "Not now" button,
+     one Tab reached the brand link, then the two theme buttons, then the tree
+     filter, then every row of the index tree — all of it announced as nothing
+     at all, because we had just told the screen reader that region did not
+     exist. A sighted keyboard user was typing a passphrase into a page whose
+     focus had silently left the panel; a screen-reader user was moving through
+     controls that report no name, no role and no value.
+
+     Same rule and same implementation as 58-scanner.js and 59-editions.js:
+     rather than enumerate focusable children — this panel has five different
+     layouts and re-renders itself on every step of sign-in — pull focus back
+     whenever it lands outside. Tab, Shift+Tab and a stray click behind the
+     overlay are one rule. */
+  let focusGuard = null;
+
   function show(html) {
     const g = el();
     if (!g) return;
@@ -46,9 +64,33 @@ BT.gate = (function () {
     g.hidden = false;
     const app = document.querySelector('.app');
     if (app) app.setAttribute('aria-hidden', 'true');
+
+    if (!focusGuard) {
+      focusGuard = e => {
+        const gate = el();
+        if (!gate || gate.hidden || gate.contains(e.target)) return;
+        /* The first focusable control in the panel, whatever this step drew —
+           the passphrase box on the sign-in screen, a link on the "no
+           repository" one. The panel itself is the fallback so a step with no
+           control at all still holds focus rather than handing it back to a
+           page that is marked hidden. */
+        const first = gate.querySelector(
+          'input:not([disabled]), button:not([disabled]), a[href], select, textarea');
+        if (first) { first.focus(); return; }
+        const panel = gate.querySelector('.gate__panel');
+        if (panel) { panel.setAttribute('tabindex', '-1'); panel.focus(); }
+      };
+      document.addEventListener('focusin', focusGuard, true);
+    }
   }
 
   function hide() {
+    /* Released BEFORE the panel is emptied, so the guard cannot fight whatever
+       takes focus next on the screen the reader is being handed back. */
+    if (focusGuard) {
+      document.removeEventListener('focusin', focusGuard, true);
+      focusGuard = null;
+    }
     const g = el();
     if (g) { g.hidden = true; g.innerHTML = ''; }
     const app = document.querySelector('.app');

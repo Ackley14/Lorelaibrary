@@ -330,17 +330,65 @@ BT.cloud = (function () {
     return { counts: doc.counts, commit: res.commit && res.commit.sha };
   }
 
-  /* Replace-only, and that is safe here in a way it is not in Settings' Import:
-     what is being replaced has just been merged with what is local, or is being
-     adopted onto a device that had nothing. BT.repo.importAll runs every item
-     through BT.normalize.absorbSynced, so a device that already holds the full
-     bibliographic record keeps it and takes only what the other device
-     actually changed. */
+  /* ── Bringing the repository's copy down ────────────────────────────────
+     MERGED WITH WHAT THIS DEVICE ALREADY HOLDS, never simply written over it.
+
+     This used to be replace-only, on the reasoning that what is being replaced
+     "has just been merged with what is local, or is being adopted onto a device
+     that had nothing". The first half is true of publish(), which merges before
+     it writes. It is NOT true of either caller of this function:
+
+       90-boot.js  start() calls syncDown() on EVERY launch of a remembered
+                   device, before a single pixel is drawn.
+       71-view-unlock.js  the gate's Open library button.
+
+     So the losing sequence needed nothing exotic. Edit a book; the publish
+     debounce fires; the network is down, or the token has expired, or
+     checkConflict cannot reach GitHub — publish() correctly refuses rather than
+     guessing, the banner says so, and the edit sits in this browser only. Close
+     the tab. Next launch, this function pulled the older repository copy and
+     wrote it straight over the top.
+
+     MEASURED on this build, with the local record's `user.updatedAt` 560ms
+     NEWER than the remote's: a rating of 9 reverted to 1, the notes were
+     erased, `finished` went back to `want`, a page position of 210 of 300
+     disappeared and the reading-log row went with it. BT.normalize.absorbSynced
+     is what does it — it takes `merged.user = incoming.user` wholesale, which
+     is right for a field-level absorb and cannot see that the incoming record
+     is the older of the two.
+
+     Two sentences the app prints made this a broken promise rather than only a
+     bug. The gate's "Not now" says changes "will be merged the next time you
+     sign in", and boot's offline banner says they "will be saved and merged as
+     soon as it is reachable again". Both lead here.
+
+     mergeDocs is the right function and is already trusted for exactly this job
+     in the other direction — record-level last-write-wins on `user.updatedAt`,
+     which putItem stamps on every reader-driven write and putItemQuiet
+     deliberately does not, so a background refresh can never outrank an edit.
+     Tombstones still win over an older edit, so a book deleted on the other
+     device stays deleted.
+
+     Skipped entirely when this device holds nothing, which is the ordinary
+     sign-in on a new phone: merging an empty side is a no-op that costs a full
+     export of a library we are about to overwrite anyway. */
   async function restore(envelope) {
     const doc = await BT.crypto.decryptJson(envelope);
     if (doc.vault && doc.vault.githubToken) setVaultToken(doc.vault.githubToken);
-    const counts = await BT.repo.importAll(doc);
+
+    let incoming = doc;
+    if (await BT.repo.countItems()) {
+      const mine = await BT.repo.exportAll();
+      incoming = mergeDocs(mine, doc).doc;
+    }
+
+    const counts = await BT.repo.importAll(incoming);
     await BT.repo.metaSet('cloud.lastPullAt', Date.now());
+    /* The envelope's own stamp, NOT the merge's. It records which repository
+       version this device has seen, and that is what the next publish compares
+       against to decide whether anybody else has written since. Stamping it
+       with anything derived from the merge would make the next save believe it
+       had already published a document that only exists in this browser. */
     await BT.repo.metaSet('cloud.knownRemoteAt', envelope.updatedAt || null);
     return counts;
   }

@@ -346,6 +346,11 @@ BT.inspector = (function () {
       </div>`}
     `;
 
+    /* THE NOTES FIELD IS CARRIED ACROSS THE REBUILD, and this is the only
+       control in the pane that needs it — see keepNotes below. Read BEFORE the
+       innerHTML write that is about to destroy it. */
+    const held = keepNotes(host, item);
+
     /* Replace only the sheet's contents, never the sheet itself. `.sheet`
        carries backdrop-filter and `.wash` is the colour behind it; recreating
        a backdrop-filtered element forces the compositor to rebuild the blurred
@@ -359,6 +364,8 @@ BT.inspector = (function () {
       host.innerHTML = shell(body, item);
     }
 
+    const carried = restoreNotes(host, held);
+
     /* Cloth colours move as custom properties on the surviving element. */
     const wash = host.querySelector('.wash');
     if (wash) {
@@ -368,8 +375,70 @@ BT.inspector = (function () {
     }
 
     lastUid = item.uid;
-    lastBody = body;
+    /* `body` is what was WRITTEN; if the notes were carried back over the top
+       of it, that string is no longer what is on screen. Recording it would let
+       the next paint compare against a render that never existed and skip
+       itself — the same trap invalidate() exists for everywhere else. */
+    lastBody = carried ? '' : body;
     wire(item);
+  }
+
+  /* ══ THE NOTES FIELD SURVIVES A REPAINT ═══════════════════════════════════
+     Every other control here draws a value the database already holds, so
+     rebuilding the sheet costs nothing. `#inspNotes` is the exception and the
+     only one: it holds text the reader has TYPED and the app has not written
+     yet — the save is debounced 500ms so that a paragraph is not thirty
+     writes — and an innerHTML rebuild replaces it with a textarea
+     re-initialised from the older stored value.
+
+     THAT WAS DESTROYING TYPING, not merely interrupting it. paint() runs a
+     second time whenever hydrate answers, and 50-ui-core fires hydrate
+     unawaited on every add and every open — an Open Library round trip is one
+     to three seconds, which is exactly the window in which somebody who has
+     just added a book is writing about it. MEASURED on this build: type
+     `ABCDEFGHIJKL` into the notes of a freshly-added book, let the hydrate land
+     mid-way, and both the screen and the database end up holding `EFGHIJKL`.
+     The first four characters are gone with nothing on screen to say so — the
+     old textarea is detached with the caret still in it, its debounce saves the
+     pre-repaint text, and the NEW textarea's debounce then writes over that
+     with only what was typed after the swap.
+
+     Restoring is safe against a legitimate change from elsewhere, because this
+     pane deliberately does not repaint on `item:put` (see init()) — nothing but
+     our own paint can reach here while the reader is typing, so the value in
+     the box is always the newer of the two.
+
+     The selection is carried too. Restoring the text and dropping the caret to
+     the end would still lose the reader's place mid-sentence, which is the same
+     failure one keystroke smaller. */
+  function keepNotes(host, item) {
+    const ta = host.querySelector('#inspNotes');
+    if (!ta || lastUid !== item.uid) return null;
+    const stored = ((item.user || {}).notes) || '';
+    const focused = document.activeElement === ta;
+    /* TWO reasons to carry, and the second one is not cosmetic. Unsaved text is
+       the data-loss case above. A FOCUSED field is the other half of it: even
+       when the debounce has already saved every character, replacing the
+       element the reader is typing into drops the caret and the focus, so the
+       next keystroke goes nowhere and the sentence is abandoned mid-word. */
+    if (!focused && ta.value === stored) return null;
+    return { value: ta.value, start: ta.selectionStart, end: ta.selectionEnd, focused };
+  }
+
+  /* -> true when something was actually carried across, which is what tells
+     paint() the recorded signature would be a lie. */
+  function restoreNotes(host, held) {
+    if (!held) return false;
+    const ta = host.querySelector('#inspNotes');
+    if (!ta) return false;
+    const rewritten = ta.value !== held.value;
+    if (rewritten) ta.value = held.value;
+    if (held.focused) {
+      try { ta.focus(); ta.setSelectionRange(held.start, held.end); } catch (_) {}
+    }
+    /* Only a REWRITE makes the signature a lie; putting the caret back does
+       not change a byte of the markup paint() recorded. */
+    return rewritten;
   }
 
   /* Authors, not "credits". Three is the cap: an anthology can list twenty

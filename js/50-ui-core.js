@@ -816,6 +816,124 @@ BT.ui = (function () {
     return api;
   })();
 
+  /* ══ ROW KEYBOARD NAVIGATION ════════════════════════════════════════════
+     Every screen in this app answers a click on a `[data-uid]` row by opening
+     the book, and NOT ONE of them answered a keyboard. Measured on this build
+     before the code below existed: the library table's 500 `<tr data-uid>` had
+     no tabindex, no role and nothing focusable inside them (`.rowsel` is
+     `display:none` until Select is pressed), the covers grid's `.card` the
+     same, and so were #/search's `.miss`, #/alerts' `.ev` and #/people's
+     `.card`. Forty consecutive Tab presses on the library walked the brand
+     link, the theme buttons, the tree filter and every row of the index tree
+     and never once entered #view. The app's central gesture — pick a book, read
+     what you wrote about it — was unreachable without a pointer, on an app that
+     already ships arrow-key navigation for the tree.
+
+     WHY ONE ROVING TAB STOP AND NOT FIVE HUNDRED. Making every row tabbable is
+     the two-line version and it is the wrong answer: it puts a 500-press
+     obstacle between the shelf and the inspector behind it, which is a worse
+     screen to operate than the one this replaces. The pattern here is the
+     standard roving tabindex, and it is also the one the reader has already
+     learned in the tree: one stop into the list, then Up/Down between rows,
+     Home/End for the ends, Enter or Space to open.
+
+     APPLIED FROM ONE PLACE, over #view, rather than in each of the five views.
+     Those views paint at moments the router never sees — a search repaints as
+     results arrive, #/people fills its strip per follow — so a per-render hook
+     would have to be added five times and remembered a sixth. A MutationObserver
+     on #view is one rule that cannot be forgotten by the next screen.
+
+     THE LISTENER IS ON #view, NOT ON document, and that is load-bearing.
+     55-tree.js owns ArrowUp/ArrowDown at the document level for the index tree,
+     and two handlers claiming the same keys would move the tree's highlight
+     while the reader walked the shelf. #view is a descendant, so it sees the
+     event first and `stopPropagation()` settles it — but only for the keys
+     actually handled, so `/` still jumps to the tree filter and `t` still
+     toggles the theme from anywhere. */
+  const rowNav = (function () {
+    let host = null;
+    let queued = false;
+    let sig = '';
+
+    const rowsOf = () => (host ? [...host.querySelectorAll('[data-uid]')] : []);
+
+    /* Exactly one row carries tabindex="0"; the rest are reachable only from
+       it. Re-stamped whenever the set of rows changes — and whenever the rows
+       are new DOM that carries no tabindex at all, which is why the signature
+       alone is not enough to skip on: a filter can produce a different list
+       with the same length and the same endpoints. */
+    function sync() {
+      const list = rowsOf();
+      if (!list.length) { sig = ''; return; }
+      const next = list.length + '|' + list[0].dataset.uid + '|' + list[list.length - 1].dataset.uid;
+      if (next === sig && list[0].hasAttribute('tabindex')) return;
+      sig = next;
+      const here = document.activeElement && document.activeElement.closest
+        ? document.activeElement.closest('[data-uid]') : null;
+      const keep = (here && host.contains(here) && list.indexOf(here) >= 0) ? here : list[0];
+      for (const r of list) r.setAttribute('tabindex', r === keep ? '0' : '-1');
+    }
+
+    function move(from, to) {
+      const list = rowsOf();
+      const i = list.indexOf(from);
+      if (i < 0) return;
+      const j = Math.max(0, Math.min(list.length - 1, to === 'end' ? list.length - 1
+        : to === 'home' ? 0 : i + to));
+      for (const r of list) r.setAttribute('tabindex', '-1');
+      list[j].setAttribute('tabindex', '0');
+      list[j].focus();
+      list[j].scrollIntoView({ block: 'nearest' });
+    }
+
+    function onKey(e) {
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      const row = e.target && e.target.closest ? e.target.closest('[data-uid]') : null;
+      if (!row || !host.contains(row)) return;
+      /* A control INSIDE a row keeps its own keys: the Add button on a search
+         result, the follow chip beside a by-line, the selection checkbox. Only
+         the row itself answers here. */
+      if (e.target !== row) return;
+
+      const k = e.key;
+      if (k === 'ArrowDown' || k === 'ArrowUp' || k === 'Home' || k === 'End') {
+        e.preventDefault();
+        e.stopPropagation();
+        move(row, k === 'ArrowDown' ? 1 : k === 'ArrowUp' ? -1 : k === 'Home' ? 'home' : 'end');
+        return;
+      }
+      /* `click()` rather than a second copy of each view's intent. Every one of
+         them already delegates from a container, so a synthetic click on the row
+         lands in the same branch a mouse would — including the library's
+         selection mode, where Space ticks the row instead of opening it. */
+      if (k === 'Enter' || k === ' ' || k === 'Spacebar') {
+        e.preventDefault();
+        e.stopPropagation();
+        row.click();
+      }
+    }
+
+    function init() {
+      if (host) return;
+      host = document.getElementById('view');
+      if (!host) return;
+      host.addEventListener('keydown', onKey);
+      /* childList only. `paintChecks` rewrites a class on every row on every
+         tick of a selection, and observing attributes would re-run this pass
+         several hundred times while somebody drags out a range. */
+      if (typeof MutationObserver === 'function') {
+        new MutationObserver(() => {
+          if (queued) return;
+          queued = true;
+          requestAnimationFrame(() => { queued = false; sync(); });
+        }).observe(host, { childList: true, subtree: true });
+      }
+      sync();
+    }
+
+    return { init, sync };
+  })();
+
   /* ══ ADD / MUTATE ═══════════════════════════════════════════════════════ */
 
   /* ── SEAM ──────────────────────────────────────────────────────────────
@@ -1087,7 +1205,7 @@ BT.ui = (function () {
     progressOf, progressFraction, progressText, progressBar, totalPagesOf, pagesCell, setProgress,
     table, tableRow, grid, COLUMNS,
     emptyState, errorBox, skeletonGrid, groupHead, toast, banner, crumb, paneActions,
-    selection,
+    selection, rowNav,
     addItem, hydrate, setStatus, setPile, bulkSetPile, confirmDialog,
     STATUSES, STATUS_WORD, PILE_WORD, FORMAT_LABEL,
   };

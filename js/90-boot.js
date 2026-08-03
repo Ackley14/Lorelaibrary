@@ -189,8 +189,13 @@ BT.boot = (function () {
     /* An item is not a page. It selects into the inspector and leaves the list
        underneath it intact — the route survives only so that links still
        work. */
-    BT.router.on('/item/:uid', async p => {
-      await library({}, {});
+    /* `alive` is forwarded, not dropped. This handler renders the library
+       underneath the pane, and 62-view-list.js now aborts its write when the
+       route has moved on — handing it nothing would opt this one route back
+       out of that guard, which is exactly the route a stale link arrives on. */
+    BT.router.on('/item/:uid', async (p, q, alive) => {
+      await library({}, {}, alive);
+      if (alive && !alive()) return;
       BT.inspector.show(p.uid);
     });
   }
@@ -659,6 +664,14 @@ BT.boot = (function () {
     appStarted = true;
 
     routes();
+    /* BEFORE BT.tree.init(), and the order is not cosmetic. rowNav binds its
+       keydown to #view and the tree binds its own to `document`; #view is a
+       descendant, so the row handler runs first and can settle Up/Down for the
+       shelf without the tree's highlight also jumping. Initialising it after
+       the tree would not change that — bubble order is decided by the DOM, not
+       by registration — but keeping the two together here is what makes the
+       relationship visible to whoever adds the third keyboard surface. */
+    BT.ui.rowNav.init();
     BT.tree.init();
     BT.inspector.init();
     /* THE ROUTER MUST START. This await is the only thing between a stored
