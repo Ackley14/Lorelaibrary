@@ -402,10 +402,73 @@ BT.openlibrary = (function () {
     return (raw && raw.key) ? raw : null;
   }
 
+  /* ── THE AUTHOR INDEX MATCHES WHOLE WORDS, SO A HALF-TYPED NAME MATCHES
+        NOTHING. THIS IS THE RETYPING BUG. ──────────────────────────────────
+
+     Measured against the live endpoint, and it is not a ranking problem, it is
+     a zero:
+
+         q=sanderso      numFound 0        ← one letter short
+         q=sanderso*     numFound 1090     ← Sanderson, Sandersons, …
+         q=brandon sand* Brandon Sanderson first, of 5
+         q=kist*         Gwendolyn Kiste third, of 648
+
+     `/search/authors.json` is a Solr index over complete tokens. Every
+     intermediate state of typing a name — and there are eight of them in
+     "sanderson" — is therefore an HTTP 200 with an empty `docs` array, which
+     the picker can only render as "no author matches". The reader sees a
+     confident denial, assumes they got the spelling wrong, clears the box and
+     types it again. That is the reported symptom in the user's own words:
+     "i often have a hard time finding authors needing to retype their name
+     several times for it to come up". Nothing was broken; the query was asked
+     one keystroke at a time and answered literally every time.
+
+     So the TRAILING TOKEN GETS A `*`. That is what turns this endpoint from an
+     exact-name lookup into the typeahead the box has always looked like.
+
+     THE GUARDS ARE NOT DECORATION:
+
+       · only the LAST token, because that is the one still being typed. A
+         wildcard on every token widens the query for no gain and costs Solr
+         real time.
+       · only if it is at least two characters. `b*` matches 170,000 authors
+         (verified with `ki*`), which is a page of noise and an expensive query
+         on a service that asks not to be hammered.
+       · only if it is plain word characters. Solr's query grammar takes `:`,
+         `~`, `^`, `(`, `[` and quotes as syntax, so appending to a token
+         carrying one of those can produce a parse error or, worse, a valid
+         query that means something else entirely. A token like that is passed
+         through untouched — a name with punctuation in it is already a
+         complete word.
+       · never twice. A reader who types their own `*` gets theirs.
+
+     A COMPLETE NAME IS UNHARMED, which is the thing to check before believing
+     any of this: `brandon sanderson*` -> numFound 3, Brandon Sanderson first;
+     `gwendolyn kiste*` -> numFound 2, Gwendolyn Kiste first; `stephen king*` ->
+     numFound 97, Stephen King (606 works) first. The wildcard widens the tail
+     of the last word and does not disturb what already matched.
+
+     WHAT THIS DOES NOT FIX is Open Library's ranking, which is as unreliable
+     here as it is on book search (point 3 in the file header): `q=brandon` puts
+     Lee E. Brandon first and Brandon Sanderson sixth. Re-ranking is a view
+     concern and stays one — 67-view-people.js scores these rows against what
+     was typed. This function returns them in the order Open Library sent them,
+     like every other search in this file. */
+  const AUTHOR_TOKEN = /^[A-Za-z0-9'’-]{2,}$/;
+
+  function typeaheadQuery(query) {
+    const parts = query.split(/\s+/).filter(Boolean);
+    if (!parts.length) return query;
+    const last = parts[parts.length - 1];
+    if (last.indexOf('*') >= 0 || !AUTHOR_TOKEN.test(last)) return query;
+    parts[parts.length - 1] = last + '*';
+    return parts.join(' ');
+  }
+
   /* -> [{ olid, name, birthDate, deathDate, topWork, workCount, topSubjects,
            alternateNames, photoUrl }]
 
-     TWO quirks, both of which produce a picker full of dead rows:
+     TWO further quirks, both of which produce a picker full of dead rows:
 
      1. THE BARE OLID. `/search/authors.json` is the ONLY endpoint in the whole
         API that returns `key: 'OL1394865A'` instead of `key:
@@ -425,8 +488,14 @@ BT.openlibrary = (function () {
     if (!query) return [];
 
     const data = await BT.net.get('openlibrary', url(BT.OL.searchAuthors, {
-      q: query,
-      limit: BT.util.clamp(opts.limit || 20, 1, 100),
+      q: opts.exact ? query : typeaheadQuery(query),
+      /* Deliberately more than the eight rows the picker shows. Open Library's
+         own ordering is unusable (see above), so the view re-ranks — and a
+         re-rank over eight rows can only reorder the eight Open Library felt
+         like sending, which for `q=brandon` did not include the author with 190
+         works until position six. Asking for a wider page costs the same single
+         request and is what gives the local scorer something to work with. */
+      limit: BT.util.clamp(opts.limit || 25, 1, 100),
     }), netOpts(opts, BT.TTL.search));
 
     const docs = Array.isArray(data && data.docs) ? data.docs : [];
@@ -829,5 +898,9 @@ BT.openlibrary = (function () {
        that cannot be seen from a response: that the field list stayed lean,
        and that no URL this module builds carries a `sort=` next to a `q=`. */
     url, SEARCH_FIELDS, AUTHOR_WORK_FIELDS, marcLang,
+    /* Exported so the typeahead rule can be asserted from the console without
+       spending a request, and so a future test can pin the guards: two
+       characters minimum, last token only, word characters only, never twice. */
+    typeaheadQuery,
   };
 })();

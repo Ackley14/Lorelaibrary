@@ -283,6 +283,30 @@ BT.boot = (function () {
     }
   }
 
+  /* ── Publisher following, retired ─────────────────────────────────────
+     Runs after the router has started, unawaited, and is a no-op on every boot
+     after the first. Placed here rather than inside 70-follows.js's module body
+     for the reason that file cannot solve on its own: a module body cannot
+     await, and a floating promise at parse time would race BT.db.open().
+
+     NOT AWAITED, and that is the rule this file already enforces everywhere
+     else (see requestPersistence and the Firefox persist() note): nothing in
+     boot may block on work whose answer changes nothing about what happens
+     next. Every screen already filters publisher rows out on the way in, so the
+     app is correct whether this has finished, is still going, or never ran.
+
+     The rows are copied into `meta` before they are deleted — see
+     retirePublisherFollows(). This user syncs real data, and a migration that
+     silently drops rows from a replicating store drops them everywhere at once. */
+  function retirePublisherFollows() {
+    const f = BT.follows;
+    if (!f || typeof f.retirePublisherFollows !== 'function') return;
+    Promise.resolve()
+      .then(() => f.retirePublisherFollows())
+      .then(n => { if (n) BT.tree.refresh(); })
+      .catch(e => console.warn('[boot] could not retire publisher follows', e && e.message));
+  }
+
   /* file:// and any hosted copy are separate browser origins, so they hold
      separate libraries. Saying so once prevents a confusing "where did my
      shelf go?" later. */
@@ -308,9 +332,18 @@ BT.boot = (function () {
      separate budgets and separate cooldown keys:
 
        BT.alerts.sweep  — 45-alerts.js. Re-reads stored items for dates that
-                          moved, then polls a HANDFUL of follows (three) for
-                          works that were not in the catalogue last time.
+                          moved, then hands the follow half to 70-follows.js's
+                          one serialized refresher.
        BT.sync.sweep    — 48-sync.js, M5. Refreshes stale item metadata.
+
+     THE FOLLOW REFRESH AT STARTUP IS THE POINT, not a side effect. The user's
+     request was "make sure that every check for each author does a comparison
+     for the current cached info and the newest info and do that on app
+     startup", and this is where startup happens. It is affordable because the
+     refresher is per-follow cooldown-gated: a roster refreshed within the last
+     few hours costs ZERO requests, so the common case of opening the app twice
+     in an afternoon spends nothing at all. When it does have work, it is one
+     request at a time and it yields to anything the reader is typing.
 
      Each is called only if it exists, and each is called with `{}` so its own
      cooldown decides whether it actually does anything. The previous shape of
@@ -852,6 +885,7 @@ BT.boot = (function () {
     BT.router.start();
     refreshFooter();
     noteOriginOnce();
+    retirePublisherFollows();
     scheduleSweeps();
     flushOnExit();
 

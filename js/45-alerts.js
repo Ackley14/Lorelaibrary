@@ -30,6 +30,31 @@
    and backlist titles a volunteer has only just catalogued. Every string
    emitted here is written so that reading it literally is never wrong.
 
+   ── THE FOLLOW HALF IS NO LONGER A POLLER ─────────────────────────────────
+   This module used to fetch a followed author's catalogue itself, on its own
+   schedule, and diff it against its own `knownWorkIds`. The Following page did
+   the same thing independently for its own strip. Two fetchers, two schedules,
+   two ideas of "what I last saw" — which is exactly why the feature "behaved
+   strangely": the feed and the page could report different things about the
+   same author on the same afternoon, and neither could see the other's work.
+
+   70-follows.js now owns one cached catalogue per follow, one serialized
+   refresher, and the diff. This file's job is smaller and clearer: turn that
+   diff into feed rows. `recordFollowDiff` is the whole of it, and it is called
+   by the refresher after every successful check — including the one at startup
+   — so a change cannot be observed without also being reported.
+
+   WHAT THE FEED MAY SAY ABOUT A FOLLOW, now that it can say two things:
+
+     author.newWork      a work id appeared in a catalogue that did not list it
+                         before. Literally that, and nothing about release.
+     author.dateChanged  a work we already held now carries a different year.
+                         This one was IMPOSSIBLE under the old arrangement, not
+                         merely absent: `knownWorkIds` is a bag of ids and holds
+                         no dates, so there was nothing to compare against. It
+                         is the half that makes this a news feed rather than a
+                         list of ids.
+
    WHAT WAS DROPPED FROM MOVIETRAK, and why:
 
      status.cancelled  a book is not cancelled, it is simply never published,
@@ -56,21 +81,10 @@ BT.alerts = (function () {
 
   const SEVERITY = { high: 'high', normal: 'normal', low: 'low' };
 
-  /* How many follows one sweep may poll. Small on purpose — see the note on
-     the Open Library rate limit above `sweep`. */
-  const FOLLOWS_PER_SWEEP = { auto: 3, manual: 8 };
-
   /* A ceiling on the zero-network item pass, so a pathological library cannot
      make "Check now" feel like a hang. The `since` filter does the real work;
      this is only a backstop. */
   const ITEM_SCAN_CAP = 800;
-
-  /* The known-works baseline is unioned rather than replaced (see checkFollow),
-     so it only grows. Set far above any real bibliography — the most prolific
-     author in Open Library does not reach four figures of works, and EVICTION
-     IS THE FAILURE MODE this number exists to avoid: an id dropped from the
-     baseline re-alerts as new the next time it appears. */
-  const KNOWN_WORK_CAP = 2000;
 
   /* How far into the past a subject can be and still count as news. A date
      recorded for a book published last month is worth a line; the same event on
@@ -400,249 +414,219 @@ BT.alerts = (function () {
     return Math.max(u.updatedAt || 0, m.detailsFetchedAt || 0, t.lastRefreshAt || 0);
   }
 
-  /* ── Follows ───────────────────────────────────────────────────────────
-     Polling a followed AUTHOR rather than each tracked book is the only way a
+  /* ══ FOLLOWS — turning one diff into feed rows ═════════════════════════
+     Watching a followed AUTHOR rather than each tracked book is the only way a
      book that is not in the library yet can ever be discovered: one query
      covers a whole bibliography, and there is no other endpoint that answers
      "what is new from this person" at all.
 
-     The bibliography itself is fetched by BT.follows.worksOf, which owns the
-     source-specific part: authors are keyed on OLID via /search/authors.json
-     because `search.json?author=gwendolyn+kiste` verifiably returns Laird
-     Barron's books, and publishers have no id at all and match on a name token.
-     This module only diffs what it is handed. */
-  async function worksOf(row) {
-    const f = BT.follows;
-    if (!f || typeof f.worksOf !== 'function') {
-      /* Same seam discipline as BT.ui's guard around this module: a missing
-         neighbour means "nothing to check", never a thrown sweep. */
-      return null;
+     NOTHING HERE FETCHES ANYTHING. That is the change. 70-follows.js holds one
+     cached catalogue per follow, refreshes it on one serialized queue, and
+     computes the diff; this is the sink it hands the diff to. So the Activity
+     feed is now a LOG of the list the Following page is showing, rather than a
+     second opinion about it derived from a second request on a second schedule.
+
+     Called after every successful check, including the startup pass, which is
+     what makes "diff on every check" true rather than aspirational — there is
+     one place a follow can be refreshed and one place its result is recorded,
+     and they are the same call. */
+
+  /* -> the feed rows written, [] if the change was already known.
+
+     `out` is 70-follows.js's refreshOne() answer:
+       { row, cold, added: [work], changed: [{ work, from, to }], error }
+
+     A COLD diff never reaches here — the refresher returns empty `added` and
+     `changed` for a first sighting — so the 190-alert flood that follows
+     following a prolific author is structurally impossible rather than guarded
+     against twice. */
+  async function recordFollowDiff(out) {
+    const row = out && out.row;
+    if (!row || !row.id || out.error) return [];
+    const emitted = [];
+    for (const w of (out.added || [])) {
+      const e = await pushNewWork(row, w);
+      if (e) emitted.push(e);
     }
-    const res = await f.worksOf(row, { fresh: true });
-    if (Array.isArray(res)) return res;
-
-    /* `works` FIRST, because that is what 70-follows.js actually returns:
-       `{ works, numFound, approximate, source }`. This adapter originally knew
-       only about `docs` — which is BT.openlibrary.authorWorks's shape, one
-       layer further down — and the mismatch was completely silent.
-
-       Silent, and total. Every call landed on the `return null` below,
-       checkFollow read that as "we could not ask", returned [] without
-       emitting, without writing a baseline and without stamping
-       lastCheckedAt — and the sweep reported `follows: 1, alerts: 0,
-       errors: 0`, which is indistinguishable from a healthy sweep of an author
-       who has published nothing. The whole follow half of this module was dead
-       and every diagnostic in the app said it was fine.
-
-       The second-order damage was worse than the missing alerts: sweep() and
-       due() both rotate the roster by `lastCheckedAt`, so a field that is never
-       written means the sort is over a column of zeroes. The same three follows
-       would have been re-polled on every sweep for ever while the fourth was
-       never reached once.
-
-       `docs` is kept below it, unchanged, for exactly the reason it was written
-       — a thinner wrapper may hand the catalogue response straight through.
-       Two accepted shapes is cheap; guessing at one is what cost this. */
-    if (res && Array.isArray(res.works)) return res.works;
-    if (res && Array.isArray(res.docs)) return res.docs;
-    return null;
+    for (const c of (out.changed || [])) {
+      const e = await pushDateChange(row, c);
+      if (e) emitted.push(e);
+    }
+    return emitted;
   }
 
-  /* Accepts a raw Open Library search doc or an already-normalised row, because
-     the shape crossing this seam is not this file's to fix. `key` arrives as
-     '/works/OL27482W' from search.json and bare from /search/authors.json;
-     BT.util.olid handles both, and every id in `knownWorkIds` is run through it
-     on the way in too, so a baseline written in one shape still matches. */
-  function workRef(w) {
-    if (!w || typeof w !== 'object') return { id: '', title: '', year: null, coverId: null };
-    const id = BT.util.olid(w.olid || w.workOlid || w.id || w.key || w.work_key || '');
+  /* A work id appeared in a catalogue that did not list it before.
 
-    /* A row from BT.follows.worksOf is a NORMALISED row with the raw search doc
-       parked underneath it as `doc` — so the snake_case fields this function was
-       written against are one level down, not absent. Reading only the top level
-       left `year` null on every followed work, and a null year is not a harmless
-       gap here: `backlist` is computed from it, so every reprint and translation
-       that turned up in an author's catalogue would have been filed at
-       SEVERITY.high and announced at the top of the feed as though it were a new
-       novel. That is precisely the dishonesty this feature is supposed to avoid.
+     The wording is the whole point and it is deliberately not "new release".
+     Open Library holds no forthcoming titles and no announcements; it
+     catalogues books that exist. "Newly listed" is exactly what was observed
+     and is never wrong when read literally, which "new from an author you
+     follow" would be for every reprint, translation and backlist title a
+     volunteer has only just typed in. */
+  async function pushNewWork(row, w) {
+    const year = yearOf(w);
+    const id = alertId(`follow:${row.id}`, 'author.newWork', null, w.workId);
+    if (await BT.repo.alertSeen(id)) return null;
 
-       Falls back to `w` itself so a bare search doc still works unchanged. */
-    const d = (w.doc && typeof w.doc === 'object') ? w.doc : w;
-
-    /* `firstYear` is 70-follows' spelling of first_publish_year, and it means
-       the same thing — the earliest recorded publication, not the latest. Its
-       sibling `latestYear` is deliberately NOT consulted: a 2025 reprint of a
-       2022 novel must not read as a 2025 book. */
-    let year = w.year != null ? w.year
-      : (w.firstYear != null ? w.firstYear : d.first_publish_year);
-    if (year == null && Array.isArray(d.publish_year) && d.publish_year.length) {
-      /* The MINIMUM, matching what first_publish_year means. Taking the max
-         would read a 2019 reprint as the publication of a 1965 novel. */
-      const ys = d.publish_year.map(Number).filter(Number.isFinite);
-      if (ys.length) year = Math.min.apply(null, ys);
-    }
-    year = Number.isFinite(Number(year)) ? Number(year) : null;
-
-    const coverId = w.coverId != null ? w.coverId
-      : (d.cover_i != null ? d.cover_i : null);
-
-    return { id, title: w.title || w.name || d.title || '', year, coverId };
-  }
-
-  /* THREE ANSWERS, and the sweep must be able to tell them apart:
-
-       []        asked, and there is nothing new
-       [rows]    asked, and here is what is new
-       null      COULD NOT ASK
-
-     The third one used to be spelled `[]` as well, and that is the bug this
-     function was already fixed for once (see the block above): a follow check
-     that failed on the network returned an empty array, the sweep counted it as
-     a healthy check, and the reader pressing "Check now" during an Open Library
-     outage was told "Checked 3 · 0 updates" and "Nothing has changed since the
-     last check" — the app stating, twice, that their followed authors have
-     published nothing when it had not managed to look. The Following page gets
-     this right in the same outage ("This is not a statement about whether
-     anything new exists — only that we could not look"), and the two screens
-     contradicting each other about the same event is what gave it away.
-
-     The persisted follow row was already honest — lastCheckedAt and
-     knownWorkIds are untouched, so the follow is retried — which made the
-     report an internal contradiction, not a judgement call. */
-  async function checkFollow(row) {
-    if (!row || !row.id || row.muted) return [];
-
-    let works;
-    try {
-      works = await worksOf(row);
-    } catch (e) {
-      console.warn('[alerts] follow check failed', row.name, e && e.message);
-      return null;
-    }
-    /* null means we could not ask. The baseline and lastCheckedAt are left
-       exactly as they were, so the follow stays at the head of the queue and is
-       retried next sweep rather than being silently marked as checked. */
-    if (!works) return null;
-
-    const known = new Set();
-    for (const k of (row.knownWorkIds || [])) {
-      const n = BT.util.olid(k);
-      if (n) known.add(n);
-    }
-    const cold = known.size === 0;
-    const type = row.type === 'publisher' ? 'publisher.newWork' : 'author.newWork';
-    const approx = row.type === 'publisher';
+    /* A work carrying a year from well before now is a backlist title somebody
+       has just catalogued, not a release. Recorded honestly and archived on
+       ingest rather than dropped, because "a 1978 novel of hers we did not know
+       about" is a real thing a reader might want to find — just not at the top
+       of a feed. */
     const thisYear = new Date().getFullYear();
-    const seenNow = [];
-    const out = [];
+    const backlist = year != null && year < thisYear - BACKLIST_YEARS;
 
-    for (const w of works) {
-      const ref = workRef(w);
-      if (!ref.id) continue;
-      seenNow.push(ref.id);
-
-      /* First sight of this follow is a baseline and emits NOTHING. Following
-         a prolific author would otherwise post her entire catalogue at once. */
-      if (cold || known.has(ref.id)) continue;
-
-      const id = alertId(`follow:${row.id}`, type, null, ref.id);
-      if (await BT.repo.alertSeen(id)) continue;
-
-      /* A work that turns up carrying a publication year from well before now
-         is a backlist title somebody has just catalogued, not a release. It is
-         recorded honestly and archived on ingest rather than dropped, because
-         "a 1978 novel of hers we did not know about" is a real thing a reader
-         might want to find — just not at the top of a feed. */
-      const backlist = ref.year != null && ref.year < thisYear - BACKLIST_YEARS;
-
-      out.push(await BT.repo.pushFeedItem({
-        alertId: id,
-        /* The work's own uid, so the row opens in the inspector even though the
-           book is not on the shelves — BT.inspector.show falls back to a
-           read-only transient fetch and offers to add it. */
-        uid: BT.normalize.uidOf('openlibrary', ref.id),
-        kind: 'book',
-        type,
-        /* A publisher match is a name token, not an identity, so it never gets
-           the loud severity an author match does. */
-        severity: approx ? SEVERITY.normal
-          : (backlist ? SEVERITY.low : SEVERITY.high),
-        title: `${row.name}: ${ref.title || 'Untitled work'}`,
-        body: newWorkBody(ref, approx),
-        from: null, to: ref.id,
-        payload: {
-          followId: row.id, followType: row.type || 'author',
-          workOlid: ref.id, coverId: ref.coverId, year: ref.year,
-          approximate: approx ? 1 : 0,
-        },
-        archivedFlag: backlist ? 1 : 0,
-        lastAt: Date.now(),
-      }));
-    }
-
-    /* UNION, NOT REPLACE — and this is the one place BookTrak had to diverge
-       from MovieTrak's checkFollow.
-
-       MovieTrak overwrote knownWorkIds with whatever the poll returned, which
-       was safe because TMDB's combined_credits is a COMPLETE list. Open Library
-       has no such endpoint: the bibliography is `search.json?author={OLID}
-       &sort=new&limit=60`, a WINDOW over a result set whose ordering moves
-       every time a volunteer edits a publication year. Replacing the baseline
-       with that window means a work that slides out of the top 60 is forgotten,
-       and the day it slides back in it is announced as new. Union also makes an
-       empty or partial response harmless: a poll that returns nothing cannot
-       shrink what we know. */
-    for (const id of seenNow) known.add(id);
-    row.knownWorkIds = Array.from(known).slice(-KNOWN_WORK_CAP);
-    row.lastCheckedAt = Date.now();
-    await BT.repo.putFollow(row);
-    return out;
+    return BT.repo.pushFeedItem({
+      alertId: id,
+      /* The work's own uid, so the row opens in the inspector even though the
+         book is not on the shelves — BT.inspector.show falls back to a
+         read-only transient fetch and offers to add it. */
+      uid: BT.normalize.uidOf('openlibrary', w.workId),
+      kind: 'book',
+      type: 'author.newWork',
+      severity: backlist ? SEVERITY.low : SEVERITY.high,
+      title: `${row.name}: ${w.title || 'Untitled work'}`,
+      body: year
+        ? `Newly listed in this catalogue — recorded ${year}`
+        : 'Newly listed in this catalogue — no publication date recorded',
+      from: null, to: w.workId,
+      payload: { followId: row.id, followType: 'author', workOlid: w.workId,
+                 coverId: w.coverId, year },
+      archivedFlag: backlist ? 1 : 0,
+      lastAt: Date.now(),
+    });
   }
 
-  function newWorkBody(ref, approx) {
-    const bits = [ref.year
-      ? `Newly listed in this catalogue — first recorded ${ref.year}`
-      : 'Newly listed in this catalogue — no publication date recorded'];
-    /* Said on the row itself, not only in the sidebar, because a publisher row
-       is the one that will be wrong often enough to matter. `publisher=tor`
-       collapses Tor, Tor.com, Tor Science Fiction and "A Tom Doherty Associates
-       Book" into one bucket, and there is no id to disambiguate them with. */
-    if (approx) bits.push('publisher matching is by name, so this may be a different imprint');
-    return bits.join(' · ');
+  /* A work we already held now carries a different year.
+
+     THIS IS THE ROW THE OLD ARRANGEMENT COULD NOT PRODUCE, and it is worth
+     being precise about why: the follow baseline was `knownWorkIds`, a bag of
+     work OLIDs with no dates in it at all. There was nothing to compare a year
+     against, so a catalogue correction — the commonest real change in an Open
+     Library bibliography — was invisible by construction. The stored window in
+     70-follows.js carries the years, so the comparison is now possible.
+
+     THE BODY NEVER SAYS "MOVED TO". Open Library's dates are YEARS, and the two
+     ends of this row are years: a volunteer re-catalogued the record, or a
+     newer printing was added and max(publish_year) rose with it. Both are
+     "the year we hold changed", and neither is a publisher announcing a date.
+     Anything stronger would be this file lying on the catalogue's behalf. */
+  async function pushDateChange(row, c) {
+    const w = c.work || {};
+    const id = alertId(`follow:${row.id}`, 'author.dateChanged',
+                       String(c.from), String(c.to));
+    if (await BT.repo.alertSeen(id)) return null;
+
+    const thisYear = new Date().getFullYear();
+    /* Judged on WHERE IT LANDS, not on how far it travelled. A record corrected
+       from 1978 to 1979 is housekeeping; one that now reads next year is the
+       reason somebody follows an author at all. */
+    const ahead = c.to >= thisYear;
+    return BT.repo.pushFeedItem({
+      alertId: id,
+      uid: BT.normalize.uidOf('openlibrary', w.workId),
+      kind: 'book',
+      type: 'author.dateChanged',
+      severity: ahead ? SEVERITY.high : SEVERITY.low,
+      title: `${row.name}: ${w.title || 'Untitled work'}`,
+      body: `The publication year recorded for this work changed — ${c.from} → ${c.to}`,
+      from: String(c.from), to: String(c.to),
+      payload: { followId: row.id, followType: 'author', workOlid: w.workId,
+                 coverId: w.coverId, year: c.to, fromYear: c.from },
+      archivedFlag: ahead ? 0 : 1,
+      lastAt: Date.now(),
+    });
+  }
+
+  /* max(publish_year) where there is one — the newest printing anyone has
+     catalogued, and the only field in a search doc that can ever be ahead of
+     today. `firstYear` is the fallback rather than the preference: it is a
+     computed minimum over every edition and is frequently decades early (The
+     Alloy of Law, published 2011, reports 2001; verified). */
+  const yearOf = w => (w && (w.latestYear || w.firstYear)) || null;
+
+  /* Refresh ONE follow and record what changed.
+
+     Kept as an export because the Activity screen, the console and any future
+     per-author button all want "check this one now", and because it states in
+     one line where the boundary is: 70-follows refreshes and diffs, this file
+     records. It is a delegation, not a second implementation — there is no
+     fetch, no baseline and no cooldown here to drift out of step.
+
+     THREE ANSWERS, and callers must tell them apart:
+       []      asked, nothing new
+       [rows]  asked, here is what changed
+       null    COULD NOT ASK
+
+     The third used to be spelled `[]` as well, and that was a real bug: a
+     follow check that failed on the network was counted as a healthy one, so a
+     reader pressing "Check now" during an Open Library outage was told
+     "Checked 3 · 0 updates" — the app stating that their followed authors have
+     published nothing when it had not managed to look. */
+  async function checkFollow(row) {
+    const f = BT.follows;
+    if (!row || !row.id || row.muted) return [];
+    if (!f || typeof f.refreshOne !== 'function') return null;
+    /* No `force` option: refreshOne is unconditional by construction. The
+       cooldown belongs to the queue worker, and passing a flag that does
+       nothing is how a reader of this line comes away believing there is a
+       cached path through it. */
+    const out = await f.refreshOne(row);
+    if (!out || out.error) return null;
+    /* refreshOne has ALREADY recorded the diff — it announces from inside
+       itself, so that no route to a refresh can produce a cache update without
+       the matching news. Calling recordFollowDiff again here would be harmless
+       (alertSeen is content-addressed and would dedupe every row) but it would
+       also be a second place that has to remember, which is how the two halves
+       of this feature drifted apart in the first place. */
+    return out.emitted || [];
   }
 
   /* ── The sweep ─────────────────────────────────────────────────────────
-     Serialized, cooldown-gated, and deliberately small.
+     Two halves that used to be one loop, and separating them is what makes the
+     whole feature coherent:
 
-     THE RATE LIMIT IS NOT A GUESS. Open Library grants roughly 3 req/s to
-     clients that identify themselves with a contact User-Agent and roughly 1
-     to everyone else, and a browser is structurally incapable of setting a
-     User-Agent — so BT.net's token bucket refills at 1/s for this source
-     (SUSTAINED_RPS.openlibrary in 05-net.js). Their terms also ask that the
-     API not be used for high-traffic backend work at all.
+       the LOCAL pass    zero requests. Diffs every stored item against its own
+                         stored snapshot. Owned here, entirely.
+       the FOLLOW pass   HANDED TO 70-follows.js. It owns the queue, the
+                         cooldown, the cache and the diff; this file only
+                         receives what changed, through recordFollowDiff.
 
-     That limiter caps the instantaneous RATE. It does nothing about total
-     VOLUME, which is what this function is responsible for: follows are polled
-     in a serialized loop, never fanned out with Promise.all, and only a handful
-     per run. Twenty follows checked in one burst would be twenty seconds of
-     queued requests and a visibly stuck app even before it became rude; three
-     per sweep on a four-hour cooldown walks the whole list within a day of
-     normal use and is invisible.
+     THE FOLLOW CAP IS GONE, AND ITS ABSENCE IS NOT A RELAXATION OF THE RATE
+     LIMIT. Open Library grants roughly 3 req/s to clients that identify
+     themselves with a contact User-Agent and roughly 1 to everyone else, and a
+     browser is structurally incapable of setting a User-Agent — so BT.net's
+     token bucket refills at 1/s for this source (SUSTAINED_RPS.openlibrary in
+     05-net.js), and their terms ask that the API not be used for high-traffic
+     backend work at all. That limiter caps the instantaneous RATE; VOLUME was
+     this function's job, and it did it with `FOLLOWS_PER_SWEEP = {auto: 3}`.
+
+     Three per four hours is what made the feature feel unpredictable. A reader
+     with twelve authors had each of them checked about twice a day, so "what is
+     coming up" was answered from a roster where two thirds of the rows were a
+     day stale and nothing on screen said which. The refresher answers volume a
+     better way: a PER-FOLLOW cooldown, so a pass over a roster refreshed an
+     hour ago costs zero requests rather than three; one at a time, never fanned
+     out; and yielding to interactive work so a walk cannot make the search box
+     feel dead. Total requests per day go DOWN, and every follow is current.
 
      ── SEAM ────────────────────────────────────────────────────────────────
      The cooldown key is `alerts.lastSweepAt`, NOT `sync.lastSweepAt`. That
      second key belongs to 48-sync.js's item-refresh sweeper, which is a
      different job on a different budget; two writers on one key means whichever
      ran last erases the other's meaning, and the first symptom is a cooldown
-     that silently never expires. */
+     that silently never expires.
+
+     Note the follow half is NOT behind that cooldown any more, and must not be.
+     `alerts.lastSweepAt` gates the ITEM pass, which is a full library scan; the
+     follows have their own per-row clock, and gating them on a shared one as
+     well was half of why a newly-followed author sat empty for four hours. */
   async function sweep(opts) {
     opts = opts || {};
     if (sweeping) return { skipped: 'already-running', checked: 0, alerts: 0 };
 
     const last = (await BT.repo.metaGet('alerts.lastSweepAt')) || 0;
-    if (!opts.manual && Date.now() - last < BT.SWEEP.cooldownMs) {
-      return { skipped: 'cooldown', nextAt: last + BT.SWEEP.cooldownMs, checked: 0, alerts: 0 };
-    }
+    const localDue = opts.manual || (Date.now() - last >= BT.SWEEP.cooldownMs);
 
     sweeping = true;
     cancelled = false;
@@ -654,37 +638,34 @@ BT.alerts = (function () {
          A manual check re-reads everything, because the user pressed a button
          and is entitled to a complete answer; an automatic one only visits what
          has been written since it last looked. */
-      const local = await scanStored({ since: opts.manual ? 0 : last });
-      report.alerts += local.emitted.length;
-      report.checked += local.checked;
-
-      const follows = (await BT.repo.allFollows())
-        .filter(f => f && !f.muted)
-        /* Round-robin by staleness, so one roster of authors cannot starve the
-           rest and every follow is reached eventually. */
-        .sort((x, y) => (x.lastCheckedAt || 0) - (y.lastCheckedAt || 0))
-        .slice(0, opts.manual ? FOLLOWS_PER_SWEEP.manual : FOLLOWS_PER_SWEEP.auto);
-
-      for (const f of follows) {
-        if (cancelled) break;
-        try {
-          const found = await checkFollow(f);
-          /* null is "could not ask" — see checkFollow. Counting it as a check
-             is what let a total outage report itself as a clean bill of health;
-             `report.errors` was structurally incapable of counting the dominant
-             failure class, because checkFollow swallowed every network error
-             before the catch below could see it. */
-          if (found === null) { report.errors++; continue; }
-          report.alerts += found.length;
-          report.follows++;
-          report.checked++;
-        } catch (e) {
-          report.errors++;
-          console.warn('[alerts] follow sweep error', f && f.name, e && e.message);
-        }
+      if (localDue) {
+        const local = await scanStored({ since: opts.manual ? 0 : last });
+        report.alerts += local.emitted.length;
+        report.checked += local.checked;
+        await BT.repo.metaSet('alerts.lastSweepAt', Date.now());
+      } else {
+        report.skipped = 'cooldown';
+        report.nextAt = last + BT.SWEEP.cooldownMs;
       }
 
-      await BT.repo.metaSet('alerts.lastSweepAt', Date.now());
+      const f = BT.follows;
+      if (f && typeof f.refreshAll === 'function' && !cancelled) {
+        /* `force` on a manual check only. An automatic pass leans on the
+           per-follow cooldown, so opening the app twice in an hour costs
+           nothing; a reader who pressed a button is entitled to a real answer
+           from every author on the roster.
+
+           The alerts this produces are counted by the refresher's own sink, not
+           here — recordFollowDiff writes them as each follow lands, so a tab
+           closed halfway through has already persisted what it learned. */
+        const before = await unreadishCount();
+        const res = await f.refreshAll({ force: !!opts.manual, reason: opts.manual ? 'manual' : 'startup' });
+        report.follows = res.ok || 0;
+        report.checked += res.checked || 0;
+        report.errors += res.failed || 0;
+        report.alerts += Math.max(0, (await unreadishCount()) - before);
+      }
+
       report.finished = Date.now();
       BT.repo.emit('alerts:sweep', report);
       return report;
@@ -694,12 +675,34 @@ BT.alerts = (function () {
     }
   }
 
-  function cancel() { cancelled = true; }
-  const isSweeping = () => sweeping;
+  /* How many feed rows exist right now, read either side of the follow pass so
+     the report can say how many it produced.
+
+     Counted rather than returned, because the rows are written by the
+     refresher's sink one follow at a time — which is the durability property
+     worth keeping: a tab closed mid-walk has persisted every diff it saw, and
+     the price is that the count has to be observed instead of accumulated. */
+  async function unreadishCount() {
+    try { return (await BT.repo.feedItems({ includeArchived: true })).length; }
+    catch (_) { return 0; }
+  }
+
+  function cancel() {
+    cancelled = true;
+    /* The follow half is not ours to stop from in here any more. Cancelling the
+       item pass while the refresher carried on would leave "Check now" looking
+       like it had stopped while requests were still going out. */
+    if (BT.follows && typeof BT.follows.cancelRefresh === 'function') BT.follows.cancelRefresh();
+  }
+  const isSweeping = () =>
+    sweeping || !!(BT.follows && BT.follows.isRefreshing && BT.follows.isRefreshing());
 
   return {
     snapshotOf, diff, commit, alertId,
     checkItem, scanStored, checkFollow,
+    /* The sink 70-follows.js hands its diff to. This is the whole of the follow
+       half of this module now — see the header. */
+    recordFollowDiff,
     sweep, cancel, isSweeping,
     SEVERITY,
     /* EXPORTED SO THERE IS ONE CONTAINMENT RULE, not two — the same argument

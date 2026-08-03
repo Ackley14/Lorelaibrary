@@ -110,16 +110,6 @@ BT.inspector = (function () {
     return STATUS_LADDER.indexOf(s) >= 0 ? s : 'want';
   };
 
-  /* The same fold 38-normalize uses for its slugs, restated because publishers
-     are matched by NAME on both sides of the comparison below and a fold that
-     only ran on one of them would answer "not following" for a publisher the
-     reader is following. */
-  function slugOf(s) {
-    let t = String(s == null ? '' : s).toLowerCase();
-    try { t = t.normalize('NFD').replace(/[̀-ͯ]/g, ''); } catch (_) {}
-    return t.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-  }
-
   async function show(uid, opts) {
     opts = opts || {};
     currentUid = uid;
@@ -472,7 +462,7 @@ BT.inspector = (function () {
          ordinary state and not a fault. The olid is shown rather than a blank,
          because it is still enough to follow by — which is the point. */
       const name = a.name || (a.olid ? `Author ${a.olid}` : '');
-      return `<span class="byname">${esc(name)}${followPill('author', BT.util.olid(a.olid || a.id || ''), a.name || name)}</span>`;
+      return `<span class="byname">${esc(name)}${followPill(BT.util.olid(a.olid || a.id || ''), a.name || name)}</span>`;
     });
 
     return units.join('<span class="bysep">·</span>')
@@ -482,22 +472,30 @@ BT.inspector = (function () {
   /* ══ FOLLOW ═══════════════════════════════════════════════════════════════
      ── SEAM ────────────────────────────────────────────────────────────────
      70-follows.js owns everything about a follow except where the button is
-     drawn. Two functions are asked for and both are feature-detected, because
-     this pane has to survive that file being absent or having failed to parse —
-     a bare BT.follows.toggleAuthor(...) inside the one shared click handler
-     would take the status segment, the genre picker, the rating and the notes
-     down with it:
+     drawn. ONE function is asked for, and it is feature-detected, because this
+     pane has to survive that file being absent or having failed to parse — a
+     bare BT.follows.toggleAuthor(...) inside the one shared click handler would
+     take the status segment, the genre picker, the rating and the notes down
+     with it:
 
        BT.follows.toggleAuthor(olid, name)   -> follow/unfollow by OLID
-       BT.follows.togglePublisher(name)      -> follow/unfollow by name
 
      When it is absent the pills are simply not emitted. An affordance whose
-     only possible outcome is an apology is worse than no affordance. */
-  const followsReady = type => {
-    const f = BT.follows;
-    if (!f) return false;
-    return typeof f[type === 'publisher' ? 'togglePublisher' : 'toggleAuthor'] === 'function';
-  };
+     only possible outcome is an apology is worse than no affordance.
+
+     AUTHORS ONLY. This file used to draw a second pill on the Publisher row of
+     the edition dl and call `BT.follows.togglePublisher`. Publisher following
+     was removed ("lets drop publisher support as i think it's a bit too
+     shoehorned in"), so that call site was left inert ONLY because the function
+     it named no longer exists — the pill was suppressed by an absence rather
+     than by a decision. That is a live wire: the day anything reintroduces a
+     `togglePublisher` under any meaning, a Follow button reappears on every
+     edition pane in the app with nobody having asked for it. The branches are
+     gone instead, so the removal cannot be undone by accident. Publisher is
+     still SHOWN in the dl below — it is a fact about the copy you hold, and
+     that never stopped being useful. */
+  const followsReady = () =>
+    !!(BT.follows && typeof BT.follows.toggleAuthor === 'function');
 
   /* AUTHORS ARE KEYED ON OLID AND NEVER ON NAME, and that is a verified rule
      rather than a preference. Open Library's `search.json?author=gwendolyn+kiste`
@@ -512,16 +510,14 @@ BT.inspector = (function () {
      an IndexedDB read, so it is not available at the moment the string is
      built, and blocking the whole paint on it to save one attribute write would
      put a database round trip in front of every book you click. */
-  function followPill(type, key, name) {
-    if (!followsReady(type)) return '';
-    if (type === 'author' && !key) {
+  function followPill(key, name) {
+    if (!followsReady()) return '';
+    if (!key) {
       return ' <span class="fwna" title="Open Library has no author id on this record. Following by name matches the wrong writer often enough to be useless, so it is not offered.">no id</span>';
     }
-    const title = type === 'publisher'
-      ? 'Follow this publisher. Matching is by name and is approximate — see the note below.'
-      : 'Follow this author. New works appearing in their Open Library catalogue turn up in Alerts.';
+    const title = 'Follow this author. New works appearing in their Open Library catalogue turn up in Alerts.';
     return ` <button type="button" class="fwbtn" aria-pressed="false"`
-      + ` data-follow="1" data-fw-type="${esc(type)}" data-fw-key="${esc(key)}"`
+      + ` data-follow="1" data-fw-type="author" data-fw-key="${esc(key)}"`
       + ` data-fw-name="${esc(name || '')}" title="${esc(title)}">Follow</button>`;
   }
 
@@ -531,25 +527,28 @@ BT.inspector = (function () {
      and rebuilding it here to ask isFollowing() would put a second copy of that
      rule in a file with no reason to know it — the day the two spellings drift
      every pill in the pane silently reads "Follow" for an author you follow.
-     Matching on type plus identity cannot drift: an OLID is an OLID, and both
-     sides of the publisher comparison go through the same fold. */
-  function isFollowed(rows, type, key, name) {
-    const want = type === 'author' ? BT.util.olid(key) : slugOf(name || key);
+     Matching on identity cannot drift: an OLID is an OLID.
+
+     `type` is still read off the row and still has to match, even though
+     'author' is the only kind this pane draws. A publisher row can arrive from
+     a device on an older build at any moment (70-follows.js retires them on
+     boot, and a sync can land one after that has run), and dropping the test
+     would let a publisher slug that happened to fold to the same string light
+     up an author's pill. */
+  function isFollowed(rows, key) {
+    const want = BT.util.olid(key);
     if (!want) return false;
     for (const f of rows || []) {
-      if (!f || f.type !== type) continue;
-      const got = type === 'author'
-        ? (BT.util.olid(f.sourceId || '') || BT.util.olid(f.id || ''))
-        : slugOf(f.sourceId || f.name || '');
+      if (!f || f.type !== 'author') continue;
+      const got = BT.util.olid(f.sourceId || '') || BT.util.olid(f.id || '');
       if (got && got === want) return true;
     }
     return false;
   }
 
-  /* Corrects every pill in the pane in place. Never repaints: the pills are
-     scattered across two unrelated places — the by-line under the title and the
-     Publisher row of the edition dl — and rebuilding the whole sheet to flip one
-     attribute is the exact stutter this file exists to avoid.
+  /* Corrects every pill in the pane in place. Never repaints: rebuilding the
+     whole sheet to flip one attribute is the exact stutter this file exists to
+     avoid.
 
      `uid` is the book the caller was looking at. The follow list is an async
      read, so by the time it lands the reader may have clicked a different book
@@ -565,7 +564,7 @@ BT.inspector = (function () {
 
     let changed = false;
     for (const b of host.querySelectorAll('[data-follow]')) {
-      const on = isFollowed(rows, b.dataset.fwType, b.dataset.fwKey, b.dataset.fwName);
+      const on = isFollowed(rows, b.dataset.fwKey);
       if (b.getAttribute('aria-pressed') === String(on)) continue;
       b.setAttribute('aria-pressed', String(on));
       /* The word changes, not just the colour. "Following" as a state and
@@ -582,13 +581,11 @@ BT.inspector = (function () {
 
   async function toggleFollow(btn) {
     const f = BT.follows;
-    const type = btn.dataset.fwType;
-    if (!followsReady(type)) return;
+    if (!followsReady()) return;
     const key = btn.dataset.fwKey;
     const name = btn.dataset.fwName || '';
     try {
-      if (type === 'publisher') await f.togglePublisher(name || key);
-      else await f.toggleAuthor(key, name);
+      await f.toggleAuthor(key, name);
     } catch (e) {
       BT.ui.toast((e && e.message) || 'Could not change that follow.', { bad: true });
       return;
@@ -840,28 +837,21 @@ BT.inspector = (function () {
         </div>`;
     }
 
-    /* The publisher's Follow pill rides in the dl rather than in a block of its
-       own, because the publisher IS a property of this edition and nothing else
-       on the record. An `open` item never reaches this branch and correctly
-       offers no publisher follow: it has not chosen a printing, so it has no
-       publisher to follow. */
-    const pubPill = publisher ? followPill('publisher', slugOf(publisher), publisher) : '';
-
+    /* PUBLISHER IS A FACT, NOT A FOLLOW. This row used to carry a Follow pill;
+       publisher following has been removed, and the value stays because it is
+       one of the four things that distinguish the copy on your shelf from the
+       work in general. */
     return `
       <div class="blk">
         <div class="blk-h">Edition <span class="why">the copy you hold</span></div>
         <dl class="kv">
           <dt>ISBN</dt><dd class="mono">${isbn ? esc(isbn) : '<span class="faint">·&nbsp;·</span>'}</dd>
-          <dt>Publisher</dt><dd>${publisher ? esc(publisher) + pubPill : '<span class="faint">Not recorded</span>'}</dd>
+          <dt>Publisher</dt><dd>${publisher ? esc(publisher) : '<span class="faint">Not recorded</span>'}</dd>
           <dt>Pages</dt><dd class="mono">${pages ? esc(String(pages)) : '<span class="faint">·&nbsp;·</span>'}</dd>
           <dt>Format</dt><dd>${esc(BT.ui.FORMAT_LABEL[fmt] || fmt)}</dd>
           ${editionOlid ? `<dt>Open Library</dt><dd><a href="${esc(BT.OL.base)}/books/${esc(editionOlid)}"
             target="_blank" rel="noopener" style="text-decoration:underline">${esc(editionOlid)} ↗</a></dd>` : ''}
         </dl>
-        ${pubPill ? `<div class="fwnote">Publishers have no id in Open Library, so a publisher
-          follow matches on the NAME and is approximate: “Tor” also catches Tor.com, Tor Science
-          Fiction and “A Tom Doherty Associates Book”. Authors are matched exactly, by their
-          catalogue id.</div>` : ''}
       </div>`;
   }
 

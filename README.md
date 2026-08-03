@@ -173,7 +173,7 @@ and every subsequent push redeploys.
   publication, your rating, progress or genre.
 - **A detail pane** for every book: 1–10 rating, notes, status, format, pile,
   progress, genre chips you can correct by hand, the full edition record, and a
-  Follow button on each author and publisher.
+  Follow button on each author.
 - **Two themes** — Vellum (light, warm parchment) and Marginalia (dark, warm
   ink). Geometry lives in a theme-invariant token block, so switching changes
   colour and material with no reflow.
@@ -198,19 +198,38 @@ and every subsequent push redeploys.
 - **The editions picker.** For a book added by search, "which of these is the
   copy on your shelf?" — pick the printing and the record becomes closed scope,
   exactly as if you had scanned it.
-- **Following authors and publishers.** Authors are followed by Open Library id,
-  never by name — name-scoped author search returns the wrong writer's books
-  often enough to be useless, so a record with no author id says so rather than
-  guessing. Publisher follows are name-matched and admit it.
+- **Following authors.** Authors are followed by Open Library id, never by name
+  — name-scoped author search returns the wrong writer's books often enough to
+  be useless, so a record with no author id says so rather than guessing. The
+  author picker is a real typeahead: Open Library's author index matches whole
+  words, so a half-typed name matched *nothing* until the trailing token grew a
+  wildcard (`sanderso` → 0 results, `sanderso*` → 1,090), and results already
+  on screen stay there while the next lookup runs.
+  - **One section per author**, drawn from a copy of their catalogue stored on
+    the follow itself. It paints with no network at all and refreshes behind
+    the paint, so the page is never blank while it thinks.
+  - Every section gives a **hard answer** — books, or the sentence "nothing is
+    scheduled", or "we could not look". Never an ambiguous blank.
+  - Bands are tightest-first and labelled for what they are: *dated after
+    today*, *this year with no month recorded* (undecidable, and never counted
+    as upcoming), and *recently published* with its year range printed.
+  - **Refresh** globally or per author, with the last check time on every row.
+  - Publisher following has been **removed** — it was a slug over free text with
+    no id behind it. Publisher remains a facet you can filter and count by.
 
 ### Keeping up
 
 - **Activity** — what changed since you last looked: a publication date that
-  moved, and works that appeared in the catalogue of an author or publisher you
-  follow. It says "newly listed in this catalogue" rather than "new release",
-  because that is exactly what was observed; Open Library has no forthcoming-
-  title data at all, so anything stronger would be a promise the source cannot
-  keep.
+  moved on a book you track, and works that appeared — or changed publication
+  year — in the catalogue of an author you follow. It is a log of the same
+  comparisons that fill the Following sections, computed once, so the two
+  screens cannot tell you different things. It says "newly listed in this
+  catalogue" rather than "new release", because that is exactly what was
+  observed; Open Library has no forthcoming-title data at all, so anything
+  stronger would be a promise the source cannot keep.
+- **The Following count in the sidebar is an unread count** — how many works
+  were newly listed or re-dated since you last looked, not how many people you
+  follow. It clears when you have seen them.
 - **Stats** — reading pace drawn from the log, shelf composition, genre and
   format breakdowns, most-shelved authors, publication by decade, and a date-
   certainty panel showing how much of your library is only known to the year.

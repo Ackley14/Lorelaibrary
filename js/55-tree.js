@@ -85,9 +85,40 @@ BT.tree = (function () {
      on the page yet — hence the defensive ask rather than a bare call. */
   const signedIn = () => !!(BT.crypto && BT.crypto.isUnlocked && BT.crypto.isUnlocked());
 
+  /* ── THE FOLLOWING ROW COUNTS NEWS, NOT PEOPLE ────────────────────────
+     It used to show `follows.length`, which is a number that does not change
+     and therefore says nothing: a reader who follows eight authors sees "8"
+     for ever, and the row is decoration. The user asked for the other number —
+     "show the number of different items not the number of authors to act as an
+     alert of sorts that 'hey there's news here!'".
+
+     So: the BADGE (a filled teal pill, the same one Activity uses for unread)
+     carries the count of works that were newly listed or whose year changed
+     since the reader last looked at that author. When there is none, the row
+     falls back to the plain follow count — renderNode treats a badge of 0 as
+     absent, which is exactly the behaviour wanted here. Two different marks for
+     two different facts: `.badge` means "there is something to see", `.n` means
+     "this is how many you follow".
+
+     COUNTED IN 70-follows.js, not here. The seen-marker lives on the follow row
+     and the sections on #/people count it the same way; a second copy of the
+     rule in this file would be free to drift, and then the sidebar and the page
+     would disagree about how much news there is with no way to tell which was
+     right. Feature-detected because 70 may be absent or have failed to parse,
+     in which case the row degrades to the count it always showed. */
+  function followNews(follows) {
+    const f = BT.follows;
+    if (!f || typeof f.unseenCount !== 'function') return 0;
+    try { return f.unseenCount(follows); } catch (_) { return 0; }
+  }
+
   async function build() {
     const items = await BT.repo.allItems();
-    const follows = await BT.repo.allFollows();
+    /* Publisher follows are retired (see 70-follows.js retirePublisherFollows).
+       Counted out here as well as deleted on disk, so a row syncing in from a
+       device still on the old build cannot inflate the number next to a screen
+       that will not show it. */
+    const follows = (await BT.repo.allFollows()).filter(f => f && f.type === 'author');
     const unread = await BT.repo.unreadCount();
 
     const byStatus = { want: 0, have: 0, reading: 0, finished: 0, dropped: 0 };
@@ -199,7 +230,8 @@ BT.tree = (function () {
         /* Scan is discovery by a different door: a barcode names ONE edition,
            so what it adds is scope 'closed' where search adds scope 'open'. */
         { id: 'scan', label: 'Scan', route: '#/scan' },
-        { id: 'people', label: 'Following', route: '#/people', n: follows.length },
+        { id: 'people', label: 'Following', route: '#/people',
+          n: follows.length, badge: followNews(follows) },
       ] },
       tags.size ? { id: 'tags', label: 'Tags', children:
         [...tags.entries()].sort((a, b) => b[1] - a[1]).map(([t, n]) => ({

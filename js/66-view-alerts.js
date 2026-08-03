@@ -21,20 +21,35 @@ BT.viewAlerts = (function () {
     'release.moved':     'Publication date changed',
     'release.precision': 'Date firmed up',
     'author.newWork':    'Newly listed in this author’s catalogue',
-    'publisher.newWork': 'Newly listed under this publisher',
+    /* The other half of a followed catalogue changing, and the one this feed
+       could not report before: a work we already held now carries a different
+       publication year. It was impossible rather than unimplemented — the old
+       follow baseline was a bag of work ids with no dates in it, so there was
+       nothing to compare a year against. 70-follows.js stores the years now. */
+    'author.dateChanged': 'Publication year changed in this catalogue',
+    /* RETIRED, AND KEPT ANYWAY. Publisher following has been removed, but rows
+       of this type are sitting in readers' databases right now and travel in
+       every export. Dropping the label would render them as the bare string
+       "publisher.newWork" under a title that still makes sense — a row that
+       looks like a bug in the app rather than like history. Nothing GENERATES
+       this any more; see 45-alerts.js. */
+    'publisher.newWork': 'Newly listed under this publisher (no longer tracked)',
   };
 
   /* Three icon classes exist in css/04-views.css and no more, so the mapping is
      by MEANING rather than by type: `move` for something that shifted under
      you, `land` for something that arrived, `info` for something we are less
-     than certain about. A publisher match is a name token rather than an
-     identity, so it gets `info` — the one visual difference on the row that
-     says "this may be a different imprint" before you read a word. */
+     than certain about. `author.dateChanged` is a `move` for the same reason
+     `release.moved` is — a value we hold is not the value it was. Retired
+     publisher rows keep `info`, which is what they always had: a publisher
+     match was a name token rather than an identity, and that is still the right
+     thing to say about the rows left behind. */
   const ICON = {
     'release.moved':     'move',
     'release.dated':     'land',
     'release.precision': 'land',
     'author.newWork':    'land',
+    'author.dateChanged': 'move',
     'publisher.newWork': 'info',
   };
   const GLYPH = { move: '↔', land: '▸', info: 'i' };
@@ -51,7 +66,10 @@ BT.viewAlerts = (function () {
     clearTimeout(readTimer);
 
     const rows = await BT.repo.feedItems({ includeArchived: showArchived });
-    const follows = await BT.repo.allFollows();
+    /* Authors only. Publisher following is retired (70-follows.js), and a
+       publisher row syncing in from a device still on the old build must not be
+       counted in a sentence that offers to manage it. */
+    const follows = (await BT.repo.allFollows()).filter(f => f && f.type === 'author');
     const lastSweep = await BT.repo.metaGet('alerts.lastSweepAt');
     if (alive && !alive()) return;
 
@@ -94,13 +112,13 @@ BT.viewAlerts = (function () {
       body: none
         ? 'This is where BookTrak tells you what changed while you were not looking: '
           + 'a publication date that was recorded or corrected on a book you are tracking, '
-          + 'and works appearing in the catalogue of an author or publisher you follow. '
-          + 'That second half needs somebody to follow first — you can follow an author '
-          + 'from their name on any book’s detail pane, from a search result, or from the '
-          + 'Following page.'
+          + 'and works appearing — or changing year — in the catalogue of an author you '
+          + 'follow. That second half needs somebody to follow first: you can follow an '
+          + 'author from their name on any book’s detail pane, from a search result, or '
+          + 'from the Following page.'
         : 'Nothing has changed since the last check. Publication dates that move, dates '
-          + 'that firm up from a year to a month, and works newly listed by the '
-          + `${esc(String(follows.length))} ${follows.length === 1 ? 'catalogue' : 'catalogues'} `
+          + 'that firm up from a year to a month, and works newly listed or re-dated by the '
+          + `${esc(String(follows.length))} ${follows.length === 1 ? 'author' : 'authors'} `
           + 'you follow will appear here.',
       actions: (none
         ? '<a class="btn btn--primary" href="#/people">Follow an author</a> '
@@ -119,15 +137,18 @@ BT.viewAlerts = (function () {
       <div class="hd">How this works</div>
       <p class="muted" style="font-size:var(--bt-fs-sm);line-height:1.6">
         BookTrak compares each book against a snapshot taken the last time it looked, and
-        each followed catalogue against the list of works it held last time. There is no
-        server watching on your behalf, so changes surface the next time you open the app.
+        each followed author’s catalogue against the copy it stored last time. This feed is
+        a log of those comparisons — the same ones that fill the sections on
+        <a href="#/people">Following</a>, so the two can never tell you different things.
+        There is no server watching on your behalf, so changes surface the next time you
+        open the app.
       </p>
       <p class="muted" style="font-size:var(--bt-fs-sm);line-height:1.6;margin-top:var(--bt-space-4)">
         ${honesty()}
       </p>
       <p class="muted" style="font-size:var(--bt-fs-sm);line-height:1.6;margin-top:var(--bt-space-4)">
-        Following <b class="mono">${n}</b> ${n === 1 ? 'catalogue' : 'catalogues'} ·
-        <a href="#/people">${n ? 'manage' : 'follow an author or publisher'}</a>
+        Following <b class="mono">${n}</b> ${n === 1 ? 'author' : 'authors'} ·
+        <a href="#/people">${n ? 'manage' : 'follow an author'}</a>
       </p>
       <p class="muted" style="font-size:var(--bt-fs-sm);line-height:1.6;margin-top:var(--bt-space-4)">
         Last check: <b class="mono">${esc(BT.util.timeAgo(lastSweep))}</b>
@@ -144,8 +165,9 @@ BT.viewAlerts = (function () {
     return 'Open Library holds no forthcoming or announced titles and its dates are '
       + 'usually year-only, so “newly listed” means a work appeared in a catalogue that '
       + 'did not list it before — which includes reprints, translations and older books '
-      + 'somebody has only just catalogued. Publisher follows match on a name, not an id, '
-      + 'so they are approximate: “Tor” also catches Tor.com and Tor Science Fiction. '
+      + 'somebody has only just catalogued. “Publication year changed” means the year the '
+      + 'catalogue records moved, which is usually a volunteer correcting a record or a '
+      + 'newer printing being added, not a publisher announcing anything. '
       + 'Older items are filed as archived rather than shown.';
   }
 

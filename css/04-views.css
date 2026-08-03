@@ -454,14 +454,10 @@
   border-bottom: 1px dotted var(--bt-line-rule); cursor: help;
 }
 
-/* The publisher caveat. Faint and set below the dl rather than in a .warnbox,
-   because it is a statement about how good the matching is, not a warning that
-   something went wrong — amber would overstate it. */
-.fwnote {
-  margin-top: var(--bt-space-3); padding-left: var(--bt-space-3);
-  border-left: 2px solid var(--bt-line-rule);
-  font-size: var(--bt-fs-micro); line-height: 1.5; color: var(--bt-text-faint);
-}
+/* .fwnote is gone with the publisher-follow caveat it set: publisher following
+   was removed, so the only text this rule ever styled no longer exists. Left as
+   a note rather than silence because the class name is short enough to look like
+   a live utility to anyone reaching for one. */
 
 /* ── The genre picker ──────────────────────────────────────────────────────
    The same .tag chips the table and the tree draw, made pressable. Reusing the
@@ -610,32 +606,211 @@ a.src:hover { background: var(--bt-surface-hover); }
 .why-line.graph { border-left-color: var(--bt-ice-edge); }
 .why-line.graph b { color: var(--bt-ice-text); }
 
-/* ══ FOLLOWING — the "recent and newly catalogued" strip ══════════════════
-   The Following page polls EVERY follow, one at a time, because Open Library
-   sustains about one request a second and the alternative to a cap is a queue
-   rather than a fan-out. A queue takes time, so the time has to be visible:
-   without this line a roster of thirty looks like a finished list of whatever
-   the first four follows happened to return, which is the exact bug the cap
-   removal was fixing. It also carries "showing 400 of 812" when the hard bound
-   bites, so nothing is ever dropped without a word. */
-.fprog {
-  display: flex; align-items: center; gap: var(--bt-space-2); flex-wrap: wrap;
-  padding: var(--bt-space-2) var(--bt-space-6);
-  font-size: var(--bt-fs-mini); color: var(--bt-text-muted);
-  font-variant-numeric: tabular-nums;   /* the counter must not jitter sideways */
-}
-/* Coral, not the generic muted grey: a follow that could not be checked is the
-   one thing on this line the reader might want to act on, and it has to be
-   legible next to the counts rather than blend into them. */
-.fprog .fbad { color: var(--bt-coral-text); }
+/* ══ FOLLOWING — one section per author ═══════════════════════════════════
+   The page draws from a cache stored on each follow row, so it paints with zero
+   requests and then refreshes in place. Two consequences drive every rule here:
+
+     · a section can be in FOUR states — has books, has undecidable ones, has
+       nothing, or was never checked — and each has to be distinguishable at a
+       glance while scrolling past six of them;
+     · a section can change under the reader while a background refresh lands,
+       so nothing may move except the thing that changed.
+
+   Every colour is an existing token used for the meaning it already carries:
+   teal is the confident case throughout the app, amber is coarse precision
+   (.prec.month and .prec.quarter are already amber for exactly this idea), and
+   coral is the only thing on screen the reader might need to act on. No new hex
+   is introduced — the palette is shared with a sibling app and a one-off value
+   here would drift out of both themes. */
+
 /* Reuses the scan log's breathe (bt-scan-breathe, defined further down this
    file) rather than adding a second in-flight idiom, and opacity only, so it
    composites and costs nothing. */
 .fdot {
   width: 6px; height: 6px; border-radius: 50%; flex: 0 0 6px;
+  display: inline-block; margin-right: var(--bt-space-2);
   background: var(--bt-teal); animation: bt-scan-breathe 1.1s var(--bt-ease) infinite;
 }
 @media (prefers-reduced-motion: reduce) { .fdot { animation: none; } }
+
+/* Coral, not the generic muted grey: a follow that could not be checked is the
+   one thing on these lines the reader might want to act on, and it has to be
+   legible next to the counts rather than blend into them. */
+.fbad { color: var(--bt-coral-text); }
+
+/* ── The author lookup's state line ───────────────────────────────────────
+   THE BOX MUST NEVER LOOK DEAD, and this is the element that guarantees it.
+   Open Library's author endpoint answers in 2.5 to 9 SECONDS (measured across a
+   dozen queries), which is long enough that silence reads as breakage — and the
+   reader's only available move is to type again, which cancelled the request
+   that was about to answer. That loop is the reported "needing to retype their
+   name several times".
+
+   It sits ABOVE the results and is the only part rewritten while a lookup is in
+   flight, so the rows underneath — the previous answer, still the best
+   information available — stay put instead of being blanked once per keystroke. */
+.fstate {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--bt-space-1);
+  padding: var(--bt-space-3) var(--bt-space-6) 0;
+  font-size: var(--bt-fs-mini); color: var(--bt-text-muted);
+  font-variant-numeric: tabular-nums;   /* the seconds must not jitter sideways */
+  min-height: 18px;                     /* reserved, so results never jump */
+}
+
+/* ── A section ────────────────────────────────────────────────────────────
+   One per followed author. The top rule is what separates them; a card or a
+   box would nest a grid inside a panel inside a pane, which this app does not
+   do anywhere else. */
+.fsec { border-top: var(--bt-rule-w) solid var(--bt-line-rule); }
+.fsec + .fsec { margin-top: 0; }
+.fsec-h {
+  display: flex; align-items: center; gap: var(--bt-space-4);
+  padding: var(--bt-space-5) var(--bt-space-6) var(--bt-space-3);
+  position: sticky; top: 0; z-index: 1;
+  background: var(--bt-surface-canvas);
+}
+.fsec-name {
+  font-weight: 600; font-size: var(--bt-fs-md);
+  display: flex; align-items: center; gap: var(--bt-space-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fsec-sub {
+  font-size: var(--bt-fs-mini); color: var(--bt-text-muted); margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fsec-body { padding-bottom: var(--bt-space-5); }
+
+/* A name, wherever one is a row's subject rather than its label. */
+.fname {
+  font-weight: 500; display: flex; align-items: center; gap: var(--bt-space-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* An author's avatar has no photo to show — /search/authors.json returns no
+   photo field at all, and building a covers URL on the assumption that one
+   exists fired ten requests and got ten 404s, each an error-level console line
+   that no onerror can suppress. So the chip is the generated gradient, and the
+   hues are set here rather than inline on every row. Violet, which is this
+   app's "a person" colour wherever one appears. */
+.chipart.fav {
+  width: 22px; height: 22px; border-radius: 50%; flex: 0 0 22px;
+  --a: var(--bt-violet); --b: var(--bt-surface-sunk);
+}
+
+/* ── THE HARD ANSWER ──────────────────────────────────────────────────────
+   The user asked for "a hard confirmation that there is or isn't anything
+   scheduled for an author", and this is it: one sentence, always present,
+   never an empty panel. Four variants, and the colour is doing the same job the
+   words are so the answer survives a fast scroll.
+
+     is-yes    teal   there are books, and they are below
+     is-maybe  amber  the record cannot say — same hue as every other coarse
+                      precision in the app
+     is-no     grey   we looked, there is nothing. Deliberately QUIET: an empty
+                      answer is an ordinary result here, not a warning, and
+                      colouring it red would teach the reader that a working
+                      feature is broken
+     is-wait   grey   we have not looked yet. The one variant that is a claim
+                      about US rather than about the catalogue. */
+.fverdict {
+  display: flex; align-items: center; flex-wrap: wrap;
+  margin: 0 var(--bt-space-6) var(--bt-space-3);
+  padding: var(--bt-space-3) var(--bt-space-4);
+  border-radius: var(--bt-radius);
+  font-size: var(--bt-fs-sm); line-height: 1.45;
+  background: var(--bt-surface-sunk); color: var(--bt-text-secondary);
+  box-shadow: inset var(--bt-marker-w) 0 0 var(--bt-line-strong);
+}
+.fverdict.is-yes {
+  background: var(--bt-teal-wash); color: var(--bt-teal-text);
+  box-shadow: inset var(--bt-marker-w) 0 0 var(--bt-teal);
+  font-weight: 500;
+}
+.fverdict.is-maybe {
+  background: var(--bt-amber-wash); color: var(--bt-amber-text);
+  box-shadow: inset var(--bt-marker-w) 0 0 var(--bt-amber-edge);
+}
+.fverdict.is-no, .fverdict.is-wait { color: var(--bt-text-muted); }
+
+/* A check that failed, over a cache that is still correct. Coral, because
+   unlike the empty answer above this IS something the reader may want to act
+   on — and it deliberately sits ABOVE the list rather than replacing it, since
+   blanking a correct list to show an error throws away the answer to keep the
+   complaint. */
+.fwarn {
+  margin: 0 var(--bt-space-6) var(--bt-space-3);
+  padding: var(--bt-space-3) var(--bt-space-4);
+  border-radius: var(--bt-radius);
+  font-size: var(--bt-fs-mini); line-height: 1.5;
+  background: var(--bt-coral-wash); color: var(--bt-coral-text);
+  box-shadow: inset var(--bt-marker-w) 0 0 var(--bt-coral-edge);
+}
+
+/* The prose under a band heading, and the counts under a section. Small,
+   secondary, and never allowed to be absent: these carry "3 already on your
+   shelves" and "read 60 catalogued works", which is what turns a two-card
+   section from something that looks broken into a narrow question honestly
+   answered. */
+.fbandnote {
+  font-size: var(--bt-fs-mini); color: var(--bt-text-muted); line-height: 1.5;
+  padding: 0 var(--bt-space-6) var(--bt-space-3);
+}
+.fbandnote b { color: var(--bt-text-secondary); font-weight: 600; }
+.fbandnote a { text-decoration: underline; }
+.fbandnote--foot {
+  margin-top: var(--bt-space-2);
+  padding-top: var(--bt-space-3);
+  border-top: var(--bt-rule-w) solid var(--bt-line-hairline);
+  color: var(--bt-text-faint);
+}
+
+/* ── The unread mark ──────────────────────────────────────────────────────
+   Matches the sidebar badge's job without matching its shape: the tree's
+   `.badge` is a filled pill in a 15px row, and the same treatment beside a
+   16px author name reads as a notification dot rather than as a count. Teal
+   wash with a teal edge is the app's "this is new, and it is good news"
+   vocabulary — the same one `.add.is-in` and `.cmine` use. */
+.fnews {
+  flex: 0 0 auto;
+  font-size: var(--bt-fs-micro); font-weight: 600; letter-spacing: .02em;
+  padding: 1px 6px; border-radius: var(--bt-radius-pill);
+  color: var(--bt-teal-text); background: var(--bt-teal-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-teal-edge);
+}
+
+/* ── The per-author news feed ─────────────────────────────────────────────
+   What changed in this catalogue, in the section for the author it changed for.
+   A row rather than a card, because it is a log line and not a book — the book
+   is already above it in a band. */
+.fnewsrow {
+  display: flex; align-items: baseline; gap: var(--bt-space-3);
+  padding: 5px var(--bt-space-6);
+  font-size: var(--bt-fs-mini); color: var(--bt-text-muted);
+  border-bottom: var(--bt-rule-w) solid var(--bt-line-hairline);
+}
+.fnewsrow .fnk {
+  flex: 0 0 14px; text-align: center; color: var(--bt-text-faint);
+  font-family: var(--bt-font-mono);
+}
+.fnewsrow .fnt {
+  color: var(--bt-text-secondary); font-weight: 500;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fnewsrow .fnw { flex: 0 0 auto; }
+/* Unseen since the reader last opened this author's section.
+
+   The marker is the LEFT EDGE rather than the trailing dot `.ev.unread` uses on
+   Activity, and the difference is deliberate rather than an inconsistency: a
+   feed row there is one of a hundred in a single stream, where a dot beside the
+   title is what distinguishes it from its neighbours. These rows come in runs
+   of two or three inside a section, and what the reader needs to see is that
+   the run exists — an inset marker in the same teal reads as a block from the
+   corner of the eye, which is the same reason `.miss.is-sel` uses one. */
+.fnewsrow.is-new {
+  color: var(--bt-text-secondary);
+  box-shadow: inset var(--bt-marker-w) 0 0 var(--bt-teal);
+}
+.fnewsrow.is-new .fnw { color: var(--bt-teal-text); }
 
 /* ── A DATE THAT MIGHT ALREADY BE BEHIND US ───────────────────────────────
    The strip lists works dated after today, but Open Library records YEARS: a
@@ -676,12 +851,14 @@ a.src:hover { background: var(--bt-surface-hover); }
    this the ten-slot mono date and a countdown collide and the field — the one
    element on the card that must stay exact — is what gives way.
 
-   SCOPED TO #fgrid, not written as a bare `.card .cs`. The card is a shared
+   SCOPED TO .fsec, not written as a bare `.card .cs`. The card is a shared
    component and the search view lays out hundreds of them; relaxing its
    subtitle row from here would reflow a screen this file has no business
    touching, and the symptom would show up somewhere nobody would think to
-   connect to the Following page. */
-#fgrid .card .cs { flex-wrap: wrap; }
+   connect to the Following page. (It was `#fgrid` while the page had one shared
+   strip; the sections replaced that, and a selector left pointing at an id
+   nothing renders any more is a rule that silently stops applying.) */
+.fsec .card .cs { flex-wrap: wrap; }
 
 /* A card the reader added FROM this strip, in the session they added it.
 
