@@ -1,0 +1,79 @@
+{
+  "_note": [
+    "JSON has no comments, so the reasoning that would normally sit beside a",
+    "value lives here and in the <link rel=\"manifest\"> comment in index.html.",
+    "",
+    "EVERY PATH IN THIS FILE IS RELATIVE, and that is not a style preference.",
+    "BookTrak is published at ackley14.github.io/Lorelaibrary/, so a leading",
+    "slash resolves to the origin root — which is MovieTrak's neighbourhood, not",
+    "ours — and the installed app would launch into a 404. Relative paths are",
+    "resolved against the URL of this file, so they are correct from the subpath,",
+    "from a repository renamed tomorrow, and from a local static server. There is",
+    "no build step to rewrite them, so they have to be right as written.",
+    "",
+    "`id` is deliberately absent. It defaults to start_url, which keeps the",
+    "installed app's identity tied to wherever the manifest actually is; naming",
+    "it explicitly would hardcode /Lorelaibrary/ and split one installed app into",
+    "two the day the repository is renamed.",
+    "",
+    "A manifest takes ONE colour pair while the app has two grounds. The dark one",
+    "wins: this is a scanning tool that is used in shops and libraries, the splash",
+    "screen shows for a beat before the theme script in index.html has run, and a",
+    "white flash on a dark-themed phone is the more jarring of the two mistakes.",
+    "#071619 is --bt-surface-canvas of the dark theme (css/01-tokens.css) and must",
+    "change with it, along with the two theme-color meta tags in index.html."
+  ],
+
+  "name": "BookTrak",
+  "short_name": "BookTrak",
+  "description": "A local-first library for the books you want to read, are reading, and have finished.",
+  "lang": "en",
+  "dir": "ltr",
+
+  "start_url": "./",
+  "scope": "./",
+
+  "display": "standalone",
+  "orientation": "any",
+
+  "theme_color": "#071619",
+  "background_color": "#071619",
+
+  "categories": ["books", "productivity", "utilities"],
+
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+
+  "shortcuts": [
+    {
+      "name": "Scan a barcode",
+      "short_name": "Scan",
+      "description": "Point the camera at an ISBN and add that exact printing.",
+      "url": "./#/scan"
+    }
+  ]
+}

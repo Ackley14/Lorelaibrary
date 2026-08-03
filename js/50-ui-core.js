@@ -561,6 +561,11 @@ BT.ui = (function () {
   function setProgress(uid, patch) {
     return BT.repo.getItem(uid).then(async cur => {
       if (!cur) return null;
+      /* Read BEFORE the copy below is mutated: it is the only surviving record
+         of where the reader was, and the whole point of the history row at the
+         foot of this function is that `user.progress` keeps a position and not
+         a trail. */
+      const wasPage = (progressOf(cur) || {}).currentPage;
       const p = Object.assign({}, progressOf(cur));
       if (patch.totalPages !== undefined) {
         p.totalPages = patch.totalPages == null ? undefined
@@ -595,6 +600,40 @@ BT.ui = (function () {
       }
 
       await BT.repo.putItem(cur);
+
+      /* THE READING LOG'S ONLY SOURCE OF PACE, and it has to be written here
+         because `user.progress` is a POSITION — one field, overwritten in
+         place. Page 40 on Monday and page 190 on Friday leave an item that
+         says "190" and nothing that says the 150 pages happened over four
+         days. The `history` store is the append-only side of the same fact,
+         and without this line #/stats can only ever draw the empty state: the
+         data it needs is not merely missing, it is destroyed on every save.
+         (12-repo.js has described this store as holding "progress events"
+         since M1; until now nothing wrote one.)
+
+         Written AFTER putItem so a failed save cannot leave a reading in the
+         log for a position the library never took.
+
+         THREE GATES, each removing a row that would be a lie in the chart:
+
+           !empty         clearing the field is erasing a record, not reading.
+           currentPage>0  the same "bookkeeping, not reading" line the
+                          promotion above draws — typing an extent for an
+                          unopened book is not a reading session.
+           !== wasPage    re-committing the same page must not append. It is a
+                          common gesture (correcting a typo in totalPages,
+                          saving the form twice) and every repeat would add a
+                          zero-page delta that drags the "recorded positions"
+                          count in the stats footnote away from the number of
+                          times the reader actually logged anything.
+
+         The bare page number is the value, not the whole record: 68-view-stats
+         differences positions, `by_uid`/`by_at` already carry the rest, and
+         `history` travels in SYNC_STORES — a row per save is a row per device
+         forever, so it stays small. */
+      if (!empty && p.currentPage > 0 && p.currentPage !== wasPage) {
+        await BT.repo.addHistory(uid, 'progress', p.currentPage);
+      }
       return cur;
     });
   }

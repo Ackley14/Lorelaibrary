@@ -4,9 +4,14 @@
    M3 note — /scan now has a real view (BT.viewScan, in 75-view-scan.js) and
    the mechanism below did what it was built to do a second time: the route
    line did not have to change at all. Every route is still registered exactly
-   once, here, and the ones whose views are not written yet (/up, /stats,
-   /unlock) go on rendering a short placeholder naming the milestone they
-   arrive in.
+   once, here, and the ones whose views are not written yet (/up, /unlock) go
+   on rendering a short placeholder naming the milestone they arrive in.
+
+   M5 also puts the service worker registration in this file — see
+   registerServiceWorker() below. It is boot's business rather than the
+   scanner's or the router's, but index.html is what CALLS it, because offline
+   access must not end up behind the encryption gate that lands between start()
+   and startApp().
 
    Resolution happens at NAVIGATION time rather than at registration, which is
    why adding a view is a one-word change: the day the module lands on the page
@@ -125,9 +130,20 @@ BT.boot = (function () {
       ['Discover', 'Following'], 'Following', 'M4',
       'Authors and publishers you follow, and what has turned up in their catalogues that is not in your library yet. Arrives in')));
 
+    /* Real as of M5, and the name was READ OFF THE FILE and not taken from the
+       plan: `68-view-stats.js` opens `BT.viewStats = (function () {` and closes
+       `return { render };`. The plan said `BT.viewStats` too — but M2 is the
+       reason that agreement is checked rather than assumed, because the failure
+       when it does not hold is silent. A single name here, not a list: aliases
+       added on spec only make the next mismatch harder to see.
+
+       The stub behind it is no longer a promise. It is the answer to "that view
+       file failed to parse", so its wording describes the screen that exists —
+       reading pace off the progress history, the breakdowns, and the date
+       precision histogram that shows what a Google Books key would sharpen. */
     BT.router.on('/stats', viewOr('viewStats', stub(
-      ['Shelf', 'Stats'], 'Stats', 'M4',
-      'Pages read, genres by share, how long books sit on the want shelf before you start them. Arrives in')));
+      ['Shelf', 'Stats'], 'Stats', 'M5',
+      'Pages read over time from your logged progress, counts by status, genre, author, decade and format, and how precisely the catalogue actually knows each publication date. Part of')));
 
     /* Real as of M5, and the name was READ OFF THE FILE rather than taken from
        the plan: `69-view-settings.js` opens `BT.viewSettings = (function () {`.
@@ -308,6 +324,151 @@ BT.boot = (function () {
      does. */
   function schedulePush() { /* M5 */ }
 
+  /* ══ The service worker, and the update it is not allowed to force ═══════
+     sw.js precaches the app shell so that an installed BookTrak opens in a
+     bookshop basement. What lives HERE is the other half: noticing that a new
+     shell has been installed, and asking before it is used.
+
+     THE WHOLE DESIGN IS "NEVER SWAP UNDER A RUNNING TAB".
+     sw.js does not call skipWaiting() and does not call clients.claim(), so a
+     newly installed worker sits in `waiting` doing nothing at all. That is not
+     caution for its own sake — this app has two states where a reload is
+     genuinely destructive:
+
+       a live camera   iOS revokes camera permission for a standalone PWA the
+                       moment the page goes (WebKit 215884, same bug that makes
+                       the scanner an overlay instead of a route), and it cannot
+                       be re-granted from inside the app. An update that reloads
+                       the page mid-scan costs the user their camera until they
+                       find BookTrak in iOS Settings.
+       a half-typed    BT.ui.setProgress writes on commit, not on keystroke.
+       page number     Reloading over it loses what was typed.
+
+     So the sequence is: worker installs → waits → we toast → the reader presses
+     Reload → we message sw.js, which is the ONLY thing that ever calls
+     skipWaiting() → the new worker activates → controllerchange fires → we
+     reload once. Nothing in that chain happens without the press.
+
+     And the press cannot happen mid-scan, because the toast is held back for
+     as long as BT.router.suspended is true — which the router sets around
+     getUserMedia and clears once every track is stopped, so it is exactly the
+     window in which a MediaStream is live. Nothing in this file navigates,
+     touches location.hash, or calls router.go(); the one thing it does to the
+     page is location.reload(), and that is behind both guards. */
+
+  /* Relative, always. BookTrak is served from /Lorelaibrary/ — '/sw.js' asks
+     the origin root, which belongs to neither this app nor MovieTrak, and would
+     404. It is also what sets the worker's SCOPE to this app's directory, so
+     the registration cannot reach MovieTrak's pages next door. */
+  const SW_URL = 'sw.js';
+  /* A tab left open for a week never navigates, so the browser never re-checks
+     sw.js on its own. Ask again on the way back in — cheap, and it is the only
+     thing that makes the toast reachable for the way this app is actually used. */
+  const SW_RECHECK_MS = 30 * 60 * 1000;
+  /* How long to wait before re-testing whether the scanner has closed. */
+  const SW_QUIET_MS = 5000;
+
+  let swWired = false;
+  let updateOffered = false;
+  let updateAccepted = false;
+  let reloading = false;
+
+  const scanning = () => !!(BT.router && BT.router.suspended);
+
+  function showUpdateToast(worker) {
+    /* Hold, do not drop. A scan session ends in seconds to minutes, and the
+       waiting worker is patient — there is nothing to lose by asking later and
+       a camera to lose by asking now. */
+    if (scanning()) { setTimeout(() => showUpdateToast(worker), SW_QUIET_MS); return; }
+    if (!BT.ui || !BT.ui.toast) return;
+    BT.ui.toast('A new version of BookTrak is ready.', {
+      actionLabel: 'Reload',
+      ms: 20000,
+      onAction: () => {
+        if (scanning()) return;
+        updateAccepted = true;
+        /* sw.js answers this by calling skipWaiting(). It is the only message
+           it listens for and the only path to that call. */
+        worker.postMessage({ type: 'BT_SKIP_WAITING' });
+      },
+    });
+  }
+
+  /* Offered once per page load, on purpose. A toast that came back every few
+     minutes would be nagging, and nothing is lost by letting it go: the worker
+     stays in `waiting`, and the `reg.waiting` check in registerServiceWorker()
+     finds it again on the next load. */
+  function offerUpdate(worker) {
+    if (!worker || updateOffered) return;
+    updateOffered = true;
+    showUpdateToast(worker);
+  }
+
+  function registerServiceWorker() {
+    /* index.html checks these before calling — that is where someone asking
+       "why is there no offline here" will look first — and they are repeated
+       because this is also reachable from the console.
+
+       The file: test is not covered by isSecureContext, however much it looks
+       like it should be: Chromium reports isSecureContext === true for a
+       file:// document and then rejects register() with "The URL protocol of
+       the current origin ('null') is not supported". Checked in a browser, not
+       inferred. Without this line, every local double-click open logs a
+       warning about a failure that is really just an unsupported environment,
+       and the app is otherwise completely fine. Firefox needs the third test
+       instead: there, navigator.serviceWorker does not exist on file:// at
+       all. */
+    if (!window.isSecureContext) return null;
+    if (location.protocol === 'file:') return null;
+    if (!('serviceWorker' in navigator)) return null;
+    if (swWired) return null;
+    swWired = true;
+
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      /* sw.js never claims clients, so the ONLY way the controller changes is
+         the skipWaiting we just asked for. The flag is belt and braces against
+         a future worker that does claim, which would otherwise reload every
+         open tab the first time it installed. */
+      if (!updateAccepted || reloading || scanning()) return;
+      reloading = true;
+      location.reload();
+    });
+
+    return navigator.serviceWorker.register(SW_URL).then(reg => {
+      /* Already waiting when the page loaded: an update was installed and the
+         offer was missed — a toast timed out, or the tab was closed before it
+         appeared. The controller check keeps a FIRST install quiet; there is
+         no old version to replace, so there is nothing to announce. */
+      if (reg.waiting && navigator.serviceWorker.controller) offerUpdate(reg.waiting);
+
+      reg.addEventListener('updatefound', () => {
+        const incoming = reg.installing;
+        if (!incoming) return;
+        incoming.addEventListener('statechange', () => {
+          if (incoming.state !== 'installed') return;
+          if (!navigator.serviceWorker.controller) return;   /* first install */
+          offerUpdate(incoming);
+        });
+      });
+
+      let checkedAt = Date.now();
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden || scanning()) return;
+        if (Date.now() - checkedAt < SW_RECHECK_MS) return;
+        checkedAt = Date.now();
+        /* Failure here is a normal offline Tuesday, not a fault. */
+        reg.update().catch(() => {});
+      });
+
+      return reg;
+    }).catch(e => {
+      /* A warning, never a throw. Everything this app does works without a
+         service worker; losing it costs offline launches and nothing else. */
+      console.warn('[sw] registration failed', (e && e.message) || e);
+      return null;
+    });
+  }
+
   /* ── Boot in two stages ────────────────────────────────────────────────
      The repository holds the library, so nothing renders until there is a
      dataset to render against. From M5 the encryption gate sits between the
@@ -397,5 +558,5 @@ BT.boot = (function () {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
   else start();
 
-  return { refreshFooter, schedulePush, start, startApp };
+  return { refreshFooter, schedulePush, registerServiceWorker, start, startApp };
 })();

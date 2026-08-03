@@ -17,10 +17,31 @@
 <link rel="icon" href="favicon.ico" sizes="32x32">
 <link rel="apple-touch-icon" href="icon-180.png">
 
-<!-- M5 inserts the manifest link here, and the service worker registration at
-     the foot of the script block. Deliberately absent until then: a worker
-     that caches the shell while the shell still changes daily mostly serves
-     yesterday's bug back to you. -->
+<!-- Installable, because scanning is a phone job: holding a barcode up to a
+     browser tab means the URL bar and the tab strip eat the viewport the
+     camera preview needs, and a home-screen launcher is one tap instead of
+     "find the bookmark". Relative again, and for the sharper reason this time
+     — the manifest's own start_url and scope are resolved against ITS url, so
+     fetching it from the wrong path would scope the installed app to the
+     origin root and launch it into a GitHub 404. manifest.json explains the
+     rest of its choices in a "_note" key, JSON having nowhere better. -->
+<link rel="manifest" href="manifest.json">
+
+<!-- iOS reads the manifest for this from 16.4 onwards and this tag before it,
+     and the phones this app is aimed at are exactly the older ones. Without it
+     an installed BookTrak opens in a Safari view with browser chrome, which is
+     the one thing installing was meant to remove. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<!-- `default`, NOT `black-translucent`. Translucent lets the page run under the
+     status bar, and .mobilebar in css/05-responsive.css pads for the left and
+     right safe-area insets but not the top — so the index button and the title
+     would sit under the clock on every notched phone. The status bar is worth
+     less than the header being reachable. -->
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<!-- The home-screen label. Without it iOS uses <title>, which is the same
+     string today and would silently follow it if the tab title ever grew a
+     count or a book name. -->
+<meta name="apple-mobile-web-app-title" content="BookTrak">
 
 <!-- Tints the browser chrome to match whichever ground the app is painting:
      low tide's shell, or deep water's ground. These two values are the
@@ -255,6 +276,11 @@
      budget can be reasoned about in exactly one place (45-alerts.js). -->
 <script src="js/66-view-alerts.js"></script>
 <script src="js/67-view-people.js"></script>
+<!-- Stats. It reads the `history` store that BT.ui.setProgress has been filling
+     since M1 and charts it by hand in CSS and SVG — there is no build step and
+     no CDN tag is permitted, so a charting library was never an option. Its
+     numbers are all derived at render time; nothing here is stored. -->
+<script src="js/68-view-stats.js"></script>
 <!-- Settings, and the only screen that rewrites the WHOLE library in one press
      (Recalculate genres). It sits below 12-repo, 38-normalize and 50-ui-core
      because it uses BT.repo.putItemQuiet, BT.normalize.bucketGenres and
@@ -267,6 +293,50 @@
      destination of its own rather than another way of listing the library. -->
 <script src="js/75-view-scan.js"></script>
 <!-- …and the remaining view files after these, in numeric order: 64-view-up,
-     68-view-stats, 71-view-unlock (71, not 70 — 70 is taken by the follows
-     logic module loaded above). -->
+     71-view-unlock (71, not 70 — 70 is taken by the follows logic module
+     loaded above). -->
 <script src="js/90-boot.js"></script>
+
+<!-- ── The service worker ──────────────────────────────────────────────────
+     Registered from here rather than from inside BT.boot.start(), because the
+     encryption gate lands between start() and startApp() in M5 and offline
+     access must not be contingent on having unlocked anything. This line runs
+     on every load, gate or no gate.
+
+     THREE GUARDS, AND ALL THREE ARE LOAD-BEARING. Opening index.html straight
+     off the disk is a supported way to run BookTrak — the README says so — and
+     there is no service worker on file:// in any browser.
+
+       isSecureContext   covers plain http on a LAN address, which is the
+                         common "I served it to my phone" case.
+       location.protocol covers file://, and IT IS NOT REDUNDANT: Chromium
+                         reports isSecureContext === TRUE for a file:// document
+                         (checked, not assumed — it treats local files as
+                         potentially trustworthy) while still refusing to
+                         register, so the obvious guard sails straight past the
+                         case it was written for. What is left is a console
+                         warning on every local load, complaining about
+                         something that is working as intended.
+       'serviceWorker'   covers Firefox, where the property is simply absent on
+                         file:// rather than present and unusable.
+
+     None of the three is a substitute for the others.
+
+     Relative 'sw.js', like everything else on this page: '/sw.js' would ask
+     for a file at the origin root, which on ackley14.github.io is neither this
+     app's nor MovieTrak's, and the registration would 404. The path also fixes
+     the SCOPE — sw.js sits beside index.html, so the worker controls
+     /Lorelaibrary/ and cannot see MovieTrak's pages next door.
+
+     The registration logic itself lives in js/90-boot.js so that it is a JS
+     file like everything else: syntax-checked, greppable, and callable from
+     the console when something needs proving. -->
+<script>
+(function () {
+  if (!window.isSecureContext) return;
+  if (location.protocol === 'file:') return;
+  if (!('serviceWorker' in navigator)) return;
+  if (!window.BT || !BT.boot || !BT.boot.registerServiceWorker) return;
+  BT.boot.registerServiceWorker();
+})();
+</script>

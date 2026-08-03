@@ -144,6 +144,102 @@
 }
 .stack i { display: block; height: 100%; }
 
+/* ── Stats: prose that carries a number ────────────────────────────────────
+   #/stats is half chart and half sentence, because a derived figure nobody can
+   check is a figure nobody should be asked to trust. Two weights: .statnote is
+   the explanation a reader is meant to read, .statfoot is the caveat they only
+   need when it applies. Both are declared here rather than written inline on
+   the elements — 66-view-alerts sets this same shape with a style attribute in
+   four places and they have already drifted apart by a pixel. */
+.statnote { font-size: var(--bt-fs-sm); line-height: 1.6; color: var(--bt-text-muted); }
+.statnote b { color: var(--bt-text-secondary); font-weight: 600; }
+.statnote + .statnote,
+.bars + .statnote { margin-top: var(--bt-space-4); }
+.statfoot {
+  font-size: var(--bt-fs-micro); line-height: 1.55;
+  color: var(--bt-text-faint); margin-top: var(--bt-space-3);
+}
+/* The gap between one stats section and the next. A heading that sits as close
+   to the block above it as to its own bars belongs to neither. */
+.hd--gap { margin-top: var(--bt-space-7); }
+
+/* ── Reading pace ──────────────────────────────────────────────────────────
+   A column chart in flexbox rather than in SVG, and the reason is reflow: this
+   plot has to survive going from a full three-pane desktop to a 320px phone
+   with the tree and inspector collapsed away, and a percentage height inside a
+   flex row does that with no script at all. An SVG would need its viewBox
+   re-solved on every resize to keep the bars from smearing, on a screen that
+   otherwise never touches the DOM after it renders.
+
+   Columns are `flex: 1 1 0` so 21 daily buckets and 26 weekly ones both fill
+   the same width. min-width: 0 is what stops a column refusing to shrink below
+   its content and pushing the last weeks off the right edge. */
+.pace { margin-bottom: var(--bt-space-4); }
+.pace-head {
+  display: flex; align-items: baseline; gap: var(--bt-space-3);
+  margin-bottom: var(--bt-space-2);
+}
+.pace-head .pk { font-family: var(--bt-font-mono); font-size: var(--bt-fs-mini); color: var(--bt-text-muted); }
+.pace-head .lg { margin-left: auto; font-size: var(--bt-fs-micro); color: var(--bt-text-faint); }
+.pace-head .lg i {
+  display: inline-block; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--bt-coral); margin-right: 4px; vertical-align: middle;
+}
+
+.pace-plot {
+  display: flex; align-items: flex-end; gap: 2px;
+  height: 132px;
+  border-bottom: var(--bt-rule-w) solid var(--bt-line-rule);
+}
+/* The finished-books fallback. Its y-axis counts books rather than pages and
+   usually tops out at one or two, so at full height a single finished book
+   draws a slab the size of a record reading week. */
+.pace-plot--short { height: 72px; }
+/* Full height even when empty, so the hover target — and therefore the
+   tooltip naming the week — covers the whole column. A zero week that cannot
+   be hovered is a week the reader cannot ask about, which is the opposite of
+   what zero-filling the axis was for. */
+.pace-col { flex: 1 1 0; min-width: 0; height: 100%; display: flex; align-items: flex-end; }
+.pace-col i {
+  display: block; width: 100%; min-height: 2px;
+  background: var(--bt-teal);
+  border-radius: var(--bt-radius-sm) var(--bt-radius-sm) 0 0;
+}
+.pace-col:hover i { background: var(--bt-teal-text); }
+/* A hairline on the baseline, so a week with no reading still reads as a week
+   that was there rather than as blank paper. */
+.pace-col.is-zero::after {
+  content: ""; display: block; width: 100%; height: 1px;
+  background: var(--bt-line-rule);
+}
+/* The fallback chart, drawn when there is no page data to difference but the
+   log still knows when books were finished. Coral because it is counting
+   events, not pages — the same hue the finish markers use below the axis. */
+.pace-col.fin i { background: var(--bt-coral); }
+.pace-col.fin:hover i { background: var(--bt-coral-text); }
+
+/* Finishes sit BELOW the axis rather than as a second series inside the plot.
+   A finished book is an event, not a quantity, and giving it a height would
+   put it on a y-axis measured in pages where it does not belong. */
+.pace-fin { display: flex; gap: 2px; height: 11px; margin-top: 3px; }
+.pace-fin span {
+  flex: 1 1 0; min-width: 0; display: grid; place-items: center;
+  font-family: var(--bt-font-mono); font-size: 8px; line-height: 1;
+  color: var(--bt-coral-text);
+}
+.pace-fin span b { display: block; width: 5px; height: 5px; border-radius: 50%; background: var(--bt-coral); }
+
+/* One label per column, but only the tick columns carry text — 26 dates in a
+   row is a smear at any size. The empty spans are what keep the labels aligned
+   to their own bars, and overflow is left visible on purpose so a centred date
+   may bleed over its silent neighbours. */
+.pace-axis { display: flex; gap: 2px; margin-top: 5px; }
+.pace-axis span {
+  flex: 1 1 0; min-width: 0; text-align: center; white-space: nowrap;
+  font-family: var(--bt-font-mono); font-size: var(--bt-fs-micro);
+  color: var(--bt-text-faint);
+}
+
 /* ══ SEARCH ═══════════════════════════════════════════════════════════════ */
 
 .searchbox {
