@@ -221,8 +221,8 @@ BT.normalize = (function () {
      survives is used twice, for two different jobs, and the two must not be
      confused:
 
-       bucketGenres()  → at most three of the six display buckets. Coarse, for
-                         chips and facets.
+       bucketGenres()  → at most three of the twelve display buckets. Coarse,
+                         for chips and facets.
        cleanSubjects() → the FULL filtered list, kept on the item and fed to
                          rec.terms. Fine-grained, and the actual taste signal —
                          'Dune (Imaginary place)' and 'Ecology in literature'

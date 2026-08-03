@@ -151,8 +151,19 @@ BT.viewLibrary = (function () {
        honest pair of answers to two different questions — "how much of my
        library is this" versus "show me everything that is this" — and the
        alternative, filtering on the primary bucket only, hides books from the
-       shelf they genuinely belong to. */
-    if (q.genre) rows = rows.filter(i => genreIdsOf(i).indexOf(q.genre) >= 0);
+       shelf they genuinely belong to.
+
+       BOTH SIDES go through BT.genreId — the stored ids in genreIdsOf, and the
+       route's own ?genre= here. Resolving only the records would leave a
+       bookmarked or hand-typed #/library?genre=fantasysf matching nothing,
+       because every record's `fantasysf` has just been resolved to `fantasy`
+       while the query still says the dead id. The reader would get a page
+       captioned "Fantasy" — crumbFor resolves it — above an empty list, which
+       is a worse answer than either name alone. */
+    if (q.genre) {
+      const want = BT.genreId(q.genre);
+      rows = rows.filter(i => genreIdsOf(i).indexOf(want) >= 0);
+    }
 
     /* Format and pile are filtered client-side over the whole library because
        neither is an IndexedDB index — the same call made in MovieTrak for
@@ -255,10 +266,25 @@ BT.viewLibrary = (function () {
      by BT.repo on put — a record restored from an older export, or one built by
      a view before it has been saved, may not have been through that yet. Falling
      back to the record's own genres means such a book is filed rather than
-     invisible. */
+     invisible.
+
+     Both paths go through BT.genreId(), and the INDEXED one is why this mapping
+     cannot live in genresOf alone. `idx.genreIds` is a verbatim copy of the
+     stored ids (12-repo builds it as `genres.map(g => g.id)`), so a book added
+     before the Fantasy/SF split holds the literal string `fantasysf` there. The
+     tree only ever emits `#/library?genre=fantasy` now, and 'fantasysf' does
+     not equal 'fantasy' — so without this the reader clicks Fantasy, having
+     just been told by the tree that there are books on that shelf, and gets a
+     list that does not contain their oldest fantasy novels. They are not gone;
+     they are only reachable at a ?genre=fantasysf URL nothing links to any
+     more, which is indistinguishable from gone.
+
+     Resolving is a READ-side fix and deliberately not a write: the stored id is
+     left exactly as the user's data has it, and Settings → Recalculate genres
+     is what actually re-derives `fantasysf` into Fantasy or Science Fiction. */
   function genreIdsOf(it) {
     const idx = (it.idx && it.idx.genreIds) || null;
-    return (idx && idx.length) ? idx : BT.ui.genresOf(it);
+    return (idx && idx.length) ? idx.map(id => BT.genreId(id)) : BT.ui.genresOf(it);
   }
 
   /* The breadcrumb's first word mirrors the SECTION of the tree the route lives
@@ -270,7 +296,10 @@ BT.viewLibrary = (function () {
     if (q.pile) return ['Shelf', BT.ui.PILE_WORD[q.pile] || q.pile];
     if (q.undated) return ['Shelf', 'No date set'];
     if (q.status) return ['Library', BT.ui.STATUS_WORD[q.status] || q.status];
-    if (q.genre) return ['Library', BT.GENRE_LABELS[q.genre] || q.genre];
+    /* BT.genreLabel, not a bare table lookup: a bookmark or a hand-typed URL
+       can still carry ?genre=fantasysf, and the resolver gives it the heir's
+       word ('Fantasy') instead of echoing a dead id back at the reader. */
+    if (q.genre) return ['Library', BT.genreLabel(q.genre)];
     if (q.format) return ['Library', BT.ui.FORMAT_LABEL[q.format] || q.format];
     return ['Library', 'All books'];
   }

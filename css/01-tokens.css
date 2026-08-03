@@ -9,8 +9,17 @@
 
    Only the PREFIX differs: this app's tokens are `--bt-`, MovieTrak's are
    `--mt-`. Nothing else about the palette is BookTrak's own except the two
-   extra hue families (violet, moss) that a five-genre library needs and a
-   four-type watchlist did not.
+   extra hue families (violet, moss) that a library needs and a four-type
+   watchlist did not.
+
+   SIX HUE FAMILIES. THAT IS THE WHOLE SUPPLY. teal, coral, amber, ice, violet,
+   moss — each with a -text/-wash/-edge set derived per theme below. There is
+   no seventh and there must not be one: a hue added here is a hue MovieTrak
+   does not have, in a palette whose entire purpose is that both apps wear it.
+   The app's twelve genres therefore SHARE these six, two per family, and the
+   tag's label is what tells them apart. See BT.GENRE_FAMILY in js/00-config.js
+   for the reasoning; if you arrived here meaning to give some genre a colour
+   of its own, that note is addressed to you.
 
    THE RULE OF THIS FILE
    ─────────────────────
@@ -73,12 +82,48 @@
      deliberately never redeclared inside a theme block. Genre and precision
      share the hue pool on purpose; they never appear in the same badge, so a
      reused hue costs nothing and keeps the palette from sprawling. MovieTrak
-     does the same thing with film and day-precision. */
-  --bt-genre-fiction: var(--bt-ice);
-  --bt-genre-nonfiction: var(--bt-moss);
-  --bt-genre-fantasysf: var(--bt-violet);
-  --bt-genre-mystery: var(--bt-teal);
+     does the same thing with film and day-precision.
+
+     THE HUE NAMES THE FAMILY, THE LABEL NAMES THE GENRE.
+     Eleven hued genres, six families, two genres to a hue — paired below so
+     the pairing is visible in the source rather than inferred from it:
+
+       violet  Literary Fiction + Historical      — the realistic shelf
+       ice     Fantasy + Science Fiction          — the speculative shelf
+       amber   Mystery & Thriller + Horror        — the frightening shelf
+       coral   Romance + Young Adult              — the emotional shelf
+       moss    Non-fiction + Biography & Memoir   — the true shelf
+       teal    Graphic Novels                     — a form, not a shelf; alone
+
+     A pair sharing a hue is the design, not a shortage. Twelve distinguishable
+     hues do not exist in this palette and would not survive a 7px tree dot if
+     they did — six is already near the limit at that size. Keep the pairs
+     semantic: the two genres under one hue must be the two a reader would
+     shelve next to each other, so that the colour still carries meaning even
+     before the word is read.
+
+     DO NOT INVENT A HEX VALUE HERE to break a pair apart. Every colour in this
+     file is MovieTrak's, value for value; a new one would exist in one app
+     only and the family resemblance is the point of the palette. */
+  --bt-genre-fiction: var(--bt-violet);
+  --bt-genre-historical: var(--bt-violet);
+  --bt-genre-fantasy: var(--bt-ice);
+  --bt-genre-scifi: var(--bt-ice);
+  --bt-genre-mystery: var(--bt-amber);
+  --bt-genre-horror: var(--bt-amber);
   --bt-genre-romance: var(--bt-coral);
+  --bt-genre-youngadult: var(--bt-coral);
+  --bt-genre-nonfiction: var(--bt-moss);
+  --bt-genre-biography: var(--bt-moss);
+  --bt-genre-graphic: var(--bt-teal);
+  /* Legacy id, kept as an alias rather than deleted. Books added before the
+     combined Fantasy & SF bucket was split still carry `fantasysf`, and the
+     app does not rewrite stored records on boot (see BT.GENRE_ALIASES). Point
+     it at its heir so an old book's tag paints the Fantasy hue instead of
+     resolving to nothing and rendering as unstyled text on a bare ground.
+     Delete it only once no stored item can carry the id — which, given the
+     user chooses when to run Settings → Recalculate genres, is never. */
+  --bt-genre-fantasysf: var(--bt-genre-fantasy);
   /* 'general' is the catch-all bucket and gets no alias at all, because it gets
      no hue: it renders in muted text on a sunk ground, exactly the treatment
      .prec.unknown gets. Colouring it would dress an absence of information up
@@ -115,8 +160,10 @@
   --bt-coral:  #B03A22; --bt-coral-text:  #96301B; --bt-coral-wash:  #F6E3DD; --bt-coral-edge:  #DFA995;
   --bt-amber:  #8A6208; --bt-amber-text:  #755207; --bt-amber-wash:  #F4E9CF; --bt-amber-edge:  #D6BA79;
   --bt-ice:    #1E5F91; --bt-ice-text:    #1A5480; --bt-ice-wash:    #DFEAF3; --bt-ice-edge:    #94BAD7;
-  /* Two more, because a library sorts into five genres and a watchlist sorted
-     into four types. Derived to the same discipline as the four above — same
+  /* Two more, because a library sorts into more shelves than a four-type
+     watchlist. Six families is where it stops — see the note in :root: the
+     twelve genres pair up onto these six rather than growing the set.
+     Derived to the same discipline as the four above — same
      lightness band, same wash/edge distances — so they read as members of the
      set rather than as guests. Violet sits between ice and coral on the wheel;
      moss is far enough off teal (H 172 → H 127) to survive a 7px tree dot. */
@@ -176,7 +223,8 @@
   --bt-ice:    #7CC7FF; --bt-ice-text:    #A6DAFF; --bt-ice-wash:    rgba(124, 199, 255, .14); --bt-ice-edge:    rgba(124, 199, 255, .42);
   /* Dark flips the discipline: bright and vivid against the near-black, never
      pastel. These two are pitched at the same luminance as ice and teal so a
-     row of five genre dots has no weak link. */
+     column of genre dots down the tree has no weak link — and with two genres
+     to a hue, a dim one would now cost two rows rather than one. */
   --bt-violet: #C38FFF; --bt-violet-text: #DCBDFF; --bt-violet-wash: rgba(195, 143, 255, .14); --bt-violet-edge: rgba(195, 143, 255, .42);
   --bt-moss:   #83CE8C; --bt-moss-text:   #AFE4B5; --bt-moss-wash:   rgba(131, 206, 140, .14); --bt-moss-edge:   rgba(131, 206, 140, .42);
 

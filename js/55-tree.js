@@ -29,12 +29,32 @@ BT.tree = (function () {
   const CARET = '<span class="tri"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M2 4l4 4 4-4z"/></svg></span>';
   const NOCARET = '<span class="tri void"></span>';
 
-  /* The bucket a book counts toward. ui-core owns the one definition; the
-     fallback matters because a record written before the facet existed must
-     land in `general` rather than drop out of every count — a tree whose
-     numbers do not add up to "All books" is a tree nobody trusts. */
-  const bucketOf = it => (BT.ui && BT.ui.genreOf ? BT.ui.genreOf(it)
-    : ((it.facets && it.facets.genre) || 'general'));
+  /* The bucket a book counts toward — its PRIMARY one. ui-core owns the single
+     definition of what a record's genres are, and 62-view-list.js reads it the
+     same way (`BT.ui.genresOf(it)[0]`), which is the contract the two screens
+     have to share: the tree counts each book once, under the most specific
+     bucket that matched, while the list matches every indexed id. So a genre
+     row's count can be smaller than the list it opens, on purpose — "how much
+     of my library is this" and "show me everything that is this" are different
+     questions.
+
+     THE NAME IS THE WHOLE BUG THIS LINE ONCE HAD. It read
+     `BT.ui.genreOf ? BT.ui.genreOf(it) : ((it.facets && it.facets.genre) ||
+     'general')`, and ui-core exports `genresOf`, plural — there has never been
+     a `genreOf`. A missing function on the left of a ternary does not throw, it
+     just quietly takes the other branch for ever, and that branch read
+     `facets.genre`: a MovieTrak-era field BookTrak has never written. So every
+     book in the library fell through to `general`, and By genre showed
+     "General 214" with a zero against all six real buckets — a tree whose
+     numbers do not add up to "All books", which is exactly what the comment
+     here claimed to be preventing. Same failure mode as the viewList/viewLibrary
+     mismatch 90-boot.js documents: a name that does not match does not fail
+     loudly, it silently disables the feature.
+
+     No fallback branch any more. genresOf already guarantees a non-empty array
+     (it returns ['general'] when a record carries nothing it recognises), so a
+     second layer of defence here could only ever hide the next rename. */
+  const bucketOf = it => BT.ui.genresOf(it)[0] || 'general';
 
   /* `unspecified` is the honest default for anything added from search, where
      the work is tracked and no edition has been chosen yet (scope 'open'). */
@@ -232,7 +252,7 @@ BT.tree = (function () {
      still highlights Want, and plain "#/library" highlights All books. */
   /* Which query parameters make an unparameterised node NOT match. These are
      the library's own filters: "All books" (#/library) must not stay lit when
-     you are looking at #/library?genre=fantasysf.
+     you are looking at #/library?genre=fantasy.
 
      Keyed by PATH rather than applied globally, and that scoping is
      load-bearing: a parameter name means different things on different

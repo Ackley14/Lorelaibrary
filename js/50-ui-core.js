@@ -200,12 +200,33 @@ BT.ui = (function () {
   /* Genre buckets, as ids. Two shapes are accepted because the record has
      carried both: normalize writes `[{ id, name }]` so repo can build
      `idx.genreIds`, but a stub straight out of search may only have the ids.
-     Reading either here means no view has to know which one it has. */
+     Reading either here means no view has to know which one it has.
+
+     Every id is resolved through BT.genreId() on the way out, and that is the
+     line that stops the Fantasy/SF split ORPHANING books. A record written
+     before the split stores `fantasysf`, which is no longer a bucket. Returned
+     raw, it reaches callers that can only match LIVE ids and quietly loses
+     every one of them: 55-tree counts the book under `byGenre.fantasysf`, a key
+     no genre row reads, so it lands in no row while still counting toward "All
+     books" — the tree-whose-numbers-do-not-add-up failure that file's bucketOf
+     comment describes; and 56-inspector lights no chip at all, so an old
+     fantasy novel opens looking as though nobody ever filed it.
+
+     Resolving here fixes all of those at once because everything that asks
+     "what is this book" comes through this function. Nothing is WRITTEN — the
+     stored id stays `fantasysf` until the user runs Settings → Recalculate
+     genres, which re-derives the bucket from the record's own subjects and can
+     tell a Fantasy from a Science Fiction, which an alias cannot.
+
+     Dedupe AFTER resolving, not before: a part-migrated record can carry both
+     `fantasysf` and `fantasy`, and the raw check would pass them as two ids and
+     draw the same chip twice. */
   function genresOf(item) {
     const raw = (item && item.genres) || [];
     const ids = [];
     for (const g of raw) {
-      const id = typeof g === 'string' ? g : (g && g.id);
+      const stored = typeof g === 'string' ? g : (g && g.id);
+      const id = stored && BT.genreId(stored);
       if (id && BT.GENRE_LABELS[id] && ids.indexOf(id) < 0) ids.push(id);
     }
     return ids.length ? ids : ['general'];

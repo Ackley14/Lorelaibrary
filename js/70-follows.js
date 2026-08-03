@@ -66,8 +66,24 @@
    ── Rate limit ────────────────────────────────────────────────────────────
    Open Library sustains about one request a second and asks not to be used as
    a backend for automated traffic. Every path here is ONE request per follow,
-   serialized by the caller, over the handful of follows due() hands back. No
-   function in this file loops over every follow, and none may.
+   and the SERIALIZATION IS THE CALLER'S. No function in this file loops over
+   every follow, and none may.
+
+   The two callers spend that budget differently on purpose, and both are
+   correct:
+
+     · The alerts sweep is UNATTENDED. Nobody is waiting, so it takes the
+       handful of follows due() hands back (SWEEP_FOLLOWS) and asks for them
+       `fresh` — the whole point of a sweep is to see what changed, so a cached
+       answer would be worthless to it. Its cap stays.
+     · The Following page is WATCHED. Someone is looking at it and has asked to
+       see everything, so it walks the whole roster one follow at a time,
+       painting what is cached before it asks for anything and painting each
+       answer as it lands. Its cap is gone; see 67-view-people.js.
+
+   What makes the second affordable is WORKS_TTL below plus `cacheOnly`, both
+   of which exist for it. `fresh` still bypasses the cache entirely, so the
+   page can never blind the sweep.
    ══════════════════════════════════════════════════════════════════════════ */
 
 BT.follows = (function () {
@@ -84,6 +100,29 @@ BT.follows = (function () {
      of searching for a book. due() rotates on lastCheckedAt so the whole
      roster still comes round. */
   const SWEEP_FOLLOWS = 3;
+
+  /* How long one follow's catalogue page may be reused before it is worth
+     asking again.
+
+     NOT BT.TTL.search, which is the ten minutes netOpts would otherwise
+     default these calls to. That number is short because a search is a live
+     question with someone watching the box, and this is not that question: it
+     is "what does this author have out", asked by a screen the reader opens
+     occasionally, against a catalogue whose answer changes when a volunteer
+     types something in — not by the minute.
+
+     Ten minutes is also what made showing the WHOLE roster unaffordable. The
+     Following page walks every follow, so at ten minutes a reader with thirty
+     follows paid thirty requests for a second look at the same screen half an
+     hour later. At the sweep cooldown they pay nothing.
+
+     BT.SWEEP.cooldownMs is reused rather than a fresh number invented, because
+     it is already this app's answer to "how often is it worth re-asking what
+     is in a follow's catalogue?" — the alerts sweep will not re-check a follow
+     more often than this either. One number, one meaning, and the two cannot
+     drift apart. The sweep itself is unaffected regardless: it passes
+     `fresh: true`, which skips the cache in both directions. */
+  const WORKS_TTL = (BT.SWEEP && BT.SWEEP.cooldownMs) || 4 * 3600e3;
 
   /* Ceiling on a stored baseline. A prolific author is ~200 works and a
      publisher token is one page of 60, so this is not close to reachable in
@@ -306,6 +345,16 @@ BT.follows = (function () {
 
      ONE request. READ-ONLY — see rule 3 in the header.
 
+     opts: { limit, offset, signal, meta, ttl,
+             fresh:     bypass the cache in both directions (the sweep),
+             cacheOnly: answer from the cache or with nothing, never the
+                        network (the Following page's first pass) }
+
+     `fresh` and `cacheOnly` are the two ends of the same axis and no caller
+     passes both. Neither is a filter on the ANSWER: an empty `works` from a
+     cacheOnly call means "not looked up yet", not "this author has published
+     nothing", and the page treats it that way.
+
      Errors travel. A follow that could not be checked because Open Library is
      down must NOT come back as an empty catalogue: the sweep would diff an
      empty list against the baseline, find nothing new, and mark the follow
@@ -348,6 +397,15 @@ BT.follows = (function () {
       signal: opts.signal,
       fresh: opts.fresh,
       meta: opts.meta,
+      /* Listed one by one rather than by spreading `opts`, because this is the
+         boundary between this file's vocabulary and the adapter's and a
+         silently-forwarded key is how the two drift.
+
+         `cacheOnly` is what lets the Following page put last visit's answers on
+         screen before it asks Open Library for anything: 05-net answers it from
+         BT.repo.cacheGet or with null, and never touches the network. */
+      cacheOnly: opts.cacheOnly,
+      ttl: opts.ttl != null ? opts.ttl : WORKS_TTL,
     });
     return {
       works: shapeWorks(res && res.docs),
@@ -406,12 +464,19 @@ BT.follows = (function () {
       offset: (opts.offset || 0) || undefined,
     });
     const data = await BT.net.get('openlibrary', url, {
-      ttl: BT.TTL.search,
+      ttl: opts.ttl != null ? opts.ttl : WORKS_TTL,
       noCache: !!opts.fresh,
+      /* Same seam as the author branch — the Following page's first pass asks
+         every follow what is already cached, and must reach the network for
+         none of them. */
+      cacheOnly: !!opts.cacheOnly,
       signal: opts.signal,
       meta: opts.meta,
     });
 
+    /* `null` is what cacheOnly answers with when nothing is cached, and it is
+       not an empty catalogue — it is "we have not looked yet". Nothing is
+       claimed from it either way, because the caller's next pass asks properly. */
     const docs = Array.isArray(data && data.docs) ? data.docs : [];
     const works = shapeWorks(docs);
     /* Point 2 above: the order we were given is relevance, not recency, so the
@@ -556,9 +621,10 @@ BT.follows = (function () {
     isFollowing, follow, unfollow, all, get,
     authorId, publisherId, publisherSlug,
     worksOf, markChecked, due,
-    /* Exposed so the sweep and the console can assert the two invariants that
-       cannot be seen from a stored row: how many follows one pass may touch,
-       and where the baseline ceiling is. */
-    SWEEP_FOLLOWS, KNOWN_CAP,
+    /* Exposed so the sweep and the console can assert the invariants that
+       cannot be seen from a stored row: how many follows one SWEEP may touch
+       (the Following page is uncapped and deliberately so), where the baseline
+       ceiling is, and how long a catalogue answer is reused for. */
+    SWEEP_FOLLOWS, KNOWN_CAP, WORKS_TTL,
   };
 })();

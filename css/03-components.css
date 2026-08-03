@@ -112,9 +112,12 @@
    caution hue, it means "read this", and a library where most books are owned
    and unread would paint half the shelf as a warning.
 
-   It shares the hue with `.c-nonfiction`, which is fine and is the same trade
-   the tokens file already makes between genre and precision: the two never
-   appear in one badge, and they live in different sections of the tree. */
+   It shares the hue with `.c-nonfiction` and `.c-biography`, just as `.c-want`
+   shares ice with the speculative pair and `.c-reading` shares teal with
+   `.c-graphic`. That is fine, and it is the same trade the tokens file already
+   makes between genre and precision: status and genre never appear in one
+   badge, and they live in different sections of the tree — a reader comparing
+   two dots is always comparing two dots of the same kind. */
 .c-want { color: var(--bt-ice); }
 .c-have { color: var(--bt-moss); }
 .c-reading { color: var(--bt-teal); }
@@ -123,12 +126,31 @@
 
 /* Genre. These read the same --bt-genre-* aliases the tags do, so a genre is
    one colour everywhere it appears — dot, tag, chart segment. Change the
-   alias in 01-tokens.css and every surface follows. */
+   alias in 01-tokens.css and every surface follows.
+
+   Listed in BT.GENRE_BUCKETS order, which is FAMILY order, so the pairs are
+   adjacent here exactly as they are adjacent in the tree. Two dots the same
+   colour, one above the other, is the intended reading: the hue says which
+   half of the shelf, the label says which genre. The full argument is in
+   01-tokens.css and in BT.GENRE_FAMILY — do not resolve the repetition by
+   inventing a colour. */
 .c-fiction { color: var(--bt-genre-fiction); }
-.c-nonfiction { color: var(--bt-genre-nonfiction); }
-.c-fantasysf { color: var(--bt-genre-fantasysf); }
+.c-historical { color: var(--bt-genre-historical); }
+.c-fantasy { color: var(--bt-genre-fantasy); }
+.c-scifi { color: var(--bt-genre-scifi); }
 .c-mystery { color: var(--bt-genre-mystery); }
+.c-horror { color: var(--bt-genre-horror); }
 .c-romance { color: var(--bt-genre-romance); }
+.c-youngadult { color: var(--bt-genre-youngadult); }
+.c-nonfiction { color: var(--bt-genre-nonfiction); }
+.c-biography { color: var(--bt-genre-biography); }
+.c-graphic { color: var(--bt-genre-graphic); }
+/* Legacy id from before the Fantasy/SF split. Nothing in the tree draws it —
+   the genre rows come from BT.GENRE_BUCKETS, which no longer lists it — but a
+   stored item can still carry it, and any surface that paints a dot from a
+   record's own bucket id would otherwise get an uncoloured dot. One line to
+   keep an old book looking like a book. */
+.c-fantasysf { color: var(--bt-genre-fantasysf); }
 /* No --bt-genre-general alias exists, and that is the point: 'general' is the
    bucket a book lands in when nothing better fit, so it is hueless. */
 .c-general { color: var(--bt-text-muted); }
@@ -262,31 +284,88 @@ td.num { text-align: right; }
 /* ── Genre tags. Text uses the --bt-genre-* alias (the BASE hue, the same
       token the tree dot reads) while the ground and border use that hue's
       -wash/-edge pair. Pinning the text to the alias is what keeps a genre
-      from drifting into two slightly different colours across the app. ─── */
+      from drifting into two slightly different colours across the app.
+
+      Twelve buckets, six hue families, so these come in PAIRS — and the two
+      halves of a pair are byte-identical apart from the alias name. That is
+      the design, not copy-paste that got away: the hue names the family (the
+      speculative shelf, the true shelf), the LABEL names the genre. Since the
+      tag always renders its label, a reader is never asked to tell Fantasy
+      from Science Fiction by colour alone; they are asked to see at a glance
+      that both are the same kind of thing. Pairs are kept adjacent below, in
+      BT.GENRE_BUCKETS order, so the pairing is legible in the source.
+
+      The wash/edge tokens are spelled out per rule rather than derived from
+      the genre alias, because CSS cannot build `--bt-ice-wash` out of
+      `var(--bt-genre-fantasy)` — a custom property resolves to a colour, not
+      to the token NAME it came from. Two extra words per rule is the price of
+      not adding a preprocessor to an app with no build step. ─────────────── */
 .tag {
   display: inline-flex; align-items: center; height: 17px; padding: 0 var(--bt-space-2);
   border-radius: 3px; font-size: var(--bt-fs-micro); letter-spacing: .09em;
   text-transform: uppercase; font-weight: 600;
 }
+/* violet — the realistic shelf */
 .tag.fiction {
-  color: var(--bt-genre-fiction); background: var(--bt-ice-wash);
+  color: var(--bt-genre-fiction); background: var(--bt-violet-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-violet-edge);
+}
+.tag.historical {
+  color: var(--bt-genre-historical); background: var(--bt-violet-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-violet-edge);
+}
+/* ice — the speculative shelf */
+.tag.fantasy {
+  color: var(--bt-genre-fantasy); background: var(--bt-ice-wash);
   box-shadow: inset 0 0 0 1px var(--bt-ice-edge);
 }
+.tag.scifi {
+  color: var(--bt-genre-scifi); background: var(--bt-ice-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-ice-edge);
+}
+/* amber — the frightening shelf */
+.tag.mystery {
+  color: var(--bt-genre-mystery); background: var(--bt-amber-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-amber-edge);
+}
+.tag.horror {
+  color: var(--bt-genre-horror); background: var(--bt-amber-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-amber-edge);
+}
+/* coral — the emotional shelf */
+.tag.romance {
+  color: var(--bt-genre-romance); background: var(--bt-coral-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-coral-edge);
+}
+.tag.youngadult {
+  color: var(--bt-genre-youngadult); background: var(--bt-coral-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-coral-edge);
+}
+/* moss — the true shelf */
 .tag.nonfiction {
   color: var(--bt-genre-nonfiction); background: var(--bt-moss-wash);
   box-shadow: inset 0 0 0 1px var(--bt-moss-edge);
 }
-.tag.fantasysf {
-  color: var(--bt-genre-fantasysf); background: var(--bt-violet-wash);
-  box-shadow: inset 0 0 0 1px var(--bt-violet-edge);
+.tag.biography {
+  color: var(--bt-genre-biography); background: var(--bt-moss-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-moss-edge);
 }
-.tag.mystery {
-  color: var(--bt-genre-mystery); background: var(--bt-teal-wash);
+/* teal — a form rather than a shelf, and the only genre without a partner */
+.tag.graphic {
+  color: var(--bt-genre-graphic); background: var(--bt-teal-wash);
   box-shadow: inset 0 0 0 1px var(--bt-teal-edge);
 }
-.tag.romance {
-  color: var(--bt-genre-romance); background: var(--bt-coral-wash);
-  box-shadow: inset 0 0 0 1px var(--bt-coral-edge);
+/* Legacy id. A book added before Fantasy and Science Fiction were split still
+   carries `fantasysf`, and BT.ui.genreTag writes the record's own id straight
+   into the class — so without this rule that book's tag would render as bare
+   uppercase text with no ground and no border, which reads as a rendering bug
+   rather than as an old record. It wears the Fantasy pair because that is what
+   BT.GENRE_ALIASES resolves it to; the honest fix, when the user wants it, is
+   Settings → Recalculate genres, which re-derives the bucket from the stored
+   subjects and can tell the two apart. */
+.tag.fantasysf {
+  color: var(--bt-genre-fantasysf); background: var(--bt-ice-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-ice-edge);
 }
 /* 'general' is the bucket a book lands in when nothing better fit, so it gets
    the same hueless treatment as .prec.unknown below. Giving it a colour would

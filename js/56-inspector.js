@@ -126,16 +126,28 @@ BT.inspector = (function () {
     let item = await BT.repo.getItem(uid);
 
     if (!item) {
-      /* Not on the shelves — a stale link, or a row from a search that was
-         never added. Fetch read-only so the pane still works, and offer to
-         add it. */
+      /* Not on the shelves — a stale link, a row from a search that was never
+         added, or a card on the Following strip, which is the one that made
+         this the ORDINARY path rather than the rare one: every tap over there
+         lands here, because a tap must show the book rather than silently add
+         it. Fetch read-only so the pane still works, and offer to add it. */
       blank(loadingBody());
       try { item = await fetchTransient(uid); }
       catch (e) { blank(BT.ui.errorBox('Could not load this book', e.message || String(e))); return; }
+      /* The reader moved on while that request was in flight. Without this the
+         older answer paints over the newer one and the pane shows a book the
+         reader is no longer pointing at — which used to need a stale link and
+         a fast finger, and now needs only two taps on a grid of results. */
+      if (currentUid !== uid) return;
       if (!item) {
         blank(BT.ui.emptyState({
           title: 'Not found',
-          body: 'Nothing on your shelves has that id, and there is no catalogue client on the page yet to look it up with.',
+          /* Not "there is no catalogue client on the page yet" — there is, and
+             a message that blames a missing module for a record Open Library
+             merged away sends the reader to look for a bug that is not there.
+             Merges are constant in a volunteer catalogue: a work id from a
+             search result four minutes old can already be a redirect. */
+          body: 'Nothing on your shelves has that id, and Open Library has no record under it either — catalogue records get merged and renumbered, so a link or a search result can go stale.',
         }));
         return;
       }
@@ -475,7 +487,7 @@ BT.inspector = (function () {
   }
 
   /* ══ GENRE ════════════════════════════════════════════════════════════════
-     The six buckets are DERIVED, by mapping Open Library's subjects through
+     The seven buckets are DERIVED, by mapping Open Library's subjects through
      BT.GENRE_RULES — and those subjects are whatever fell out of a MARC record,
      an Internet Archive ingest or a bestseller-list scrape. The result is wrong
      often enough that a reader must be able to say so, which is what this is.
@@ -525,7 +537,7 @@ BT.inspector = (function () {
          fit — so it is EXCLUSIVE. "General and Romance" is not a classification
          anyone can explain, and 38-normalize refuses to produce it for the same
          reason (there is no `general` rule in the table; you can only fall into
-         it). Picking it here means "none of the other five". */
+         it). Picking it here means "none of the other six". */
       on.clear();
       on.add('general');
     } else {

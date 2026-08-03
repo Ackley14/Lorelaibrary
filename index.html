@@ -252,11 +252,18 @@
      budget can be reasoned about in exactly one place (45-alerts.js). -->
 <script src="js/66-view-alerts.js"></script>
 <script src="js/67-view-people.js"></script>
+<!-- Settings, and the only screen that rewrites the WHOLE library in one press
+     (Recalculate genres). It sits below 12-repo, 38-normalize and 50-ui-core
+     because it uses BT.repo.putItemQuiet, BT.normalize.bucketGenres and
+     BT.ui.hydrate. Every one of those is resolved inside a function body rather
+     than at parse time, so nothing here would break if it moved — but load
+     order IS the dependency graph in this file, and it should tell the truth. -->
+<script src="js/69-view-settings.js"></script>
 <!-- The scan screen: the scan log, manual ISBN entry, and the button that
      opens the overlay above. Numbered 75 rather than 63 because it is a
      destination of its own rather than another way of listing the library. -->
 <script src="js/75-view-scan.js"></script>
 <!-- …and the remaining view files after these, in numeric order: 64-view-up,
-     68-view-stats, 69-view-settings, 71-view-unlock (71, not 70 — 70 is
-     taken by the follows logic module loaded above). -->
+     68-view-stats, 71-view-unlock (71, not 70 — 70 is taken by the follows
+     logic module loaded above). -->
 <script src="js/90-boot.js"></script>

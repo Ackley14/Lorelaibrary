@@ -4,9 +4,9 @@
    M3 note — /scan now has a real view (BT.viewScan, in 75-view-scan.js) and
    the mechanism below did what it was built to do a second time: the route
    line did not have to change at all. Every route is still registered exactly
-   once, here, and the ones whose views are not written yet (/up, /alerts,
-   /people, /stats, /settings, /unlock) go on rendering a short placeholder
-   naming the milestone they arrive in.
+   once, here, and the ones whose views are not written yet (/up, /stats,
+   /unlock) go on rendering a short placeholder naming the milestone they
+   arrive in.
 
    Resolution happens at NAVIGATION time rather than at registration, which is
    why adding a view is a one-word change: the day the module lands on the page
@@ -129,9 +129,23 @@ BT.boot = (function () {
       ['Shelf', 'Stats'], 'Stats', 'M4',
       'Pages read, genres by share, how long books sit on the want shelf before you start them. Arrives in')));
 
+    /* Real as of M5, and the name was READ OFF THE FILE rather than taken from
+       the plan: `69-view-settings.js` opens `BT.viewSettings = (function () {`.
+       That check is the whole reason this file has a paragraph about
+       viewList/viewLibrary at the top — a name that does not match does not
+       throw, it silently leaves a placeholder promising a milestone that has
+       already shipped.
+
+       The stub behind it is no longer a promise; it is now the answer to "that
+       view file failed to parse". Its wording is kept honest for that job: it
+       describes what the screen offers, not what it will offer one day.
+       "Which genre buckets to show" came out of it because the real screen
+       deliberately does not have that control — BT.config.genres exists but
+       nothing reads it, and a switch that visibly does nothing is worse than no
+       switch. It gains one with the code that honours it. */
     BT.router.on('/settings', viewOr('viewSettings', stub(
       ['System', 'Settings'], 'Settings', 'M5',
-      'Language and region, which genre buckets to show, an optional Google Books key, and Export / Import. Arrives in')));
+      'Recalculate genres after a rules change, an optional Google Books key, region and language, diagnostics, and Export / Import. Part of')));
 
     BT.router.on('/unlock', viewOr('viewUnlock', stub(
       ['System', 'Sync'], 'Sign in', 'M5',

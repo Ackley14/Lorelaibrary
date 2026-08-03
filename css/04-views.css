@@ -380,7 +380,7 @@
 
    The ✓ slot is always present and merely transparent when unpressed. Toggling
    `content` instead would change the chip's width on every click, and a row of
-   six chips reflowing under the finger is how you press the wrong one. ───── */
+   seven chips reflowing under the finger is how you press the wrong one. ─── */
 .gpick { display: flex; flex-wrap: wrap; gap: var(--bt-space-5) var(--bt-space-2); }
 .gchip {
   position: relative; height: 22px; opacity: .45;
@@ -391,7 +391,7 @@
 .gchip[aria-pressed="true"], .gchip[aria-pressed="true"]:hover { opacity: 1; }
 .gchip[aria-pressed="true"]::before { opacity: 1; }
 /* Same hit-area trick as the follow pill, bounded the same way: .gpick is 12px
-   row / 6px column, so 5px and 2px are the largest insets that keep six chips
+   row / 6px column, so 5px and 2px are the largest insets that keep seven chips
    on three wrapped rows from overlapping each other's targets. 32px tall. */
 .gchip::after { content: ""; position: absolute; inset: -5px -2px; }
 /* Sits on its own row inside the flex container. It is the only feedback that
@@ -496,6 +496,48 @@ a.src:hover { background: var(--bt-surface-hover); }
 .why-line.graph { border-left-color: var(--bt-ice-edge); }
 .why-line.graph b { color: var(--bt-ice-text); }
 
+/* ══ FOLLOWING — the "recent and newly catalogued" strip ══════════════════
+   The Following page polls EVERY follow, one at a time, because Open Library
+   sustains about one request a second and the alternative to a cap is a queue
+   rather than a fan-out. A queue takes time, so the time has to be visible:
+   without this line a roster of thirty looks like a finished list of whatever
+   the first four follows happened to return, which is the exact bug the cap
+   removal was fixing. It also carries "showing 400 of 812" when the hard bound
+   bites, so nothing is ever dropped without a word. */
+.fprog {
+  display: flex; align-items: center; gap: var(--bt-space-2); flex-wrap: wrap;
+  padding: var(--bt-space-2) var(--bt-space-6);
+  font-size: var(--bt-fs-mini); color: var(--bt-text-muted);
+  font-variant-numeric: tabular-nums;   /* the counter must not jitter sideways */
+}
+/* Coral, not the generic muted grey: a follow that could not be checked is the
+   one thing on this line the reader might want to act on, and it has to be
+   legible next to the counts rather than blend into them. */
+.fprog .fbad { color: var(--bt-coral-text); }
+/* Reuses the scan log's breathe (bt-scan-breathe, defined further down this
+   file) rather than adding a second in-flight idiom, and opacity only, so it
+   composites and costs nothing. */
+.fdot {
+  width: 6px; height: 6px; border-radius: 50%; flex: 0 0 6px;
+  background: var(--bt-teal); animation: bt-scan-breathe 1.1s var(--bt-ease) infinite;
+}
+@media (prefers-reduced-motion: reduce) { .fdot { animation: none; } }
+
+/* A card the reader added FROM this strip, in the session they added it.
+
+   The strip's whole job is books you do NOT have, so an owned work is normally
+   filtered out entirely — but the one the reader just added must not vanish
+   from under the pane they added it in, so it stays and says so instead. Same
+   teal "already yours" vocabulary as the search view's `.add.is-in`, at card
+   scale rather than row scale. */
+.cmine { color: var(--bt-teal-text); white-space: nowrap; }
+.card.is-mine .poster { box-shadow: 0 0 0 2px var(--bt-teal-edge); }
+/* The marker takes a second line rather than squeezing its neighbour. `.cs` is
+   a non-wrapping flex row, so without this the year breaks mid-phrase and the
+   card reads "recorded" above "2026". */
+.card.is-mine .cs { flex-wrap: wrap; }
+.card.is-mine .cs .mono { white-space: nowrap; }
+
 /* ══ SETTINGS ═════════════════════════════════════════════════════════════ */
 
 .settings { padding: var(--bt-space-6); max-width: 720px; }
@@ -520,6 +562,45 @@ a.src:hover { background: var(--bt-surface-hover); }
 .gauge i { display: block; height: 100%; background: var(--bt-teal); }
 .gauge i.hot { background: var(--bt-coral); }
 .actions { display: flex; gap: var(--bt-space-2); flex-wrap: wrap; }
+
+/* ── Whole-library actions ────────────────────────────────────────────────
+   Recalculating genres rewrites every book on the shelf in one press, so it
+   gets two things an ordinary .field does not: a question asked IN THE PAGE
+   before it runs, and a result that stays on screen with an Undo attached to
+   it.
+
+   The question is not a window.confirm(), and that is the entire point. OK is
+   confirm()'s default action — the button Enter presses — so the safe answer
+   ("leave the genres I set by hand alone") could only ever have been the one
+   you had to aim for. Here the safe answer is the primary button and takes
+   focus on open.
+
+   Teal rather than amber: this is a decision with two reasonable answers, not
+   a warning. Amber is the caution hue in this palette and nothing else (see
+   .warnbox), and spending it on a question would blunt it for the erase. */
+.ask {
+  border: var(--bt-rule-w) solid var(--bt-teal-edge); border-left-width: var(--bt-marker-w);
+  border-radius: var(--bt-radius); background: var(--bt-teal-wash);
+  padding: var(--bt-space-4) var(--bt-space-5); margin-top: var(--bt-space-3);
+}
+.ask__q {
+  font-size: var(--bt-fs-base); color: var(--bt-text-primary);
+  font-weight: 500; margin-bottom: var(--bt-space-2);
+}
+.ask .field__help { margin-bottom: var(--bt-space-3); }
+
+/* The result of a bulk pass, and deliberately persistent. A toast expires in
+   seconds and takes its Undo with it; this is the one screen where losing the
+   way back means losing genres somebody typed by hand. */
+.runres {
+  margin-top: var(--bt-space-4);
+  border: var(--bt-rule-w) solid var(--bt-line-hairline);
+  border-radius: var(--bt-radius); background: var(--bt-surface-raised);
+  box-shadow: var(--bt-shadow-inset-top);
+  padding: var(--bt-space-4) var(--bt-space-5);
+}
+.runres__l { font-size: var(--bt-fs-base); color: var(--bt-text-primary); }
+.runres .field__help:last-child { margin-bottom: 0; }
 
 /* ══ FIRST RUN / UNLOCK ═══════════════════════════════════════════════════ */
 

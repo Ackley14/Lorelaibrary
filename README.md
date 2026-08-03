@@ -129,10 +129,10 @@ Reading needs no token at all — the file is public, and it is ciphertext.
   as having moved rather than silently overwritten.
 - **Formats** — physical, ebook, audiobook — because "read" and "listened to"
   are the same status and genuinely different objects.
-- **Six genre buckets**, deliberately coarse. Open Library subjects are a
+- **Seven genre buckets**, deliberately coarse. Open Library subjects are a
   free-for-all of thousands of overlapping strings; anything finer than
-  fiction / non-fiction / fantasy & SF / mystery / romance / general would be
-  precision the source data does not actually have.
+  fiction / non-fiction / fantasy & SF / mystery / romance / horror / general
+  would be precision the source data does not actually have.
 - **Stats** that double as a readable view of what you actually read, as
   opposed to what you tell people you read.
 
