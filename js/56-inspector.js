@@ -732,6 +732,29 @@ BT.inspector = (function () {
        affordance, and #/scan already explains that case at length for the
        reader who came looking for it. */
     if (!closed) {
+      /* NEITHER BUTTON IS DRAWN FOR A BOOK THAT IS NOT ON THE SHELVES, and
+         `_transient` is how this block learns that — the same guard Status,
+         Genre, Progress, Ownership, Yours and Remove all sit behind in paint().
+         This was the one block that missed it, on the path the file elsewhere
+         calls "the ORDINARY path rather than the rare one": every tap on a
+         search result and every tap on a Following card lands here with a
+         record that has not been added yet.
+
+         Both buttons failed, differently and silently. "Specify edition" ran
+         BT.editions.open on a uid with no stored record, which apologises with
+         "That book is no longer on your shelves" — a factually false sentence
+         sitting directly under an "Add to library" button. "Scan the copy I
+         own" opened the CAMERA, took the barcode off the book in the reader's
+         hand and spent an Open Library request on it, then hit
+         BT.scan.pinEdition's `if (!item) return null` — which scanPin never
+         checks, null being no exception — and repainted the identical pane. No
+         message, no write, nothing said.
+
+         This file's own rule: "An affordance whose only possible outcome is an
+         excuse is worse than no affordance." Add the book first and both
+         buttons appear, which is the honest order anyway — you cannot say which
+         copy you own of a book you have not said you own. */
+      const pinnable = !item._transient;
       return `
         <div class="blk">
           <div class="blk-h">Edition <span class="why">a work, not a copy</span></div>
@@ -740,10 +763,11 @@ BT.inspector = (function () {
             page count, cover, publisher and ISBN, so none of those is claimed
             here until you say which one is on your shelf.
           </div>
+          ${pinnable ? `
           <div style="margin-top:var(--bt-space-3);display:flex;gap:var(--bt-space-2);flex-wrap:wrap">
             <button class="btn btn--sm" type="button" data-act="edition">Specify edition</button>
             ${scannerReady() ? '<button class="btn btn--sm" type="button" data-act="scanpin">Scan the copy I own</button>' : ''}
-          </div>
+          </div>` : ''}
         </div>`;
     }
 
@@ -965,9 +989,19 @@ BT.inspector = (function () {
       console.warn('[inspector] edition lookup failed; pinning the barcode alone', e);
     }
 
-    try { await BT.scan.pinEdition(item.uid, isbn, stub); }
+    /* The RETURN VALUE is checked, not just the throw. pinEdition answers a
+       missing record with a bare `return null` — not an exception, so a bare
+       try/catch here read a silent no-op as success and repainted the same pane
+       after the reader had opened the camera and scanned a barcode. Nothing
+       must be able to consume a scan and say nothing. */
+    let pinned = null;
+    try { pinned = await BT.scan.pinEdition(item.uid, isbn, stub); }
     catch (e) {
       BT.ui.toast((e && e.message) || 'Could not pin that copy.', { bad: true });
+      return;
+    }
+    if (!pinned) {
+      BT.ui.toast('That book is not on your shelves any more, so there was nothing to pin it to.', { bad: true });
       return;
     }
 

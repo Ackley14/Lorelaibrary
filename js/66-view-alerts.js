@@ -228,9 +228,21 @@ BT.viewAlerts = (function () {
       if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
       if (!BT.alerts || !BT.alerts.sweep) { BT.ui.toast('Nothing to check with yet.'); return; }
       const rep = await BT.alerts.sweep({ manual: true });
+      /* `rep.errors` is read, and that is the point. Built from `checked` and
+         `alerts` alone, this toast said "Checked 3 · 0 updates" through a total
+         Open Library outage in which nothing was checked at all — the app
+         telling the reader their authors have published nothing when it had not
+         managed to look. Nothing else in the app surfaces this report, so if
+         this line does not say it, nobody does. */
+      const failed = rep.errors
+        ? `${rep.errors} follow${rep.errors === 1 ? '' : 's'} could not be checked`
+        : '';
       BT.ui.toast(rep.skipped
         ? 'Already checking'
-        : `Checked ${rep.checked} · ${rep.alerts} update${rep.alerts === 1 ? '' : 's'}`);
+        : (failed
+          ? `Checked ${rep.checked} · ${rep.alerts} update${rep.alerts === 1 ? '' : 's'} · ${failed}`
+          : `Checked ${rep.checked} · ${rep.alerts} update${rep.alerts === 1 ? '' : 's'}`),
+        failed ? { bad: true, ms: 6000 } : undefined);
       BT.router.resolve();
     };
     ['sweepNow', 'sweepEmpty'].forEach(id => {

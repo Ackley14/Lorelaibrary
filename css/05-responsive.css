@@ -83,9 +83,22 @@
   .ticks i { height: 34px; }
 
   /* The drawer close button is the only way back from a full-screen inspector
-     on a phone, so it is the last thing that should be hard to hit. */
-  .insp-close { width: 44px; height: 44px; }
+     on a phone, so it is the last thing that should be hard to hit. The
+     negative margin has to track the height — it is what stops the (now
+     sticky) button displacing the wash; see 04-views.css. */
+  .insp-close { width: 44px; height: 44px; margin-bottom: -44px; }
   .insp-close svg { width: 20px; height: 20px; }
+
+  /* The scanner's close was left behind when everything else grew a thumb:
+     28px on the one screen the app calls "a phone job", held one-handed at
+     arm's length over a barcode — the least steady moment in the app — while
+     .icobtn and .insp-close above are 44px and even .btn--sm beside it in the
+     same bar is 36px. A miss lands on the video and does nothing. (The
+     backdrop tap, Escape and the back gesture all still close it, which is why
+     this was minor rather than a trap.) Sized in this block rather than beside
+     the base rule so the desktop overlay is untouched. */
+  .scanner-close { width: 44px; height: 44px; }
+  .scanner-close svg { width: 20px; height: 20px; }
 }
 
 /* ══ 3 · THE LADDER ═══════════════════════════════════════════════════════
@@ -184,6 +197,40 @@
      ellipsizing. `max-width: 0` is what lets the cell collapse and the
      ellipsis engage. */
   tbody td[data-col="title"] { max-width: 0; }
+
+  /* ── The title must survive its own cell ────────────────────────────────
+     Two genre chips are 143px of a 320px screen, and the rule above hands the
+     title whatever the fixed columns leave — which was 12px. Then the To
+     sell / Sold badge, a flex sibling of the title inside that cell and
+     `white-space: nowrap`, took its whole 54px min-content off the top: the
+     title measured EXACTLY ZERO pixels wide at 320, 360 and 390. Every book on
+     the sell pile — the app's headline feature, and the one shelf a reader
+     works through on a phone — was an anonymous row of badge, genre and date,
+     with the badge painted over the genre chip. Nothing gave the title
+     priority; it simply lost every tie.
+
+     Three lines, in the order they matter:
+
+     · ONE GENRE CHIP. The same trade the status, pages and added columns
+       already make at this width, and it is what actually frees the pixels:
+       it takes the title from 0 to 33 at 320px and stops the table itself
+       overflowing .tblwrap by 26px. The second genre is one tap away in the
+       inspector.
+     · A FLOOR UNDER THE TITLE, small enough (2.5em) that the cell's minimum
+       still fits — a floor the cell cannot honour is not a floor, it is an
+       overflow, and the badge ends up painted into the genre column.
+     · THE BADGE SHRINKS FIRST, via a near-zero shrink factor rather than a
+       cap: flex distributes a deficit in proportion to base size × shrink
+       factor, so 0.05 means the title gives up almost everything until it hits
+       its floor and only then does the badge start to clip. At 390px both are
+       whole (title 67px, badge 53px); at 320px the badge clips rather than the
+       title vanishing, which is the right way round — a clipped badge still
+       reads as a mark, a missing title names nothing. */
+  tbody td[data-col="genre"] .tag + .tag { display: none; }
+  tbody td[data-col="title"] .title-cell .t { min-width: 2.5em; }
+  tbody td[data-col="title"] .title-cell .pile {
+    flex-shrink: .05; min-width: 0; overflow: hidden;
+  }
 }
 
 @media (max-width: 460px) {

@@ -489,6 +489,26 @@ BT.alerts = (function () {
     return { id, title: w.title || w.name || d.title || '', year, coverId };
   }
 
+  /* THREE ANSWERS, and the sweep must be able to tell them apart:
+
+       []        asked, and there is nothing new
+       [rows]    asked, and here is what is new
+       null      COULD NOT ASK
+
+     The third one used to be spelled `[]` as well, and that is the bug this
+     function was already fixed for once (see the block above): a follow check
+     that failed on the network returned an empty array, the sweep counted it as
+     a healthy check, and the reader pressing "Check now" during an Open Library
+     outage was told "Checked 3 · 0 updates" and "Nothing has changed since the
+     last check" — the app stating, twice, that their followed authors have
+     published nothing when it had not managed to look. The Following page gets
+     this right in the same outage ("This is not a statement about whether
+     anything new exists — only that we could not look"), and the two screens
+     contradicting each other about the same event is what gave it away.
+
+     The persisted follow row was already honest — lastCheckedAt and
+     knownWorkIds are untouched, so the follow is retried — which made the
+     report an internal contradiction, not a judgement call. */
   async function checkFollow(row) {
     if (!row || !row.id || row.muted) return [];
 
@@ -497,12 +517,12 @@ BT.alerts = (function () {
       works = await worksOf(row);
     } catch (e) {
       console.warn('[alerts] follow check failed', row.name, e && e.message);
-      return [];
+      return null;
     }
     /* null means we could not ask. The baseline and lastCheckedAt are left
        exactly as they were, so the follow stays at the head of the queue and is
        retried next sweep rather than being silently marked as checked. */
-    if (!works) return [];
+    if (!works) return null;
 
     const known = new Set();
     for (const k of (row.knownWorkIds || [])) {
@@ -648,7 +668,14 @@ BT.alerts = (function () {
       for (const f of follows) {
         if (cancelled) break;
         try {
-          report.alerts += (await checkFollow(f)).length;
+          const found = await checkFollow(f);
+          /* null is "could not ask" — see checkFollow. Counting it as a check
+             is what let a total outage report itself as a clean bill of health;
+             `report.errors` was structurally incapable of counting the dominant
+             failure class, because checkFollow swallowed every network error
+             before the catch below could see it. */
+          if (found === null) { report.errors++; continue; }
+          report.alerts += found.length;
           report.follows++;
           report.checked++;
         } catch (e) {

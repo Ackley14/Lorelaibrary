@@ -240,7 +240,16 @@ BT.viewStats = (function () {
     }
 
     const finishes = finishTimes(items, history);
-    const pace = buildPace(history);
+    /* JOINED AGAINST THE SHELF, the way finishTimes already is. buildPace
+       iterates raw history rows, so a log left behind by a deleted book went on
+       being charted: "300 pages across the last 2 days … in 1 book" for a
+       library where no remaining book had a single recorded position. 12-repo
+       now cascades history with the delete, so this is belt and braces for rows
+       already orphaned on a device — and it keeps the two halves of this one
+       screen telling the same story, which is the rule stated at the top of the
+       file: this screen describes the shelf as it stands. */
+    const onShelf = new Set(items.map(i => i.uid));
+    const pace = buildPace(history.filter(r => r && onShelf.has(r.uid)));
     const tl = timeline(pace.deltas, [...finishes.values()]);
 
     view.innerHTML = `

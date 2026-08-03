@@ -193,11 +193,17 @@ BT.viewPeople = (function () {
                  spellcheck="false" autocomplete="off" autocapitalize="none" autocorrect="off"
                  value="${esc(term)}" aria-label="Find an author or publisher to follow">
         </div>
+        <!-- One <span>, for the reason 75-view-scan.js and 61-view-search.js
+             both give: .shint is a flex container, so prose written straight
+             into it breaks only at element boundaries. Here <b>approximate</b>
+             could not join the preceding line at ANY width — it dropped to a
+             line of its own with the full stop floating 6px after it, on
+             desktop as well as on a phone. -->
         <div class="shint">
-          Authors are matched on their Open Library id, never on their name — a
+          <span>Authors are matched on their Open Library id, never on their name — a
           name-scoped search for one author genuinely returns another author’s books.
           Publishers have no id at all, so those are matched on a word and are
-          <b>approximate</b>.
+          <b>approximate</b>.</span>
         </div>
       </div>
 

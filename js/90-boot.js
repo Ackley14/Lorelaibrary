@@ -661,7 +661,18 @@ BT.boot = (function () {
     routes();
     BT.tree.init();
     BT.inspector.init();
-    await BT.tree.refresh();
+    /* THE ROUTER MUST START. This await is the only thing between a stored
+       record and every screen in the app, and it reads the whole library to
+       count it — so anything the tree cannot digest used to abort startApp()
+       before BT.router.start() below, leaving a blank shell with no Settings,
+       no Export and no Erase: an app that can only be recovered by clearing
+       site data, which is the one action that also destroys the library.
+       A tree that failed to build is a navigation aid missing; a router that
+       never started is the whole app missing. The error is logged rather than
+       swallowed silently, and every route below still renders — including the
+       ones that let the reader export or erase their way out. */
+    try { await BT.tree.refresh(); }
+    catch (e) { console.error('[boot] the index tree could not be built', e); }
 
     BT.repo.subscribe((ev, detail) => {
       /* M5 — the ONLY place a save is triggered. Four events, and the list is

@@ -47,8 +47,14 @@
 /* Bump on EVERY shell change. See obligation 2 above.
    v2 — M5 sync: 15-crypto, 16-cloud, 48-sync and 71-view-unlock joined the
    shell, and 45-alerts, 69-view-settings, 90-boot and index.html all changed
-   with them. */
-const VERSION = 'v2';
+   with them.
+   v3 — the cross-feature audit. No file joined or left the shell; thirteen of
+   them changed (05-net, 12-repo, 39-scan, 45-alerts, 55-tree, 56-inspector,
+   61-view-search, 62-view-list, 66-view-alerts, 67-view-people, 68-view-stats,
+   71-view-unlock, 90-boot, plus three stylesheets). Without this bump every
+   installed copy would go on serving the shell whose scan-add deletes the
+   wrong book — obligation 2 exactly: the fix is deployed and nobody gets it. */
+const VERSION = 'v3';
 
 /* ── The prefix is load-bearing ───────────────────────────────────────────
    Cache Storage is scoped to the ORIGIN, not to the worker's scope, and

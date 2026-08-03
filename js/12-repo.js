@@ -137,10 +137,35 @@ BT.repo = (function () {
        that navigate nowhere. */
     const rows = await BT.db.getAll('feedItems');
     for (const r of rows) if (r.uid === uid) await BT.db.del('feedItems', r.feedId);
+    /* Cascade: the reading log goes with the book. 39-scan states the contract
+       plainly — "Deleting a book takes its rating, its notes, its tags, its
+       progress and its reading history with it" — and leaving it behind broke
+       that twice over. The Reading Pace chart iterates raw history rows, so it
+       went on charting pages read in a book that is not on any shelf ("300
+       pages … in 1 book" for an empty shelf), the orphans travelled in
+       exportAll to every other device, and a re-scan of the same barcode gets
+       the same uid back from freeUid and silently inherited the dead copy's
+       progress and finish. Undo is preserved by removeByScan, which now
+       captures these rows before the delete and puts them back.
+
+       `dfSeen` is deliberately NOT cascaded: it guards the recommender's
+       document-frequency counters against double-counting a book, and dropping
+       the row without decrementing every term in `df` would leave N smaller
+       than the counts it normalises — a silently skewed IDF curve. It is
+       local, unsynced state that costs one stale row. */
+    const hist = await BT.db.getAll('history');
+    /* `id != null` because the in-memory fallback store mints its key without
+       writing it onto the row (10-db.js), and a delete with an undefined key is
+       not something to find out about during a delete. */
+    for (const h of hist) if (h && h.uid === uid && h.id != null) await BT.db.del('history', h.id);
     /* Every namespace, not just the ones this item's current scope writes — a
        surviving `isbncand:` row would resolve a future scan to a book that no
        longer exists. */
-    if (item) await dropIdKeys(allIdKeysFor(item), uid);
+    if (item) {
+      const keys = allIdKeysFor(item);
+      await dropIdKeys(keys, uid);
+      await reclaimIdKeys(keys);
+    }
     emit('item:delete', { uid });
   }
 
@@ -204,6 +229,55 @@ BT.repo = (function () {
     }
   }
 
+  /* Is this ISBN the item's OWN barcode, or one it merely lists?
+
+     A scanned record states its code twice: `ids.isbn13` (and, for a record
+     this app minted, the uid itself). Everything else in `isbnsPinned` was
+     harvested from the same Open Library edition record by `pinnedIsbns` —
+     useful, but a claim nobody made on purpose. */
+  function isPrimaryIsbn(item, isbn) {
+    if (!item || !isbn) return false;
+    if (item.ids && item.ids.isbn13 === isbn) return true;
+    return typeof item.uid === 'string' && item.uid.indexOf(`book:isbn:${isbn}`) === 0;
+  }
+
+  /* MAY THIS ITEM TAKE THIS ROW? Only `isbn13:` is arbitrated, and that is the
+     whole point of the question.
+
+     `isbn13:{isbn}` is ONE row and two items cannot both hold it. Both
+     interactive pin doors already refuse to steal it (59-editions.js and
+     56-inspector.js, each with the same comment) — but the SCAN-ADD path did
+     not, and it does not go through them. 38-normalize's `pinnedIsbns`
+     deliberately keeps every other ISBN-13 printed on the same edition record,
+     on the reasoning that they identify the same printing; live Open Library
+     data disagrees often enough to matter (of the first 200 of The Hobbit's 481
+     edition records, 12 ISBN-13s are claimed by more than one edition). So
+     scanning book B silently took the row belonging to book A, and from then on
+     A's barcode reported "already owned" under B's title, remove-by-scan
+     deleted B — with B's rating, notes, progress and reading history — and A
+     became invisible to the scanner and duplicated on the next scan. No error
+     at any point.
+
+     THE RULE: a row is taken from another item only by the item whose OWN
+     barcode it is. A passing mention never displaces a scanned claim, and two
+     scanned claims resolve to whoever got there first rather than to whoever
+     wrote last — which also makes an export/import rebuild land on the same
+     winner as the live store instead of a different one.
+
+     `isbncand:` is deliberately NOT arbitrated: two open items may legitimately
+     list the same candidate ISBN (a work split, an omnibus) and last-writer-wins
+     is the documented behaviour there — see dropIdKeys. */
+  async function mayClaim(key, item) {
+    if (key.indexOf('isbn13:') !== 0) return true;
+    const row = await BT.db.get('idIndex', key);
+    if (!row || row.uid === item.uid) return true;
+    const isbn = key.slice(7);
+    if (!isPrimaryIsbn(item, isbn)) return false;
+    const holder = await BT.db.get('items', row.uid);
+    if (!holder) return true;                       // the row outlived its item
+    return !isPrimaryIsbn(holder, isbn);
+  }
+
   /* Rewrite an item's rows: retract the keys it no longer claims, then write
      the ones it does. `prev` is the breadcrumb from the previous write. The
      retraction is the point — "Specify Edition" turns an open item with forty
@@ -216,7 +290,50 @@ BT.repo = (function () {
     const keep = new Set(next);
     const stale = (prev || []).filter(k => !keep.has(k));
     if (stale.length) await dropIdKeys(stale, item.uid);
-    for (const key of next) await BT.db.put('idIndex', { key, uid: item.uid });
+    for (const key of next) {
+      if (!(await mayClaim(key, item))) continue;
+      await BT.db.put('idIndex', { key, uid: item.uid });
+    }
+  }
+
+  /* Re-derive ownership of rows that have just become unowned.
+     Called after a delete, and the mirror image of dropIdKeys.
+
+     dropIdKeys protects the SAVE path: it refuses to delete a row another item
+     holds. The DELETE path had the opposite hole — when the deleted item WAS
+     the holder, the row simply vanished even though a surviving item still
+     listed that ISBN. The scanner then stopped recognising a book the reader
+     owns: instead of "pin this edition, or add a separate copy?" it silently
+     minted a second, unlinked record, which is how a library quietly
+     accumulates duplicates. (Two open items sharing a candidate ISBN is
+     ordinary — Open Library carries several work records for popular titles,
+     and culling one of them is a tidy-up, not a contrived state.)
+
+     Scope-aware, because it reuses idKeysFor: a surviving open item reclaims
+     `isbncand:` rows and a surviving closed one reclaims `isbn13:` rows, never
+     the other way round.
+
+     A PINNED row is handed on only to an item whose OWN barcode it is. An
+     item that merely lists the code — `pinnedIsbns` keeps every ISBN-13 on the
+     edition record it was minted from — must not inherit a freed barcode,
+     because resolveScan would then answer "already owned" under that other
+     book's title AND the barcode's real owner could never be re-added: the
+     scan would resolve to the squatter instead of creating a record. Leaving
+     the row unowned is the better failure — the next scan mints the right book
+     and mayClaim hands it the row. */
+  async function reclaimIdKeys(keys) {
+    const want = new Set();
+    for (const k of keys) if (!(await BT.db.get('idIndex', k))) want.add(k);
+    if (!want.size) return;
+    for (const it of await allItems()) {
+      for (const k of idKeysFor(it)) {
+        if (!want.has(k)) continue;
+        if (k.indexOf('isbn13:') === 0 && !isPrimaryIsbn(it, k.slice(7))) continue;
+        await BT.db.put('idIndex', { key: k, uid: it.uid });
+        want.delete(k);
+      }
+      if (!want.size) return;
+    }
   }
 
   /* Resolve any known external id to a stored uid. This is what stops the same
@@ -459,6 +576,19 @@ BT.repo = (function () {
   const addHistory = (uid, event, value) => BT.db.put('history', { uid, event, value, at: Date.now() });
   const allHistory = () => BT.db.getAll('history');
 
+  /* The two halves of an undoable delete. `historyFor` is read BEFORE
+     deleteItem cascades the log away and `putHistory` puts the same rows back
+     — with their original `id`, so a restore re-creates the log rather than
+     duplicating it. Without this pair, cascading the log would have made
+     removeByScan's Undo quietly lossy: the book would come back and the months
+     of reading behind it would not. */
+  async function historyFor(uid) {
+    return (await BT.db.getAll('history')).filter(r => r && r.uid === uid);
+  }
+  async function putHistory(rows) {
+    for (const r of (rows || [])) await BT.db.put('history', r);
+  }
+
   /* ── Meta ──────────────────────────────────────────────────────────── */
   async function metaGet(key) { const r = await BT.db.get('meta', key); return r ? r.value : undefined; }
   async function metaSet(key, value) { return BT.db.put('meta', { key, value }); }
@@ -544,7 +674,7 @@ BT.repo = (function () {
     allFollows, getFollow, putFollow, deleteFollow,
     cacheGet, cachePut, cachePurge, cacheClear, cacheCount,
     dfObserve, dfTable,
-    addHistory, allHistory,
+    addHistory, allHistory, historyFor, putHistory,
     metaGet, metaSet,
     exportAll, importAll, wipe,
   };

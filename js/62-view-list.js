@@ -200,7 +200,12 @@ BT.viewLibrary = (function () {
        future pile value inherits the behaviour without another line here — and
        so that `?pile=sell` is a clean "what am I about to get rid of" list
        rather than one quietly padded with what already went. */
-    if (!q.pile) rows = rows.filter(i => (i.user.pile || null) !== 'sold');
+    /* `i.user` defensively, like 55-tree.js's build loop: a row that arrived
+       through import or sync without a `user` block bypasses putItem's heal,
+       and an unguarded read here throws inside the router's error boundary —
+       one screen replaced by "This screen could not be displayed" rather than
+       one book filed wrong. */
+    if (!q.pile) rows = rows.filter(i => ((i.user && i.user.pile) || null) !== 'sold');
 
     const sort = q.sort || 'added';
     rows.sort((SORTS[sort] || SORTS.added).fn);

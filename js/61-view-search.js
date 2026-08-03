@@ -479,13 +479,23 @@ BT.viewSearch = (function () {
                  autocomplete="off" autocapitalize="none" autocorrect="off" enterkeyhint="search"
                  value="${esc(query)}" aria-label="Search Open Library">
         </div>
+        <!-- ONE <span> PER .shint, and it is not decoration. .shint is a flex
+             container, so every text node and every <kbd>/<b> inside it becomes
+             a separate flex item: line breaks can then only happen at those
+             boundaries, never between words, and the 6px gap opens mid-clause.
+             Written bare, the sentence below broke after <b>work</b> and put
+             the comma at the start of the next line. Wrapping the whole hint in
+             one span makes it a single flex item whose contents wrap as
+             ordinary prose. 75-view-scan.js reached the same conclusion and
+             documents it at its own .shint; search and people never got the
+             treatment. -->
         <div class="shint">
-          <kbd>⏎</kbd> add the highlighted result · <kbd>↑</kbd><kbd>↓</kbd> move ·
-          <b>${count}</b> already on your shelves
+          <span><kbd>⏎</kbd> add the highlighted result · <kbd>↑</kbd><kbd>↓</kbd> move ·
+          <b>${count}</b> already on your shelves</span>
         </div>
         <div class="shint">
-          Adding from search records the <b>work</b>, not a printing — the edition
-          stays open until you scan a copy or pick one.
+          <span>Adding from search records the <b>work</b>, not a printing — the edition
+          stays open until you scan a copy or pick one.</span>
         </div>
       </div>
 

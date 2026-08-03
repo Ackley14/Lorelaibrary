@@ -559,12 +559,17 @@ BT.scan = (function () {
        restoring the item without it would make the next refresh diff a live
        record against nothing and announce every field as newly changed. */
     const snapshot = await BT.repo.getSnapshot(hit.uid);
+    /* Captured for the same reason as the snapshot: deleteItem cascades the
+       reading log away with the book (39-scan's own contract, three paragraphs
+       up), so an undo that restored only the record would hand back a book with
+       months of progress silently missing. */
+    const history = await BT.repo.historyFor(hit.uid);
 
     await BT.repo.deleteItem(hit.uid);
 
     const removal = {
       ok: true, uid: hit.uid, isbn13,
-      title: item.title, item, snapshot,
+      title: item.title, item, snapshot, history,
       async restore() {
         /* putItem rewrites every id-index row from the record itself, so the
            `isbn13:` claim comes back with the book and the next scan finds it.
@@ -575,6 +580,9 @@ BT.scan = (function () {
            deferred, so this is noted rather than worked around.) */
         const back = await BT.repo.putItem(item);
         if (snapshot) await BT.repo.putSnapshot(snapshot);
+        /* Rows keep their original ids, so this re-creates the log rather than
+           adding a second copy of it. */
+        if (history && history.length) await BT.repo.putHistory(history);
         emit('item:restored', { uid: back.uid, title: back.title });
         return back;
       },

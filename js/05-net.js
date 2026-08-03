@@ -506,7 +506,8 @@ BT.net = (function () {
            object; parsing first turns every missing ISBN into a SyntaxError
            with no status, no source and nothing a user could act on. */
         if (res.ok) {
-          circuitReset(source);
+          /* circuitReset is NOT called here, on the bare 200 — see the bottom
+             of this branch. A status line is not an answer. */
           /* A 200 that is still a web page. Two real causes: a URL that
              resolved to a browsable Open Library page rather than a `.json`
              document, and a captive portal — hotel or airport wifi — happily
@@ -522,7 +523,28 @@ BT.net = (function () {
           }
           let payload;
           try { payload = await res.json(); }
-          catch (e) { throw new NetError('parse', `${label(source)}: malformed response`); }
+          catch (e) {
+            /* SET AND BREAK, NEVER THROW. This was the one genuine
+               upstream-failure shape that unwound straight past the retry loop,
+               past circuitTrip and past `if (opts._stale) return serveStale(…)`
+               below — so a truncated or garbled body, which is the classic
+               symptom of a flaky mobile connection or a proxy cutting a
+               response short, was also the only failure that DISCARDED the copy
+               the app was already holding. A 500, a 404 and being offline all
+               kept serving the cached search results; a half-delivered body
+               painted "Open Library is not answering" over them. That
+               contradicts this module's own promise ("the app will keep serving
+               what it already has") and the OUTAGE BUFFER contract in
+               12-repo.js, which names the 10-minute search TTL as its example.
+
+               Retried like the error-envelope branch below, and for the same
+               reason: a body that arrived incomplete is exactly the condition a
+               second round trip fixes. NetError.retryable still excludes
+               'parse', so this is stated here rather than left to classify(). */
+            lastErr = new NetError('parse', `${label(source)}: malformed response`, { source });
+            if (attempt < policy.retries) { await backoff(attempt, 0); continue; }
+            break;
+          }
           /* An error envelope hiding inside a success. Google's JSON API
              reports failures as `{ error: { code, message } }` and some of Open
              Library's older endpoints answer with a bare `error` string, so
@@ -536,6 +558,14 @@ BT.net = (function () {
             if (attempt < policy.retries) { await backoff(attempt, 0); continue; }
             break;
           }
+          /* THE BREAKER CLOSES ON A USABLE PAYLOAD, not on a 200. Resetting at
+             the top of this branch meant a source answering 200 with garbage —
+             a truncated body, or an `{error:…}` envelope — cleared its own
+             failure count on every call and then added one back, so `fails`
+             could never reach 4 and the breaker never opened however long the
+             source stayed broken. Six calls meant eighteen round trips against
+             a host whose terms ask us not to hammer it. */
+          circuitReset(source);
           if (!opts.noCache && ttl > 0) {
             BT.repo.cachePut(ck, source, payload, ttl, opts.cacheClass || 'reduced');
           }
@@ -548,7 +578,13 @@ BT.net = (function () {
         await backoff(attempt, lastErr.retryAfter);
       }
 
-      if (lastErr && (lastErr.kind === 'server' || lastErr.kind === 'opaque')) circuitTrip(source);
+      /* 'parse' counts as a sick source. A source answering 200 with garbage is
+         no more usable than one answering 500, and while the throw above
+         bypassed this line the breaker never opened for it — six calls meant
+         six round trips, indefinitely, against a host whose terms ask us not to
+         hammer it. */
+      if (lastErr && (lastErr.kind === 'server' || lastErr.kind === 'opaque' ||
+                      lastErr.kind === 'parse')) circuitTrip(source);
       /* Nothing reached the network usefully — give the units back. A 404 is
          NOT in this list: that request was made, answered and paid for. */
       if (lastErr && (lastErr.kind === 'offline' || lastErr.kind === 'opaque')) {

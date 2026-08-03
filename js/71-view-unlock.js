@@ -57,6 +57,31 @@ BT.gate = (function () {
 
   const isOpen = () => { const g = el(); return !!(g && !g.hidden); };
 
+  /* THE GATE MUST NOT OUTLIVE ITS OWN ROUTE.
+
+     hide() is reachable only from this panel's own buttons, so the back gesture
+     — the primary navigation on Android and the back-swipe on iOS — changed the
+     route underneath the overlay and left it standing: the app re-rendered
+     behind a panel that still had `.app` marked aria-hidden and every control
+     covered, and further back presses just unwound history with nothing on
+     screen changing. 58-scanner.js, the app's other full-screen overlay, has
+     had this listener since it was written; this file reasoned about the same
+     seam in resume() (`if (/^#\/unlock\b/.test(location.hash)) …`) but only for
+     the button path.
+
+     THE TWO GUARDS ARE BOTH LOAD-BEARING:
+       · `BT.router.current` — on a COLD BOOT 90-boot.js opens the gate before
+         startApp(), and there the gate legitimately IS the app. Closing it on a
+         hash change would drop an enrolled reader into a locked library.
+       · still on #/unlock — the route's own view re-opens the gate, so closing
+         it here would fight BT.viewUnlock.render. */
+  window.addEventListener('hashchange', () => {
+    if (!isOpen()) return;
+    if (!(BT.router && BT.router.current)) return;
+    if (/^#\/unlock\b/.test(location.hash || '')) return;
+    hide();
+  });
+
   /* Close the gate and hand the app back — the one exit every screen here
      uses, because getting it wrong is invisible until it is annoying.
 

@@ -532,8 +532,26 @@
 .src .note { font-size: var(--bt-fs-micro); color: var(--bt-text-faint); margin-top: 5px; line-height: 1.3; }
 a.src:hover { background: var(--bt-surface-hover); }
 
+/* STICKY, NOT ABSOLUTE, and its sibling .wash is the proof: an absolutely
+   positioned child of `.insp` is laid out against the padding box of the
+   element that is ALSO the scroll container, so it scrolls away with the
+   content. The drawer's content runs ~1250px against an 844px phone viewport,
+   so past 54px of scroll — anywhere near Remove, or the foot of the Edition
+   block — the only advertised way out of a full-screen inspector was gone for
+   the rest of the session, while .wash (sticky) stayed put. 05-responsive.css
+   says of this button: "the only way back from a full-screen inspector on a
+   phone, so it is the last thing that should be hard to hit".
+
+   `margin-left: auto` keeps it at the right edge now that it is in flow, and
+   the negative bottom margin cancels the height it would otherwise take from
+   the wash — the same trick .wash itself uses to sit under the sheet. */
 .insp-close {
-  display: none; position: absolute; top: var(--bt-space-4); right: var(--bt-space-4); z-index: 3;
+  display: none; position: sticky; top: var(--bt-space-4); z-index: 3;
+  /* `.insp` is a `.pane`, i.e. a flex column, so an in-flow child is a flex
+     item: without this it shrinks to fit a scroll container it can never fit,
+     and a 44px thumb target quietly renders 28px tall. */
+  flex: 0 0 auto;
+  margin-left: auto; margin-right: var(--bt-space-4); margin-bottom: -28px;
   width: 28px; height: 28px; border-radius: 50%; place-items: center;
   color: #fff; background: rgba(4, 16, 20, .5);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .3);

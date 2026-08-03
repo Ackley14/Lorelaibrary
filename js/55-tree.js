@@ -108,9 +108,22 @@ BT.tree = (function () {
       byFormat[f] = (byFormat[f] || 0) + 1;
       /* Ownership is a separate axis from reading: a book can be finished and
          still on the sell pile, or unread and already sold. `pile` is null for
-         almost everything, so only the two real values are counted. */
-      if (it.user.pile) byPile[it.user.pile] = (byPile[it.user.pile] || 0) + 1;
-      for (const t of (it.user.tags || [])) tags.set(t, (tags.get(t) || 0) + 1);
+         almost everything, so only the two real values are counted.
+
+         `user` is read defensively for exactly the reason `release` is, twelve
+         lines down, and this pair of lines was the last place that did not:
+         BT.repo.putItem heals a missing `user` block, but importAll writes
+         through BT.db.putMany and bypasses the heal, and absorbSynced hands a
+         new uid's record straight through. One imported or hand-edited row
+         without a `user` block therefore threw here — and since this build runs
+         from startApp() before BT.router.start(), the throw took the ROUTER
+         with it: blank shell, every route inert, Settings (and with it Export
+         and Erase) unreachable, recoverable only by clearing site data, which
+         destroys the library. One unguarded property read was the whole
+         difference between a bricked app and a tree row counted wrong. */
+      const u = it.user || {};
+      if (u.pile) byPile[u.pile] = (byPile[u.pile] || 0) + 1;
+      for (const t of (u.tags || [])) tags.set(t, (tags.get(t) || 0) + 1);
 
       /* Same reading of the date as #/up uses, or the number on the row
          disagrees with the length of the list it opens. Order matters here:
@@ -338,8 +351,17 @@ BT.tree = (function () {
         refresh();
         return;
       }
-      /* On narrow screens the tree is a drawer; picking something closes it. */
-      if (e.target.closest('a.row') && window.innerWidth <= 820) closeDrawer();
+      /* Wherever the tree IS a drawer, picking something closes it — which is
+         what this line always meant and what the bare `<= 820` did not say.
+         §6 of 05-responsive.css makes the tree a fixed drawer in a SECOND band
+         (821-1180px with a coarse pointer: every iPad in either orientation,
+         every Android tablet, the Fold inner screen), and there the drawer and
+         its scrim stayed up over the screen the tap had just navigated to.
+         Tapping the hamburger again calls openDrawer() unconditionally, so the
+         only way out was a tap on the scrim — and that tap is swallowed by the
+         scrim, making every single navigation on a tablet cost a dead tap over
+         an app that looks frozen. */
+      if (e.target.closest('a.row') && isTreeDrawer()) closeDrawer();
     });
 
     filter.addEventListener('input', BT.util.debounce(() => {
@@ -391,7 +413,7 @@ BT.tree = (function () {
       document.getElementById('scrim').classList.remove('on');
     });
 
-    for (const mq of [MQ_TREE_DRAWER, MQ_INSP_DRAWER]) {
+    for (const mq of [MQ_TREE_DRAWER, MQ_TREE_TABLET, MQ_INSP_DRAWER]) {
       if (mq.addEventListener) mq.addEventListener('change', syncDrawers);
       else if (mq.addListener) mq.addListener(syncDrawers);
     }
@@ -424,6 +446,18 @@ BT.tree = (function () {
      changing the other. */
   const MQ_TREE_DRAWER = matchMedia('(max-width: 820px)');
   const MQ_INSP_DRAWER = matchMedia('(max-width: 1180px) and (pointer: coarse)');
+  /* §6 of 05-responsive.css gives up the TREE on tablets and foldables to keep
+     the inspector docked, so the tree is a fixed drawer here too. It is a
+     separate query rather than a widened MQ_TREE_DRAWER because the two bands
+     do different things to the INSPECTOR, which is docked in this one. */
+  const MQ_TREE_TABLET = matchMedia('(min-width: 821px) and (max-width: 1180px) and (pointer: coarse)');
+
+  /* The one question every drawer decision should ask: is the tree currently a
+     drawer? Centralised the way isInspOverlay() already centralises the
+     inspector's version of it — two literals in two files disagreeing is
+     exactly how the tablet band ended up with a drawer that had no close
+     path. */
+  function isTreeDrawer() { return MQ_TREE_DRAWER.matches || MQ_TREE_TABLET.matches; }
 
   function syncDrawers() {
     const tree = document.getElementById('treePane');
@@ -431,12 +465,15 @@ BT.tree = (function () {
     const scrim = document.getElementById('scrim');
     if (!tree || !insp || !scrim) return;
 
-    if (!MQ_TREE_DRAWER.matches) tree.classList.remove('open');
+    /* isTreeDrawer(), not MQ_TREE_DRAWER: in the tablet band the tree IS a
+       drawer, so a rotation used to force-close one the reader had legitimately
+       opened. */
+    if (!isTreeDrawer()) tree.classList.remove('open');
     /* The inspector is docked on tablets and foldables, so "open" is only
        meaningful where it is actually an overlay. */
     if (!isInspOverlay()) insp.classList.remove('open');
     scrim.classList.toggle('on',
-      (MQ_TREE_DRAWER.matches && tree.classList.contains('open')) ||
+      (isTreeDrawer() && tree.classList.contains('open')) ||
       (isInspOverlay() && insp.classList.contains('open')));
   }
 
