@@ -116,8 +116,8 @@ img { display: block; max-width: 100%; }
 }
 .brand i {
   font-style: normal; font-size: 9px; letter-spacing: .16em; text-transform: uppercase;
-  color: var(--bt-brass-text);
-  border: var(--bt-rule-w) solid var(--bt-brass-edge);
+  color: var(--bt-teal-text);
+  border: var(--bt-rule-w) solid var(--bt-teal-edge);
   border-radius: var(--bt-radius-sm); padding: 1px 4px;
 }
 
@@ -137,14 +137,14 @@ img { display: block; max-width: 100%; }
 }
 .colophon p + p { margin-top: var(--bt-space-2); }
 .colophon a { color: var(--bt-text-muted); text-decoration: underline; text-underline-offset: 2px; }
-.colophon a:hover { color: var(--bt-brass-text); }
+.colophon a:hover { color: var(--bt-teal-text); }
 /* The Open Library mark that sits beside the attribution line. Drawn as a
    gradient rather than fetched: a remote logo would be the app's only
    third-party request, and a bundled file would not load over file://. The
-   ramp runs parchment → brass → ink, which is the app reading as itself
+   ramp runs shell → teal → deep water, which is the app reading as itself
    rather than a pixel-accurate reproduction of someone else's mark. */
 .ol-logo {
   display: inline-block; width: 40px; height: 10px; vertical-align: -1px; margin-right: 5px;
-  background: linear-gradient(90deg, #E1DCC5 0%, #C7A15A 58%, #2A2118 100%);
+  background: linear-gradient(90deg, #DCECE8 0%, #0B6F62 58%, #071619 100%);
   border-radius: 1px;
 }

@@ -1,10 +1,16 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   BookTrak design tokens — "Folio"
+   BookTrak design tokens — "Tide"
 
-   A dense three-pane reading room set like a printed page: warm paper in the
-   light theme, warm ink-black in the dark one, as ONE token set. Light is
-   "Vellum", dark is "Marginalia". Restrained and editorial on purpose — the
-   covers supply the colour, so the chrome must not compete with them.
+   The same palette MovieTrak wears, on BookTrak's geometry. Light is "low
+   tide": bleached shell, cool paper. Dark is "deep water": a teal-black ground
+   lit by two enormous radial washes. The colour values below are MovieTrak's,
+   copied rather than re-derived, because the two apps are meant to read as one
+   family — a shelf and a watchlist by the same hand.
+
+   Only the PREFIX differs: this app's tokens are `--bt-`, MovieTrak's are
+   `--mt-`. Nothing else about the palette is BookTrak's own except the two
+   extra hue families (violet, moss) that a five-genre library needs and a
+   four-type watchlist did not.
 
    THE RULE OF THIS FILE
    ─────────────────────
@@ -66,87 +72,92 @@
   /* Semantic aliases — resolved per theme via the colour tokens below, and
      deliberately never redeclared inside a theme block. Genre and precision
      share the hue pool on purpose; they never appear in the same badge, so a
-     reused hue costs nothing and keeps the palette from sprawling. */
-  --bt-genre-fiction: var(--bt-ink);
-  --bt-genre-nonfiction: var(--bt-sage);
-  --bt-genre-fantasysf: var(--bt-plum);
-  --bt-genre-mystery: var(--bt-slate);
-  --bt-genre-romance: var(--bt-rose);
-  /* 'general' is the catch-all bucket and is deliberately hueless — colouring
-     it would imply a classification the data does not actually carry. */
-  --bt-genre-general: var(--bt-text-muted);
-  --bt-precision-day: var(--bt-sage);
-  --bt-precision-month: var(--bt-brass);
-  --bt-precision-year: var(--bt-rose);
+     reused hue costs nothing and keeps the palette from sprawling. MovieTrak
+     does the same thing with film and day-precision. */
+  --bt-genre-fiction: var(--bt-ice);
+  --bt-genre-nonfiction: var(--bt-moss);
+  --bt-genre-fantasysf: var(--bt-violet);
+  --bt-genre-mystery: var(--bt-teal);
+  --bt-genre-romance: var(--bt-coral);
+  /* 'general' is the catch-all bucket and gets no alias at all, because it gets
+     no hue: it renders in muted text on a sunk ground, exactly the treatment
+     .prec.unknown gets. Colouring it would dress an absence of information up
+     as a classification. */
+  --bt-precision-day: var(--bt-teal);
+  --bt-precision-month: var(--bt-amber);
+  --bt-precision-year: var(--bt-coral);
 
   --bt-z-bar: 20;  --bt-z-scrim: 35;  --bt-z-drawer: 45;  --bt-z-toast: 60;
 }
 
-/* ══ 2 · LIGHT — "Vellum": warm parchment, aged paper ═════════════════════ */
+/* ══ 2 · LIGHT — "low tide": bleached shell, cool paper ════════════════════ */
 :root[data-theme="light"] {
-  --bt-surface-canvas: #FAF8F3;
-  --bt-surface-rail: #F3F0E8;
-  --bt-surface-sunk: #EAE5DA;
-  --bt-surface-raised: #FFFDF8;
-  --bt-surface-hover: #F0ECE2;
-  --bt-surface-glass: rgba(253, 251, 246, .66);
+  --bt-surface-canvas: #F8F9F8;
+  --bt-surface-rail: #F0F2F1;
+  --bt-surface-sunk: #E7EAE9;
+  --bt-surface-raised: #FFFFFF;
+  --bt-surface-hover: #EDF0EF;
+  --bt-surface-glass: rgba(252, 253, 253, .66);
   --bt-glass-blur: blur(28px) saturate(1.7);
 
-  --bt-line-hairline: #E7E1D5;
-  --bt-line-rule: #D7CFC0;
-  --bt-line-strong: #BCB3A1;
+  --bt-line-hairline: #E2E6E5;
+  --bt-line-rule: #CFD6D5;
+  --bt-line-strong: #B3BDBC;
   --bt-line-highlight: rgba(255, 255, 255, .9);
 
-  /* Ink, not black. The primary is a very dark warm brown so long blurbs sit
-     on the page instead of vibrating against it. Its lightness is held where
-     a neutral near-black would be, so every contrast ratio still clears AA. */
-  --bt-text-primary: #1F1A13;
-  --bt-text-secondary: #4C4438;
-  --bt-text-muted: #7B7263;
-  --bt-text-faint: #A79D8B;
+  --bt-text-primary: #12201F;
+  --bt-text-secondary: #42514F;
+  --bt-text-muted: #6D7B79;
+  --bt-text-faint: #9AA6A4;
 
-  --bt-brass: #8A6516; --bt-brass-text: #6F4F0D; --bt-brass-wash: #F5EAD2; --bt-brass-edge: #D6BE84;
-  --bt-ink:   #3B4A99; --bt-ink-text:   #303C80; --bt-ink-wash:   #E5E5F0; --bt-ink-edge:   #A9AFDC;
-  --bt-sage:  #4F6B42; --bt-sage-text:  #3F5734; --bt-sage-wash:  #E6ECDD; --bt-sage-edge:  #AABE9B;
-  --bt-plum:  #86478F; --bt-plum-text:  #6F3A78; --bt-plum-wash:  #F0E4F1; --bt-plum-edge:  #C7A6CB;
-  --bt-rose:  #AE4257; --bt-rose-text:  #94374A; --bt-rose-wash:  #F8E3E5; --bt-rose-edge:  #E0A7B1;
-  --bt-slate: #4C6377; --bt-slate-text: #3E5364; --bt-slate-wash: #E4E9EE; --bt-slate-edge: #A8B6C2;
+  /* The four MovieTrak hues, value for value. Deep and muted against paper. */
+  --bt-teal:   #0B6F62; --bt-teal-text:   #0A5C51; --bt-teal-wash:   #DCECE8; --bt-teal-edge:   #8CC4B9;
+  --bt-coral:  #B03A22; --bt-coral-text:  #96301B; --bt-coral-wash:  #F6E3DD; --bt-coral-edge:  #DFA995;
+  --bt-amber:  #8A6208; --bt-amber-text:  #755207; --bt-amber-wash:  #F4E9CF; --bt-amber-edge:  #D6BA79;
+  --bt-ice:    #1E5F91; --bt-ice-text:    #1A5480; --bt-ice-wash:    #DFEAF3; --bt-ice-edge:    #94BAD7;
+  /* Two more, because a library sorts into five genres and a watchlist sorted
+     into four types. Derived to the same discipline as the four above — same
+     lightness band, same wash/edge distances — so they read as members of the
+     set rather than as guests. Violet sits between ice and coral on the wheel;
+     moss is far enough off teal (H 172 → H 127) to survive a 7px tree dot. */
+  --bt-violet: #6A39A2; --bt-violet-text: #5B318B; --bt-violet-wash: #E8E0F0; --bt-violet-edge: #B397D3;
+  --bt-moss:   #336B3A; --bt-moss-text:   #2C5C32; --bt-moss-wash:   #DEEDE0; --bt-moss-edge:   #93C899;
 
-  --bt-good: #2C6B3E;  --bt-bad: #A6301C;
+  --bt-good: #1F6B3F;  --bt-bad: #A32A18;
 
   /* The hatch is a static stripe and never blurs — it repeats hundreds of
      times across a dense table, so it has to be free to paint. */
-  --bt-hatch-stripe: rgba(31, 26, 19, .22);
-  --bt-hatch-ground: rgba(31, 26, 19, .04);
-  --bt-hatch-edge: rgba(31, 26, 19, .11);
-  --bt-hatch-ink: #A79D8B;
-  --bt-pending-ink: #A79D8B;
+  --bt-hatch-stripe: rgba(18, 32, 31, .22);
+  --bt-hatch-ground: rgba(18, 32, 31, .04);
+  --bt-hatch-edge: rgba(18, 32, 31, .11);
+  --bt-hatch-ink: #9AA6A4;
+  --bt-pending-ink: #9AA6A4;
 
-  --bt-shadow-sheet: 0 -12px 30px -18px rgba(38, 28, 16, .45);
-  --bt-shadow-drawer: 0 18px 44px -26px rgba(38, 28, 16, .55);
-  --bt-shadow-lift: 0 8px 18px -8px rgba(38, 28, 16, .32);
+  --bt-shadow-sheet: 0 -12px 30px -18px rgba(12, 28, 26, .45);
+  --bt-shadow-drawer: 0 18px 44px -26px rgba(12, 28, 26, .55);
+  --bt-shadow-lift: 0 8px 18px -8px rgba(12, 28, 26, .32);
   --bt-shadow-inset-top: inset 0 1px 0 rgba(255, 255, 255, .9);
 
-  /* The focus ring is indigo rather than brass: brass is the brand hue and
-     turns up in badges and the active marker, so a brass ring would be
-     ambiguous exactly when it needs to be unmistakable. */
-  --bt-focus-ring: #303C80;
-  --bt-selection: #EEDFB6;
-  --bt-scrim: rgba(31, 26, 19, .24);
-  --bt-poster-edge: rgba(31, 26, 19, .14);
+  /* The ring is ice, not teal: teal is the brand hue and turns up in badges,
+     the active marker and half the controls, so a teal ring would be ambiguous
+     exactly when it needs to be unmistakable. */
+  --bt-focus-ring: #1E5F91;
+  --bt-selection: #CBE6DF;
+  --bt-scrim: rgba(18, 32, 31, .24);
+  --bt-poster-edge: rgba(18, 32, 31, .14);
   --bt-tank-1: transparent;
   --bt-tank-2: transparent;
   color-scheme: light;
 }
 
-/* ══ 3 · DARK — "Marginalia": same geometry, warm ink-black ground ════════ */
+/* ══ 3 · DARK — "deep water": same geometry, teal-black ground ═════════════ */
 :root[data-theme="dark"] {
-  --bt-surface-canvas: #14110E;
-  --bt-surface-rail: #1C1813;
-  --bt-surface-sunk: #100D0A;
+  --bt-surface-canvas: #071619;
+  --bt-surface-rail: #0A1F24;
+  --bt-surface-sunk: #061318;
   --bt-surface-raised: rgba(255, 255, 255, .045);
   --bt-surface-hover: rgba(255, 255, 255, .055);
-  --bt-surface-glass: rgba(22, 18, 14, .70);
+  --bt-surface-glass: rgba(8, 26, 31, .70);
   --bt-glass-blur: blur(12px) saturate(1.25);   /* cheap: dark leans on translucency */
 
   --bt-line-hairline: rgba(255, 255, 255, .075);
@@ -154,41 +165,42 @@
   --bt-line-strong: rgba(255, 255, 255, .24);
   --bt-line-highlight: rgba(255, 255, 255, .16);
 
-  --bt-text-primary: #F6F1E7;
-  --bt-text-secondary: #CFC5B3;
-  --bt-text-muted: #9A8F7C;
-  --bt-text-faint: #746B5C;
+  --bt-text-primary: #EAF7F4;
+  --bt-text-secondary: #B4CFCC;
+  --bt-text-muted: #7E9C9C;
+  --bt-text-faint: #5C7679;
 
-  --bt-brass: #EDB556; --bt-brass-text: #F7D18E; --bt-brass-wash: rgba(237, 181, 86, .14); --bt-brass-edge: rgba(237, 181, 86, .42);
-  --bt-ink:   #9AA6FF; --bt-ink-text:   #BFC7FF; --bt-ink-wash:   rgba(154, 166, 255, .14); --bt-ink-edge:   rgba(154, 166, 255, .42);
-  --bt-sage:  #8FC98C; --bt-sage-text:  #B4DDB1; --bt-sage-wash:  rgba(143, 201, 140, .14); --bt-sage-edge:  rgba(143, 201, 140, .42);
-  --bt-plum:  #C596DC; --bt-plum-text:  #DCBBEE; --bt-plum-wash:  rgba(197, 150, 220, .14); --bt-plum-edge:  rgba(197, 150, 220, .42);
-  --bt-rose:  #F58396; --bt-rose-text:  #FFAAB7; --bt-rose-wash:  rgba(245, 131, 150, .15); --bt-rose-edge:  rgba(245, 131, 150, .42);
-  --bt-slate: #9DB6CC; --bt-slate-text: #C2D3E2; --bt-slate-wash: rgba(157, 182, 204, .14); --bt-slate-edge: rgba(157, 182, 204, .42);
+  --bt-teal:   #23E3C5; --bt-teal-text:   #6FF3DC; --bt-teal-wash:   rgba(35, 227, 197, .14);  --bt-teal-edge:   rgba(35, 227, 197, .42);
+  --bt-coral:  #FF5F45; --bt-coral-text:  #FF9683; --bt-coral-wash:  rgba(255, 95, 69, .15);   --bt-coral-edge:  rgba(255, 95, 69, .42);
+  --bt-amber:  #FFC25C; --bt-amber-text:  #FFD48C; --bt-amber-wash:  rgba(255, 194, 92, .14);  --bt-amber-edge:  rgba(255, 194, 92, .42);
+  --bt-ice:    #7CC7FF; --bt-ice-text:    #A6DAFF; --bt-ice-wash:    rgba(124, 199, 255, .14); --bt-ice-edge:    rgba(124, 199, 255, .42);
+  /* Dark flips the discipline: bright and vivid against the near-black, never
+     pastel. These two are pitched at the same luminance as ice and teal so a
+     row of five genre dots has no weak link. */
+  --bt-violet: #C38FFF; --bt-violet-text: #DCBDFF; --bt-violet-wash: rgba(195, 143, 255, .14); --bt-violet-edge: rgba(195, 143, 255, .42);
+  --bt-moss:   #83CE8C; --bt-moss-text:   #AFE4B5; --bt-moss-wash:   rgba(131, 206, 140, .14); --bt-moss-edge:   rgba(131, 206, 140, .42);
 
-  --bt-good: #6BCB86;  --bt-bad: #FF8069;
+  --bt-good: #4FD08A;  --bt-bad: #FF7A63;
 
-  --bt-hatch-stripe: rgba(240, 232, 214, .20);
+  --bt-hatch-stripe: rgba(214, 240, 238, .20);
   --bt-hatch-ground: rgba(255, 255, 255, .035);
   --bt-hatch-edge: rgba(255, 255, 255, .10);
-  --bt-hatch-ink: #746B5C;
-  --bt-pending-ink: #746B5C;
+  --bt-hatch-ink: #5C7679;
+  --bt-pending-ink: #5C7679;
 
   --bt-shadow-sheet: 0 -14px 34px -20px rgba(0, 0, 0, .75);
   --bt-shadow-drawer: 0 22px 52px -28px rgba(0, 0, 0, .85);
   --bt-shadow-lift: 0 10px 22px -10px rgba(0, 0, 0, .7);
   --bt-shadow-inset-top: inset 0 1px 0 rgba(255, 255, 255, .16);
 
-  /* Dark flips the rule to brass: indigo at this lightness is too close to the
-     line tokens to register against an ink ground. */
-  --bt-focus-ring: #EDB556;
-  --bt-selection: rgba(237, 181, 86, .24);
-  --bt-scrim: rgba(8, 6, 4, .6);
+  --bt-focus-ring: #7CC7FF;
+  --bt-selection: rgba(35, 227, 197, .24);
+  --bt-scrim: rgba(2, 10, 13, .6);
   --bt-poster-edge: rgba(255, 255, 255, .14);
   /* Two very large, very cheap radial washes give the dark ground its depth.
      Painted once, never animated, never blurred — this is what lets the theme
-     read as lamplight on a page without a single expensive filter. */
-  --bt-tank-1: radial-gradient(72vw 58vw at 6% -8%, rgba(158, 108, 32, .28), transparent 62%);
-  --bt-tank-2: radial-gradient(60vw 52vw at 96% 92%, rgba(122, 78, 36, .22), transparent 62%);
+     read as "underwater" without a single expensive filter. */
+  --bt-tank-1: radial-gradient(72vw 58vw at 6% -8%, rgba(11, 125, 120, .30), transparent 62%);
+  --bt-tank-2: radial-gradient(60vw 52vw at 96% 92%, rgba(28, 95, 156, .22), transparent 62%);
   color-scheme: dark;
 }

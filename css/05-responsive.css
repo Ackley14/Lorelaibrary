@@ -316,7 +316,7 @@ select.chip { padding: 0 var(--bt-space-3); appearance: none; }
 }
 
 /* Keyboard selection in the search results list. */
-.miss.is-sel { background: var(--bt-brass-wash); box-shadow: inset var(--bt-marker-w) 0 0 var(--bt-brass); }
+.miss.is-sel { background: var(--bt-teal-wash); box-shadow: inset var(--bt-marker-w) 0 0 var(--bt-teal); }
 
 /* Results being replaced: dim rather than tear down, so the list keeps its
    height and nothing jumps under a thumb mid-type. */
@@ -329,7 +329,7 @@ select.chip { padding: 0 var(--bt-space-3); appearance: none; }
 /* The Add control is a real button with a real hit area — the row itself no
    longer adds anything, so a flick-scroll cannot add a book by accident. */
 .miss .add { flex: 0 0 auto; cursor: pointer; }
-.miss .add.is-in { border-color: var(--bt-brass-edge); color: var(--bt-brass-text); background: var(--bt-brass-wash); }
+.miss .add.is-in { border-color: var(--bt-teal-edge); color: var(--bt-teal-text); background: var(--bt-teal-wash); }
 @media (pointer: coarse) {
   .miss .add { min-height: 40px; min-width: 64px; display: grid; place-items: center; font-size: var(--bt-fs-base); }
   .miss { gap: var(--bt-space-3); padding-top: var(--bt-space-3); padding-bottom: var(--bt-space-3); }

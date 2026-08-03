@@ -60,20 +60,21 @@
    and a band you can see the width of is the only honest way to show that the
    uncertainty is the data, not a rendering shortcut.
 
-   Hues follow the --bt-precision-* aliases: day is sage, month/quarter brass,
-   year rose. They are spelled out as the underlying hue tokens because the
-   washes and edges have no aliased form. */
+   Hues follow the --bt-precision-* aliases: day is teal, month/quarter amber,
+   year coral — the same three MovieTrak spends here. They are spelled out as
+   the underlying hue tokens because the washes and edges have no aliased
+   form. */
 .band { position: absolute; top: 6px; height: 10px; border-radius: var(--bt-radius-sm); }
-.band.day { background: var(--bt-sage); width: var(--bt-marker-w); box-shadow: 0 0 0 3px var(--bt-sage-wash); }
+.band.day { background: var(--bt-teal); width: var(--bt-marker-w); box-shadow: 0 0 0 3px var(--bt-teal-wash); }
 .band.day::after {
   content: ""; position: absolute; left: 50%; top: -6px; transform: translateX(-50%);
-  width: 5px; height: 5px; border-radius: 50%; background: var(--bt-sage);
+  width: 5px; height: 5px; border-radius: 50%; background: var(--bt-teal);
 }
-.band.month, .band.quarter { background: var(--bt-brass-wash); box-shadow: inset 0 0 0 1px var(--bt-brass); }
+.band.month, .band.quarter { background: var(--bt-amber-wash); box-shadow: inset 0 0 0 1px var(--bt-amber); }
 .band.year {
-  background-color: var(--bt-rose-wash);
-  background-image: repeating-linear-gradient(-45deg, var(--bt-rose-edge) 0 1px, transparent 1px 5px);
-  box-shadow: inset 0 0 0 1px var(--bt-rose-edge);
+  background-color: var(--bt-coral-wash);
+  background-image: repeating-linear-gradient(-45deg, var(--bt-coral-edge) 0 1px, transparent 1px 5px);
+  box-shadow: inset 0 0 0 1px var(--bt-coral-edge);
 }
 .band.tba, .band.unknown {
   left: 0; right: 0;
@@ -103,17 +104,17 @@
   font-size: 10px; font-weight: 700;
 }
 /* Three states at 16px, so they are picked for separation rather than for
-   brand: a date that moved is rose, a book that published is sage, anything
-   else is indigo. Brass is deliberately not in this set — brass means "the app
-   did something you can act on", and a feed entry is a report, not a control. */
-.ev .ic.move { background: var(--bt-rose-wash); color: var(--bt-rose-text); }
-.ev .ic.land { background: var(--bt-sage-wash); color: var(--bt-sage-text); }
-.ev .ic.info { background: var(--bt-ink-wash); color: var(--bt-ink-text); }
+   brand: a date that moved is coral, a book that published is teal, anything
+   else is ice. Amber is deliberately not in this set — amber means "read
+   this", and a feed entry is a report, not a warning. */
+.ev .ic.move { background: var(--bt-coral-wash); color: var(--bt-coral-text); }
+.ev .ic.land { background: var(--bt-teal-wash); color: var(--bt-teal-text); }
+.ev .ic.info { background: var(--bt-ice-wash); color: var(--bt-ice-text); }
 .ev .et { font-size: var(--bt-fs-base); color: var(--bt-text-primary); font-weight: 500; }
 .ev .es { font-size: var(--bt-fs-mini); color: var(--bt-text-muted); margin-top: 2px; }
 .ev.unread .et::after {
   content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%;
-  background: var(--bt-brass); margin-left: 6px; vertical-align: middle;
+  background: var(--bt-teal); margin-left: 6px; vertical-align: middle;
 }
 .diff { display: flex; align-items: center; gap: var(--bt-space-2); margin-top: 4px; flex-wrap: wrap; }
 
@@ -134,7 +135,7 @@
 }
 .bar .bl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar .g { height: 7px; border-radius: var(--bt-radius-sm); background: var(--bt-surface-sunk); overflow: hidden; }
-.bar .g i { display: block; height: 100%; border-radius: var(--bt-radius-sm); background: var(--bt-brass); }
+.bar .g i { display: block; height: 100%; border-radius: var(--bt-radius-sm); background: var(--bt-teal); }
 .bar .n { font-family: var(--bt-font-mono); font-size: var(--bt-fs-mini); color: var(--bt-text-muted); text-align: right; }
 .stack {
   display: flex; height: 9px; border-radius: var(--bt-radius-sm); overflow: hidden;
@@ -155,11 +156,11 @@
   border: var(--bt-rule-w) solid var(--bt-line-rule);
   border-radius: var(--bt-radius); box-shadow: var(--bt-shadow-inset-top);
 }
-/* Focus is indigo, not brass, and that is the rule everywhere in this file.
-   Brass is the brand hue: it is already the active marker, the unread dot and
-   half the badges, so a brass ring is ambiguous at exactly the moment it has
-   to be unmistakable. 01-tokens says the same thing about --bt-focus-ring. */
-.sfield:focus-within { border-color: var(--bt-ink-edge); box-shadow: 0 0 0 3px var(--bt-ink-wash); }
+/* A focused field wears teal, the same as MovieTrak: the tint is what says
+   "typing lands here", and it is separate from --bt-focus-ring (ice), which is
+   the keyboard-navigation outline the browser draws on :focus-visible. Two
+   different questions, two different hues, deliberately. */
+.sfield:focus-within { border-color: var(--bt-teal-edge); box-shadow: 0 0 0 3px var(--bt-teal-wash); }
 .sfield input { flex: 1; font-size: 14px; min-width: 0; }
 .sfield input:focus { outline: none; }
 .shint {
@@ -191,9 +192,9 @@
 }
 .miss:hover { background: var(--bt-surface-hover); }
 .miss .add {
-  margin-left: auto; font-size: var(--bt-fs-mini); color: var(--bt-ink-text);
-  border: var(--bt-rule-w) solid var(--bt-ink-edge); border-radius: 3px;
-  padding: 2px 7px; background: var(--bt-ink-wash);
+  margin-left: auto; font-size: var(--bt-fs-mini); color: var(--bt-ice-text);
+  border: var(--bt-rule-w) solid var(--bt-ice-edge); border-radius: 3px;
+  padding: 2px 7px; background: var(--bt-ice-wash);
 }
 
 /* ══ PANE 3 — THE INSPECTOR, the app's only blurred surface ═══════════════
@@ -208,11 +209,11 @@
 }
 /* --a / --b are set on the element by the view from the cover's own colours,
    so the hero is a wash of the book rather than a crop of it. The fallbacks
-   are a warm board-and-ink pair for the case where no cover has loaded yet —
-   a cool default read as "broken image" against the Vellum page. */
+   are the same deep-water pair MovieTrak uses, for the moment before a cover
+   has loaded. */
 .wash {
   position: sticky; top: 0; height: 196px; margin-bottom: -64px; z-index: 0;
-  background: linear-gradient(163deg, var(--a, #4a3f2f), var(--b, #17120c));
+  background: linear-gradient(163deg, var(--a, #3a4a52), var(--b, #12181c));
 }
 /* A laid-paper grain and a single soft highlight. Both are gradients on one
    element: no images, nothing to request, nothing to decode. */
@@ -236,6 +237,30 @@
   padding: 0 var(--bt-space-6) 40px;
 }
 @supports not (backdrop-filter: blur(2px)) { .sheet { background: var(--bt-surface-canvas); } }
+
+/* ── The wash with nothing to wash ──────────────────────────────────────────
+   The band takes its two colours from the SELECTED book's cover, so with
+   nothing selected there is no book to take them from — and it was painting
+   anyway, 132px of gradient standing in for a record that is not there.
+
+   56-inspector.js writes the same `.wash` markup for every state, so there is
+   no state class on the band itself to key off. What DOES differ is the sheet's
+   contents: a placeholder (nothing selected, not found, an error) rather than
+   an item, and both placeholders are single well-known classes. So the state is
+   read off the sheet with :has(), and the band is hidden — no JS change needed.
+
+   :has() is the whole mechanism, and the polarity is deliberate: on a browser
+   without it the rule is simply dropped and the band behaves exactly as it did
+   before, which is the right failure for a purely cosmetic fix. The sheet gives
+   up its lip and shadow at the same time, because a sheet that now overlaps
+   nothing should not go on looking like one. ──────────────────────────────── */
+.insp:has(.empty) .wash,
+.insp:has(.errorbox) .wash { display: none; }
+.insp:has(.empty) .sheet,
+.insp:has(.errorbox) .sheet {
+  min-height: 100%;
+  border-radius: 0; border-top-color: transparent; box-shadow: none;
+}
 
 .insp-poster {
   width: 78px; aspect-ratio: 2/3; margin: -52px 0 0; position: relative; z-index: 2;
@@ -281,7 +306,7 @@
 .src .sv b { font-family: var(--bt-font-mono); font-size: 17px; font-weight: 600; color: var(--bt-text-primary); }
 .src .sv i { font-style: normal; font-size: var(--bt-fs-mini); color: var(--bt-text-faint); font-family: var(--bt-font-mono); }
 .src .meter { height: 3px; border-radius: var(--bt-radius-sm); background: var(--bt-surface-sunk); margin-top: var(--bt-space-2); overflow: hidden; }
-.src .meter i { display: block; height: 100%; background: var(--bt-brass); }
+.src .meter i { display: block; height: 100%; background: var(--bt-teal); }
 .src.na { background: var(--bt-surface-sunk); }
 .src.na .sn { color: var(--bt-text-faint); }
 .src .void {
@@ -296,7 +321,7 @@ a.src:hover { background: var(--bt-surface-hover); }
 .insp-close {
   display: none; position: absolute; top: var(--bt-space-4); right: var(--bt-space-4); z-index: 3;
   width: 28px; height: 28px; border-radius: 50%; place-items: center;
-  color: #fff; background: rgba(14, 10, 5, .5);
+  color: #fff; background: rgba(4, 16, 20, .5);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .3);
 }
 
@@ -306,8 +331,8 @@ a.src:hover { background: var(--bt-surface-hover); }
   flex: 1; height: 16px; border-radius: 1px; cursor: pointer;
   background: var(--bt-surface-sunk); box-shadow: inset 0 0 0 1px var(--bt-line-hairline);
 }
-.ticks i.on { background: var(--bt-brass); box-shadow: none; }
-.ticks i:hover { box-shadow: inset 0 0 0 1px var(--bt-brass-edge); }
+.ticks i.on { background: var(--bt-teal); box-shadow: none; }
+.ticks i:hover { box-shadow: inset 0 0 0 1px var(--bt-teal-edge); }
 .myscore { font-family: var(--bt-font-mono); font-size: 15px; font-weight: 600; color: var(--bt-text-primary); }
 .myscore s { text-decoration: none; font-size: 11px; color: var(--bt-text-faint); }
 
@@ -330,7 +355,7 @@ a.src:hover { background: var(--bt-surface-hover); }
   background-image: linear-gradient(transparent 21px, var(--bt-line-hairline) 21px, var(--bt-line-hairline) 22px, transparent 22px);
   background-size: 100% 22px; background-position: 0 var(--bt-space-3);
 }
-.notecard:focus { outline: none; border-color: var(--bt-ink-edge); box-shadow: 0 0 0 3px var(--bt-ink-wash); }
+.notecard:focus { outline: none; border-color: var(--bt-teal-edge); box-shadow: 0 0 0 3px var(--bt-teal-wash); }
 
 .kv { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 5px var(--bt-space-4); font-size: 12px; }
 .kv dt { color: var(--bt-text-muted); font-size: 11px; }
@@ -344,14 +369,14 @@ a.src:hover { background: var(--bt-surface-hover); }
 }
 .why-line {
   font-size: var(--bt-fs-mini); color: var(--bt-text-secondary); line-height: 1.45;
-  border-left: 2px solid var(--bt-brass-edge); padding-left: var(--bt-space-3); margin-top: var(--bt-space-2);
+  border-left: 2px solid var(--bt-teal-edge); padding-left: var(--bt-space-3); margin-top: var(--bt-space-2);
 }
-.why-line b { color: var(--bt-brass-text); font-weight: 600; }
+.why-line b { color: var(--bt-teal-text); font-weight: 600; }
 /* Reached through the taste graph — same author, same subject cluster — rather
    than through something the user did. Different colour because it is a
    different kind of claim, and one the user should be able to discount. */
-.why-line.graph { border-left-color: var(--bt-ink-edge); }
-.why-line.graph b { color: var(--bt-ink-text); }
+.why-line.graph { border-left-color: var(--bt-ice-edge); }
+.why-line.graph b { color: var(--bt-ice-text); }
 
 /* ══ SETTINGS ═════════════════════════════════════════════════════════════ */
 
@@ -359,14 +384,14 @@ a.src:hover { background: var(--bt-surface-hover); }
 .field { margin-bottom: var(--bt-space-6); }
 .field__label { display: block; font-size: var(--bt-fs-base); color: var(--bt-text-primary); font-weight: 500; margin-bottom: 3px; }
 .field__help { font-size: var(--bt-fs-sm); color: var(--bt-text-muted); line-height: 1.5; margin-bottom: var(--bt-space-3); }
-.field__help a { color: var(--bt-brass-text); text-decoration: underline; }
+.field__help a { color: var(--bt-teal-text); text-decoration: underline; }
 .field input[type="text"], .field input[type="password"], .field select {
   width: 100%; height: 30px; padding: 0 var(--bt-space-3);
   background: var(--bt-surface-raised);
   border: var(--bt-rule-w) solid var(--bt-line-rule); border-radius: var(--bt-radius);
   color: var(--bt-text-primary); font-family: var(--bt-font-mono); font-size: var(--bt-fs-base);
 }
-.field input:focus, .field select:focus { outline: none; border-color: var(--bt-ink-edge); box-shadow: 0 0 0 3px var(--bt-ink-wash); }
+.field input:focus, .field select:focus { outline: none; border-color: var(--bt-teal-edge); box-shadow: 0 0 0 3px var(--bt-teal-wash); }
 .field__state { font-family: var(--bt-font-mono); font-size: var(--bt-fs-mini); margin-top: var(--bt-space-2); color: var(--bt-text-muted); }
 .field__state--ok { color: var(--bt-good); }
 .field__state--bad { color: var(--bt-bad); }
@@ -374,8 +399,8 @@ a.src:hover { background: var(--bt-surface-hover); }
    has one worth drawing — Open Library is rate-limited per second, not per day
    — so this bar is usually reporting on a key the user chose to add. */
 .gauge { height: 6px; background: var(--bt-surface-sunk); border-radius: var(--bt-radius-sm); overflow: hidden; margin-top: var(--bt-space-2); }
-.gauge i { display: block; height: 100%; background: var(--bt-brass); }
-.gauge i.hot { background: var(--bt-rose); }
+.gauge i { display: block; height: 100%; background: var(--bt-teal); }
+.gauge i.hot { background: var(--bt-coral); }
 .actions { display: flex; gap: var(--bt-space-2); flex-wrap: wrap; }
 
 /* ══ FIRST RUN / UNLOCK ═══════════════════════════════════════════════════ */
@@ -384,8 +409,8 @@ a.src:hover { background: var(--bt-surface-hover); }
 .firstrun h1 { font-family: var(--bt-font-serif); font-size: 30px; line-height: 1.15; margin-bottom: var(--bt-space-4); }
 .firstrun .lede { font-size: var(--bt-fs-md); color: var(--bt-text-secondary); line-height: 1.55; margin-bottom: var(--bt-space-6); }
 .firstrun ol { padding-left: var(--bt-space-6); display: flex; flex-direction: column; gap: var(--bt-space-3); font-size: var(--bt-fs-base); color: var(--bt-text-secondary); }
-.firstrun ol a { color: var(--bt-brass-text); text-decoration: underline; }
-.firstrun li::marker { color: var(--bt-brass); font-family: var(--bt-font-mono); }
+.firstrun ol a { color: var(--bt-teal-text); text-decoration: underline; }
+.firstrun li::marker { color: var(--bt-teal); font-family: var(--bt-font-mono); }
 
 /* ── Carried over by Settings and Unlock, which are form-shaped rather than
       list-shaped and so do not use the table/grid components. ──────────── */
@@ -435,11 +460,11 @@ a.src:hover { background: var(--bt-surface-hover); }
 @supports not (backdrop-filter: blur(2px)) { .gate__panel { background: var(--bt-surface-rail); } }
 .gate__brand { display: flex; align-items: baseline; gap: var(--bt-space-2); margin-bottom: var(--bt-space-5); }
 .gate__brand b { font-family: var(--bt-font-serif); font-size: 15px; color: var(--bt-text-primary); }
-/* The "Folio" kicker. Brass, outlined, tiny — the one place the brand hue is
+/* The theme kicker. Teal, outlined, tiny — the one place the brand hue is
    spent purely on identity rather than on a control. */
 .gate__brand i {
   font-style: normal; font-size: 9px; letter-spacing: .16em; text-transform: uppercase;
-  color: var(--bt-brass-text); border: var(--bt-rule-w) solid var(--bt-brass-edge);
+  color: var(--bt-teal-text); border: var(--bt-rule-w) solid var(--bt-teal-edge);
   border-radius: var(--bt-radius-sm); padding: 1px 4px;
 }
 .gate h1 { font-family: var(--bt-font-serif); font-size: 27px; line-height: 1.15; margin-bottom: var(--bt-space-3); }
@@ -466,7 +491,7 @@ a.src:hover { background: var(--bt-surface-hover); }
   position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
   background: var(--bt-line-hairline);
 }
-.prg i { display: block; height: 100%; background: var(--bt-brass); }
+.prg i { display: block; height: 100%; background: var(--bt-teal); }
 tbody td[data-col="title"] { position: relative; }
 
 .prgctl { display: flex; flex-direction: column; gap: var(--bt-space-3); }
@@ -478,7 +503,7 @@ tbody td[data-col="title"] { position: relative; }
   height: 4px; border-radius: var(--bt-radius-pill); overflow: hidden;
   background: var(--bt-line-hairline);
 }
-.prgmeter i { display: block; height: 100%; background: var(--bt-brass); }
+.prgmeter i { display: block; height: 100%; background: var(--bt-teal); }
 
 /* The page-number box. Wide enough for four digits because a page count is not
    a percentage and plenty of books run past 999. */
@@ -502,12 +527,12 @@ tbody td[data-col="title"] { position: relative; }
 .prgctl input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
   width: 18px; height: 18px; border-radius: 50%;
-  background: var(--bt-brass); cursor: pointer;
+  background: var(--bt-teal); cursor: pointer;
   border: 2px solid var(--bt-surface-canvas);
 }
 .prgctl input[type="range"]::-moz-range-thumb {
   width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--bt-surface-canvas);
-  background: var(--bt-brass); cursor: pointer;
+  background: var(--bt-teal); cursor: pointer;
 }
 
 /* ══ THE SCANNER ══════════════════════════════════════════════════════════
@@ -554,7 +579,7 @@ tbody td[data-col="title"] { position: relative; }
   font-weight: 500; color: var(--bt-text-primary);
 }
 .scanner-torch[aria-pressed="true"] {
-  background: var(--bt-brass-wash); border-color: var(--bt-brass-edge); color: var(--bt-brass-text);
+  background: var(--bt-teal-wash); border-color: var(--bt-teal-edge); color: var(--bt-teal-text);
 }
 .scanner-close {
   flex: 0 0 auto;
@@ -583,13 +608,13 @@ tbody td[data-col="title"] { position: relative; }
   border-top: var(--bt-rule-w) solid rgba(255, 255, 255, .55);
   border-bottom: var(--bt-rule-w) solid rgba(255, 255, 255, .55);
   background: rgba(255, 255, 255, .06);
-  box-shadow: 0 0 0 100vmax rgba(8, 6, 4, .5);
+  box-shadow: 0 0 0 100vmax rgba(2, 10, 13, .5);
   pointer-events: none;
 }
 .scanner-roi::after {
   content: ""; position: absolute; left: 8%; right: 8%; top: 50%;
   height: 2px; margin-top: -1px; border-radius: var(--bt-radius-pill);
-  background: var(--bt-rose); opacity: .85;
+  background: var(--bt-coral); opacity: .85;
 }
 .scanner-hint {
   position: absolute; left: 0; right: 0; bottom: var(--bt-space-5);
@@ -674,10 +699,10 @@ tbody td[data-col="title"] { position: relative; }
   background: var(--bt-line-hairline); color: var(--bt-text-muted);
 }
 .scanpill.pending { background: var(--bt-surface-sunk); color: var(--bt-text-faint); }
-.scanpill.ok      { background: var(--bt-sage-wash);  color: var(--bt-sage-text); }
-.scanpill.dupe    { background: var(--bt-brass-wash); color: var(--bt-brass-text); }
-.scanpill.miss    { background: var(--bt-slate-wash); color: var(--bt-slate-text); }
-.scanpill.err     { background: var(--bt-rose-wash);  color: var(--bt-rose-text); }
+.scanpill.ok      { background: var(--bt-teal-wash);  color: var(--bt-teal-text); }
+.scanpill.dupe    { background: var(--bt-amber-wash); color: var(--bt-amber-text); }
+.scanpill.miss    { background: var(--bt-ice-wash);   color: var(--bt-ice-text); }
+.scanpill.err     { background: var(--bt-coral-wash); color: var(--bt-coral-text); }
 
 /* A pill in flight breathes, so a stalled queue is visible without a spinner
    per row. Opacity only — it composites, so a screen full of them costs
@@ -715,9 +740,9 @@ tbody td[data-col="title"] { position: relative; }
   font-family: var(--bt-font-mono); font-size: var(--bt-fs-sm); font-weight: 600;
   color: var(--bt-text-primary); font-variant-numeric: tabular-nums;
 }
-.tal.ok b   { color: var(--bt-sage-text); }
-.tal.dupe b { color: var(--bt-brass-text); }
-.tal.miss b { color: var(--bt-slate-text); }
+.tal.ok b   { color: var(--bt-teal-text); }
+.tal.dupe b { color: var(--bt-amber-text); }
+.tal.miss b { color: var(--bt-ice-text); }
 .tal.err b  { color: var(--bt-bad); }
 
 /* ══ SPECIFY EDITION ══════════════════════════════════════════════════════
@@ -800,10 +825,10 @@ tbody td[data-col="title"] { position: relative; }
 
 /* The edition already pinned to this item. A left marker rather than a fill,
    so it survives the hover background without a second colour. */
-.edrow.picked { background: var(--bt-brass-wash); }
+.edrow.picked { background: var(--bt-teal-wash); }
 .edrow.picked::before {
   content: ""; position: absolute; left: 0; top: 0; bottom: 0;
-  width: var(--bt-marker-w); background: var(--bt-brass);
+  width: var(--bt-marker-w); background: var(--bt-teal);
 }
 .edrow.picked .ed-pub { font-weight: 600; }
 

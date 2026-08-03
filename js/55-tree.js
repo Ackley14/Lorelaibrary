@@ -84,9 +84,22 @@ BT.tree = (function () {
       /* Same reading of the date as #/up uses, or the number on the row
          disagrees with the length of the list it opens. Order matters here:
          SK_UNKNOWN sorts above every real key, so "no date" has to be tested
-         before "in the future" or every undated book is also upcoming. */
-      if (it.release.sortKey >= BT.util.SK_UNKNOWN) undated++;
-      else if (it.release.sortKey >= today) upcoming++;
+         before "in the future" or every undated book is also upcoming.
+
+         `release` is read defensively because it is genuinely optional: 12-repo
+         (`item.release && …` in normalizeIndexable) and 38-normalize
+         (withDefaults stamps `user` and `tracking` but NOT `release`) both
+         treat it that way, and this line was the only place in the app that
+         did not. A record without one is then a record with no known date,
+         which is exactly what SK_UNKNOWN means — so the missing field has an
+         honest answer and does not need to be an exception. It does need to not
+         throw: this loop builds the index tree, which is the app's whole
+         navigation, so one malformed row taking it out leaves every shelf
+         unreachable rather than mis-counted by one. */
+      const sk = (it.release && it.release.sortKey) != null
+        ? it.release.sortKey : BT.util.SK_UNKNOWN;
+      if (sk >= BT.util.SK_UNKNOWN) undated++;
+      else if (sk >= today) upcoming++;
     }
 
     return [

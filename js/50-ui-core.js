@@ -671,6 +671,25 @@ BT.ui = (function () {
     return item;
   }
 
+  /* The same seam, for the same reason, one module along — and this one was
+     missed. 45-alerts.js owns snapshotOf() and also lands in M4, so a bare
+     `BT.alerts.snapshotOf(item)` threw a TypeError on every single add: the
+     item was already written by then, so the library gained the book while the
+     caller got a rejected promise and the user got no toast, no Undo and no
+     hydrate. #/search had grown its own try/catch around addItem to survive
+     it, which hid the fault; the inspector's "Add to library" had not, so that
+     button simply failed.
+
+     A missing snapshotter means there is nothing to compare against yet, so the
+     honest baseline is the marker alone. When 45-alerts arrives it fills in the
+     fields it wants to diff, and nothing here changes. */
+  function baselineSnapshot(item) {
+    const snap = (BT.alerts && typeof BT.alerts.snapshotOf === 'function')
+      ? BT.alerts.snapshotOf(item)
+      : { uid: item.uid };
+    return Object.assign({ baseline: 1 }, snap);
+  }
+
   /* `opts.scope` IS THE CALLER'S TO STATE, never guessed from the stub.
 
      A scan read one specific physical copy — one ISBN, one printing, with the
@@ -695,7 +714,7 @@ BT.ui = (function () {
        first sighting of a record reads as a change against an empty snapshot,
        and adding a book announces that its title, its date and its page count
        all just "changed". */
-    await BT.repo.putSnapshot(Object.assign({ baseline: 1 }, BT.alerts.snapshotOf(item)));
+    await BT.repo.putSnapshot(baselineSnapshot(item));
 
     toast(`Added “${BT.util.truncate(item.title, 40)}”`, {
       actionLabel: 'Undo',

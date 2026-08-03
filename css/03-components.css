@@ -29,8 +29,8 @@
 }
 .filter input::placeholder { color: var(--bt-text-faint); }
 .filter input:focus {
-  outline: none; border-color: var(--bt-brass-edge);
-  box-shadow: 0 0 0 3px var(--bt-brass-wash);
+  outline: none; border-color: var(--bt-teal-edge);
+  box-shadow: 0 0 0 3px var(--bt-teal-wash);
 }
 
 .tree { padding: 2px var(--bt-space-3) 20px; user-select: none; }
@@ -63,12 +63,12 @@
   font-family: var(--bt-font-mono); font-size: 10px; color: var(--bt-text-faint);
   font-variant-numeric: tabular-nums; flex: 0 0 auto;
 }
-.row.is-sel { background: var(--bt-brass-wash); color: var(--bt-text-primary); font-weight: 500; }
-.row.is-sel .n { color: var(--bt-brass-text); }
+.row.is-sel { background: var(--bt-teal-wash); color: var(--bt-text-primary); font-weight: 500; }
+.row.is-sel .n { color: var(--bt-teal-text); }
 .row.is-sel::before {
   content: ""; position: absolute; left: -8px; top: 50%; transform: translateY(-50%);
   width: var(--bt-marker-w); height: 15px; border-radius: 0 3px 3px 0;
-  background: var(--bt-brass);
+  background: var(--bt-teal);
 }
 .row.is-focus { box-shadow: inset 0 0 0 1.5px var(--bt-focus-ring); }
 
@@ -97,13 +97,13 @@
 }
 .dot.fill { background: currentColor; }
 
-/* Reading status. `want` is the cool end of the palette because nothing has
-   happened yet; `reading` takes the brand hue because it is the one state the
-   app is actually about. finished and dropped are BOTH faint on purpose — a
+/* Reading status. `want` is ice, the same hue MovieTrak spends on an unwatched
+   title; `reading` takes the brand teal because it is the one state the app is
+   actually about. finished and dropped are BOTH faint on purpose — a
    closed book should recede, and the tree already distinguishes them by
    section, so spending a hue here would only add noise to a long shelf. */
-.c-want { color: var(--bt-slate); }
-.c-reading { color: var(--bt-brass); }
+.c-want { color: var(--bt-ice); }
+.c-reading { color: var(--bt-teal); }
 .c-finished { color: var(--bt-text-faint); }
 .c-dropped { color: var(--bt-text-faint); }
 
@@ -115,14 +115,16 @@
 .c-fantasysf { color: var(--bt-genre-fantasysf); }
 .c-mystery { color: var(--bt-genre-mystery); }
 .c-romance { color: var(--bt-genre-romance); }
-.c-general { color: var(--bt-genre-general); }
+/* No --bt-genre-general alias exists, and that is the point: 'general' is the
+   bucket a book lands in when nothing better fit, so it is hueless. */
+.c-general { color: var(--bt-text-muted); }
 
-.star { flex: 0 0 auto; font-size: 10px; color: var(--bt-brass); }
+.star { flex: 0 0 auto; font-size: 10px; color: var(--bt-amber); }
 .hash { flex: 0 0 auto; font-family: var(--bt-font-mono); font-size: 11px; color: var(--bt-text-faint); }
 .badge {
   flex: 0 0 auto; min-width: 15px; height: 15px; padding: 0 4px;
   display: grid; place-items: center; border-radius: var(--bt-radius-pill);
-  background: var(--bt-brass); color: var(--bt-surface-canvas);
+  background: var(--bt-teal); color: var(--bt-surface-canvas);
   font-family: var(--bt-font-mono); font-size: 9px; font-weight: 700;
 }
 
@@ -186,7 +188,7 @@ kbd {
 }
 .chip:hover { border-color: var(--bt-line-strong); color: var(--bt-text-primary); }
 .chip[aria-pressed="true"] {
-  background: var(--bt-brass-wash); border-color: var(--bt-brass-edge); color: var(--bt-brass-text);
+  background: var(--bt-teal-wash); border-color: var(--bt-teal-edge); color: var(--bt-teal-text);
 }
 .spacer { flex: 1; }
 .count { font-family: var(--bt-font-mono); font-size: var(--bt-fs-mini); color: var(--bt-text-muted); }
@@ -210,8 +212,8 @@ tbody td {
 }
 tbody tr { cursor: pointer; }
 tbody tr:hover td { background: var(--bt-surface-hover); }
-tbody tr.is-sel td { background: var(--bt-brass-wash); }
-tbody tr.is-sel td:first-child { box-shadow: inset var(--bt-marker-w) 0 0 var(--bt-brass); }
+tbody tr.is-sel td { background: var(--bt-teal-wash); }
+tbody tr.is-sel td:first-child { box-shadow: inset var(--bt-marker-w) 0 0 var(--bt-teal); }
 td.num { text-align: right; }
 
 .title-cell { display: flex; align-items: center; gap: 9px; min-width: 0; }
@@ -231,24 +233,24 @@ td.num { text-align: right; }
   text-transform: uppercase; font-weight: 600;
 }
 .tag.fiction {
-  color: var(--bt-genre-fiction); background: var(--bt-ink-wash);
-  box-shadow: inset 0 0 0 1px var(--bt-ink-edge);
+  color: var(--bt-genre-fiction); background: var(--bt-ice-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-ice-edge);
 }
 .tag.nonfiction {
-  color: var(--bt-genre-nonfiction); background: var(--bt-sage-wash);
-  box-shadow: inset 0 0 0 1px var(--bt-sage-edge);
+  color: var(--bt-genre-nonfiction); background: var(--bt-moss-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-moss-edge);
 }
 .tag.fantasysf {
-  color: var(--bt-genre-fantasysf); background: var(--bt-plum-wash);
-  box-shadow: inset 0 0 0 1px var(--bt-plum-edge);
+  color: var(--bt-genre-fantasysf); background: var(--bt-violet-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-violet-edge);
 }
 .tag.mystery {
-  color: var(--bt-genre-mystery); background: var(--bt-slate-wash);
-  box-shadow: inset 0 0 0 1px var(--bt-slate-edge);
+  color: var(--bt-genre-mystery); background: var(--bt-teal-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-teal-edge);
 }
 .tag.romance {
-  color: var(--bt-genre-romance); background: var(--bt-rose-wash);
-  box-shadow: inset 0 0 0 1px var(--bt-rose-edge);
+  color: var(--bt-genre-romance); background: var(--bt-coral-wash);
+  box-shadow: inset 0 0 0 1px var(--bt-coral-edge);
 }
 /* 'general' is the bucket a book lands in when nothing better fit, so it gets
    the same hueless treatment as .prec.unknown below. Giving it a colour would
@@ -305,7 +307,7 @@ td.num { text-align: right; }
   transition: transform var(--bt-dur) var(--bt-ease), box-shadow var(--bt-dur);
 }
 .card:hover .poster { transform: translateY(-3px); box-shadow: var(--bt-shadow-lift); }
-.card.is-sel .poster { box-shadow: 0 0 0 2px var(--bt-brass), var(--bt-shadow-lift); }
+.card.is-sel .poster { box-shadow: 0 0 0 2px var(--bt-teal), var(--bt-shadow-lift); }
 .card .ct {
   font-size: var(--bt-fs-sm); font-weight: 500; color: var(--bt-text-primary); line-height: 1.25;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
@@ -325,7 +327,7 @@ td.num { text-align: right; }
       makes a grid of unfetched covers still navigable by muscle memory. ─── */
 .poster {
   position: relative; overflow: hidden; border-radius: 3px;
-  background: linear-gradient(158deg, var(--a, #4A3E2E), var(--b, #1A140D));
+  background: linear-gradient(158deg, var(--a, #3a4a52), var(--b, #12181c));
   box-shadow: inset 0 0 0 1px var(--bt-poster-edge);
 }
 .poster img { width: 100%; height: 100%; object-fit: cover; position: relative; z-index: 2; }
@@ -347,7 +349,7 @@ td.num { text-align: right; }
    wide both turn to mud, and the hue pair alone is enough to tell two rows
    apart while scanning. */
 .chipart {
-  background: linear-gradient(158deg, var(--a, #4A3E2E), var(--b, #1A140D));
+  background: linear-gradient(158deg, var(--a, #3a4a52), var(--b, #12181c));
   box-shadow: inset 0 0 0 1px var(--bt-poster-edge);
   position: relative; overflow: hidden;
 }
@@ -373,11 +375,11 @@ td.num { text-align: right; }
 .is-selecting .rowsel { display: grid; }
 .rowsel svg { width: 9px; height: 9px; }
 .rowsel[aria-checked="true"] {
-  background: var(--bt-brass); border-color: var(--bt-brass); color: var(--bt-surface-canvas);
+  background: var(--bt-teal); border-color: var(--bt-teal); color: var(--bt-surface-canvas);
 }
 tbody tr.is-checked td { background: var(--bt-surface-hover); }
-tbody tr.is-checked td:first-child { box-shadow: inset var(--bt-marker-w) 0 0 var(--bt-brass-edge); }
-.card.is-checked .poster { box-shadow: 0 0 0 2px var(--bt-brass-edge); }
+tbody tr.is-checked td:first-child { box-shadow: inset var(--bt-marker-w) 0 0 var(--bt-teal-edge); }
+.card.is-checked .poster { box-shadow: 0 0 0 2px var(--bt-teal-edge); }
 
 /* Pinned to the pane, not the viewport (see .list-pane). It sits ABOVE the
    list rather than pushing it, because the row you just clicked must not
@@ -396,7 +398,7 @@ tbody tr.is-checked td:first-child { box-shadow: inset var(--bt-marker-w) 0 0 va
 @keyframes slideup { from { transform: translateY(100%); } }
 .selectbar .n {
   font-family: var(--bt-font-mono); font-size: var(--bt-fs-md); font-weight: 700;
-  color: var(--bt-brass-text); font-variant-numeric: tabular-nums;
+  color: var(--bt-teal-text); font-variant-numeric: tabular-nums;
 }
 .selectbar .lbl { font-size: var(--bt-fs-sm); color: var(--bt-text-muted); }
 .selectbar .acts { display: flex; align-items: center; gap: var(--bt-space-2); flex-wrap: wrap; }
@@ -432,19 +434,19 @@ tbody tr.is-checked td:first-child { box-shadow: inset var(--bt-marker-w) 0 0 va
   font-size: 8.5px; letter-spacing: .13em; text-transform: uppercase; font-weight: 700;
   padding: 2px 5px; border-radius: var(--bt-radius-sm); white-space: nowrap;
 }
-.prec.day { background: var(--bt-sage-wash); color: var(--bt-sage-text); box-shadow: inset 0 0 0 1px var(--bt-sage-edge); }
-.prec.month { background: var(--bt-brass-wash); color: var(--bt-brass-text); box-shadow: inset 0 0 0 1px var(--bt-brass-edge); }
+.prec.day { background: var(--bt-teal-wash); color: var(--bt-teal-text); box-shadow: inset 0 0 0 1px var(--bt-teal-edge); }
+.prec.month { background: var(--bt-amber-wash); color: var(--bt-amber-text); box-shadow: inset 0 0 0 1px var(--bt-amber-edge); }
 /* Quarter shares month's hue. Publishers announce whole seasons ("Fall 2027")
    and a season is just a coarse month, so splitting the two into different
    colours would imply a distinction the reader does not need to make. */
-.prec.quarter { background: var(--bt-brass-wash); color: var(--bt-brass-text); box-shadow: inset 0 0 0 1px var(--bt-brass-edge); }
-.prec.year { background: var(--bt-rose-wash); color: var(--bt-rose-text); box-shadow: inset 0 0 0 1px var(--bt-rose-edge); }
+.prec.quarter { background: var(--bt-amber-wash); color: var(--bt-amber-text); box-shadow: inset 0 0 0 1px var(--bt-amber-edge); }
+.prec.year { background: var(--bt-coral-wash); color: var(--bt-coral-text); box-shadow: inset 0 0 0 1px var(--bt-coral-edge); }
 .prec.tba, .prec.unknown { background: var(--bt-surface-sunk); color: var(--bt-text-muted); box-shadow: inset 0 0 0 1px var(--bt-line-rule); }
 
-/* The waterline — Folio's three-segment gauge, filling only what is stored. */
+/* The waterline — Tide's three-segment gauge, filling only what is stored. */
 .wl { display: inline-flex; flex-direction: column-reverse; gap: 2px; vertical-align: middle; margin-right: 8px; flex: 0 0 auto; }
 .wl i { display: block; width: 10px; height: 2.5px; border-radius: 1px; background: var(--bt-line-rule); }
-.wl i.f { background: var(--bt-brass); }
+.wl i.f { background: var(--bt-teal); }
 .datecell { display: flex; align-items: center; }
 
 /* Drift — a publication date that moved. The one place in the whole app where
@@ -454,8 +456,8 @@ tbody tr.is-checked td:first-child { box-shadow: inset var(--bt-marker-w) 0 0 va
   display: inline-flex; align-items: center; gap: 3px; padding: 1px 5px;
   border-radius: var(--bt-radius-sm); font-family: var(--bt-font-mono); font-size: var(--bt-fs-micro);
 }
-.drift.later { color: var(--bt-rose-text); background: var(--bt-rose-wash); box-shadow: inset 0 0 0 1px var(--bt-rose-edge); }
-.drift.earlier { color: var(--bt-sage-text); background: var(--bt-sage-wash); box-shadow: inset 0 0 0 1px var(--bt-sage-edge); }
+.drift.later { color: var(--bt-coral-text); background: var(--bt-coral-wash); box-shadow: inset 0 0 0 1px var(--bt-coral-edge); }
+.drift.earlier { color: var(--bt-teal-text); background: var(--bt-teal-wash); box-shadow: inset 0 0 0 1px var(--bt-teal-edge); }
 
 /* ══ FEEDBACK ═════════════════════════════════════════════════════════════ */
 
@@ -468,23 +470,22 @@ tbody tr.is-checked td:first-child { box-shadow: inset var(--bt-marker-w) 0 0 va
 
 .errorbox {
   margin: var(--bt-space-6);
-  border: var(--bt-rule-w) solid var(--bt-rose-edge); border-left-width: var(--bt-marker-w);
-  border-radius: var(--bt-radius); background: var(--bt-rose-wash);
+  border: var(--bt-rule-w) solid var(--bt-coral-edge); border-left-width: var(--bt-marker-w);
+  border-radius: var(--bt-radius); background: var(--bt-coral-wash);
   padding: var(--bt-space-4) var(--bt-space-5); font-size: var(--bt-fs-base);
 }
-.errorbox strong { display: block; color: var(--bt-rose-text); margin-bottom: 2px; }
+.errorbox strong { display: block; color: var(--bt-coral-text); margin-bottom: 2px; }
 
-/* Brass is the brand hue AND the caution hue, which would normally be a
-   mistake. It survives because a warning is never identified by colour alone
-   here — it always carries the marker rule on the left edge and a bold label
-   line, and brand brass never appears as a filled panel like this one. */
+/* Amber is the caution hue and nothing else — it is the one hue in the set that
+   is never a control and never a brand mark, so a filled amber panel can only
+   mean "read this". Teal carries the brand; coral carries failure. */
 .warnbox {
-  border: var(--bt-rule-w) solid var(--bt-brass-edge); border-left-width: var(--bt-marker-w);
-  border-radius: var(--bt-radius); background: var(--bt-brass-wash);
+  border: var(--bt-rule-w) solid var(--bt-amber-edge); border-left-width: var(--bt-marker-w);
+  border-radius: var(--bt-radius); background: var(--bt-amber-wash);
   padding: var(--bt-space-4) var(--bt-space-5); font-size: var(--bt-fs-base);
   margin-bottom: var(--bt-space-5); color: var(--bt-text-secondary);
 }
-.warnbox strong { display: block; color: var(--bt-brass-text); margin-bottom: 2px; }
+.warnbox strong { display: block; color: var(--bt-amber-text); margin-bottom: 2px; }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--bt-space-2);
@@ -496,14 +497,14 @@ tbody tr.is-checked td:first-child { box-shadow: inset var(--bt-marker-w) 0 0 va
 }
 .btn:hover { border-color: var(--bt-line-strong); color: var(--bt-text-primary); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
-/* Brass inverts between themes — dark gold on paper, bright gold on ink — so
-   the label has to invert with it or one of the two themes loses contrast. */
-.btn--primary { background: var(--bt-brass); border-color: var(--bt-brass); color: #1A1207; font-weight: 600; }
+/* Teal inverts between themes — deep on paper, bright on deep water — so the
+   label has to invert with it or one of the two themes loses contrast. */
+.btn--primary { background: var(--bt-teal); border-color: var(--bt-teal); color: #04191a; font-weight: 600; }
 :root[data-theme="light"] .btn--primary { color: #fff; }
-.btn--primary:hover { filter: brightness(1.08); color: #1A1207; }
+.btn--primary:hover { filter: brightness(1.08); color: #04191a; }
 :root[data-theme="light"] .btn--primary:hover { color: #fff; }
 .btn--ghost { background: none; border-color: transparent; }
-.btn--danger:hover { border-color: var(--bt-rose-edge); color: var(--bt-rose-text); }
+.btn--danger:hover { border-color: var(--bt-coral-edge); color: var(--bt-coral-text); }
 .btn--sm { height: 22px; padding: 0 var(--bt-space-3); font-size: var(--bt-fs-sm); }
 
 .skel {
@@ -531,23 +532,23 @@ tbody tr.is-checked td:first-child { box-shadow: inset var(--bt-marker-w) 0 0 va
   background: var(--bt-surface-glass);
   backdrop-filter: var(--bt-glass-blur); -webkit-backdrop-filter: var(--bt-glass-blur);
   border: var(--bt-rule-w) solid var(--bt-line-rule);
-  border-left: var(--bt-marker-w) solid var(--bt-brass);
+  border-left: var(--bt-marker-w) solid var(--bt-teal);
   border-radius: var(--bt-radius); box-shadow: var(--bt-shadow-drawer);
   font-size: var(--bt-fs-base); color: var(--bt-text-primary);
   animation: rise var(--bt-dur) var(--bt-ease);
 }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
-.toast--bad { border-left-color: var(--bt-rose); }
-.toast button { color: var(--bt-brass-text); text-decoration: underline; font-size: var(--bt-fs-sm); }
+.toast--bad { border-left-color: var(--bt-coral); }
+.toast button { color: var(--bt-teal-text); text-decoration: underline; font-size: var(--bt-fs-sm); }
 
 .banner {
   display: flex; align-items: center; gap: var(--bt-space-4);
   padding: var(--bt-space-3) var(--bt-space-6);
-  background: var(--bt-brass-wash); color: var(--bt-text-primary);
-  border-bottom: var(--bt-rule-w) solid var(--bt-brass-edge);
+  background: var(--bt-amber-wash); color: var(--bt-text-primary);
+  border-bottom: var(--bt-rule-w) solid var(--bt-amber-edge);
   font-size: var(--bt-fs-base);
 }
-.banner button { margin-left: auto; color: var(--bt-brass-text); text-decoration: underline; }
+.banner button { margin-left: auto; color: var(--bt-amber-text); text-decoration: underline; }
 
 /* A section divider inside the table. Deliberately NOT sticky. The thead
    already sticks at top:0 and its height changes with theme and pointer type,

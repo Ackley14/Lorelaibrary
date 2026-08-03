@@ -23,10 +23,10 @@
      yesterday's bug back to you. -->
 
 <!-- Tints the browser chrome to match whichever ground the app is painting:
-     Vellum's parchment, or Marginalia's ink. These two values are the
+     low tide's shell, or deep water's ground. These two values are the
      --bt-surface-canvas of each theme and must be changed with them. -->
-<meta name="theme-color" content="#FAF8F3" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#14110E" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F8F9F8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#071619" media="(prefers-color-scheme: dark)">
 
 <!-- Theme is resolved BEFORE the stylesheets paint. Doing this in a deferred
      script would flash the wrong ground colour on every load.
@@ -62,17 +62,17 @@
   <!-- ── Pane 1 · the index tree ────────────────────────────────────────── -->
   <aside class="pane tree-pane" id="treePane">
     <div class="pane-h">
-      <a class="brand" href="#/library"><b>BookTrak</b><i>Folio</i></a>
+      <a class="brand" href="#/library"><b>BookTrak</b><i>Tide</i></a>
       <div class="tswitch" role="group" aria-label="Colour theme" id="tswitch">
-        <button type="button" data-theme-set="light" aria-pressed="false" title="Vellum — pale parchment">
+        <button type="button" data-theme-set="light" aria-pressed="false" title="Low tide — bleached shell">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
-          </svg>Vellum
+          </svg>Light
         </button>
-        <button type="button" data-theme-set="dark" aria-pressed="false" title="Marginalia — lamplight on ink">
+        <button type="button" data-theme-set="dark" aria-pressed="false" title="Deep water — teal black">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/>
-          </svg>Margin
+          </svg>Dark
         </button>
       </div>
     </div>
@@ -167,11 +167,21 @@
 <script src="js/10-db.js"></script>
 <script src="js/12-repo.js"></script>
 <!-- Later milestones slot in here, still in numeric order: 15-crypto and
-     16-cloud (encrypted passphrase sync), 20-openlibrary / 22-googlebooks /
-     38-normalize (catalogue clients), 40-recommend / 45-alerts / 48-sync. -->
+     16-cloud (encrypted passphrase sync). -->
+<script src="js/20-openlibrary.js"></script>
+<!-- 22-googlebooks belongs on this line when it arrives (M3). It is optional
+     enrichment behind a user-supplied key, never a fallback, so the catalogue
+     below works whether or not it is ever loaded. -->
+<script src="js/38-normalize.js"></script>
+<!-- …and here: 40-recommend / 45-alerts / 48-sync. -->
 <script src="js/49-router.js"></script>
 <script src="js/50-ui-core.js"></script>
 <script src="js/55-tree.js"></script>
 <script src="js/56-inspector.js"></script>
-<!-- …and here: 58-scanner, the 6x view files, 70-view-unlock. -->
+<!-- 58-scanner slots in here (M3), still ahead of the views that link to it. -->
+<script src="js/61-view-search.js"></script>
+<script src="js/62-view-list.js"></script>
+<!-- …and the remaining view files after these, in numeric order: 64-view-up,
+     66-view-alerts, 67-view-people, 68-view-stats, 69-view-settings,
+     70-view-unlock. -->
 <script src="js/90-boot.js"></script>

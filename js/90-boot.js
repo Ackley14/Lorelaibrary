@@ -1,12 +1,16 @@
 /* ══════════════════════════════════════════════════════════════════════════
    Boot: routes, storage probe, background refresh, global error handling.
 
-   M1 note — the shell is complete and every destination in the index tree
-   resolves, but the view modules (61–70, 75) have not been written yet. Every
-   route below is registered exactly once, here, and each one renders a short
-   placeholder naming the milestone it arrives in. The placeholders are chosen
-   at NAVIGATION time rather than at registration, so the day a real view
-   module lands on the page it simply wins — no line in this file changes.
+   M2 note — search and the list view have landed, and the mechanism below did
+   what it was built to do: naming the module is the whole diff. Every route is
+   still registered exactly once, here, and the ones whose views are not
+   written yet (/scan, /up, /alerts, /people, /stats, /settings, /unlock) go on
+   rendering a short placeholder naming the milestone they arrive in.
+
+   Resolution happens at NAVIGATION time rather than at registration, which is
+   why adding a view is a one-word change: the day the module lands on the page
+   it simply wins. Keep it that way — a handler that captures BT.viewX at
+   registration pins whatever was there when startApp() ran.
    ══════════════════════════════════════════════════════════════════════════ */
 
 BT.boot = (function () {
@@ -36,10 +40,19 @@ BT.boot = (function () {
      library has finished arriving from anywhere else, and a handler captured
      at that moment would pin the placeholder in place for the rest of the
      session even after the real view existed. Reading BT[name] per call costs
-     one property lookup and removes the whole class of problem. */
-  function viewOr(name, fallback) {
+     one property lookup and removes the whole class of problem.
+
+     `names` may be a list, and one route uses that: the list view is
+     `BT.viewList` here, but it is a port of MovieTrak's `MT.viewLibrary` and
+     the older name is the one this file shipped against in M1. Accepting both
+     costs an array scan and closes the one failure that would be invisible —
+     a renamed export does not throw, it just leaves the M2 placeholder on the
+     front door for ever. */
+  function viewOr(names, fallback) {
+    const list = Array.isArray(names) ? names : [names];
     return function (params, query, alive) {
-      const mod = BT[name];
+      let mod = null;
+      for (const n of list) { if (BT[n] && BT[n].render) { mod = BT[n]; break; } }
       const render = (mod && mod.render) || fallback;
       return render.call(mod || null, params, query, alive);
     };
@@ -48,7 +61,7 @@ BT.boot = (function () {
   function routes() {
     /* Library is the front door. There is no separate "home" — the index tree
        is always visible, so a dashboard would just be a second navigation. */
-    const library = viewOr('viewLibrary', stub(
+    const library = viewOr(['viewList', 'viewLibrary'], stub(
       ['Library', 'All books'], 'The library goes here', 'M2',
       'Every book you are tracking, filtered by whichever shelf you picked in the index — status, genre, format, pile or tag. Arrives in'));
 
