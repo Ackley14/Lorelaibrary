@@ -1,26 +1,38 @@
 /* ══════════════════════════════════════════════════════════════════════════
    Boot: routes, storage probe, background refresh, global error handling.
 
-   M2 note — search and the list view have landed, and the mechanism below did
-   what it was built to do: naming the module is the whole diff. Every route is
-   still registered exactly once, here, and the ones whose views are not
-   written yet (/scan, /up, /alerts, /people, /stats, /settings, /unlock) go on
-   rendering a short placeholder naming the milestone they arrive in.
+   M3 note — /scan now has a real view (BT.viewScan, in 75-view-scan.js) and
+   the mechanism below did what it was built to do a second time: the route
+   line did not have to change at all. Every route is still registered exactly
+   once, here, and the ones whose views are not written yet (/up, /alerts,
+   /people, /stats, /settings, /unlock) go on rendering a short placeholder
+   naming the milestone they arrive in.
 
    Resolution happens at NAVIGATION time rather than at registration, which is
    why adding a view is a one-word change: the day the module lands on the page
    it simply wins. Keep it that way — a handler that captures BT.viewX at
    registration pins whatever was there when startApp() ran.
+
+   The name each view file actually exports is CHECKED against this file when
+   the view lands, not assumed. M2 shipped with `viewList` written here and
+   `viewLibrary` implemented, which does not throw — it silently left the
+   placeholder on the front door. `viewOr` now takes a list for that route, and
+   the rule for every future milestone is to open the file and read the
+   `BT.x = (function ()` line rather than trusting the plan.
    ══════════════════════════════════════════════════════════════════════════ */
 
 BT.boot = (function () {
   const signedIn = () => !!(BT.crypto && BT.crypto.isUnlocked && BT.crypto.isUnlocked());
 
-  /* ── M1 placeholders ───────────────────────────────────────────────────
+  /* ── Placeholders ──────────────────────────────────────────────────────
      A missing screen is a promise, not an error. Each stub sets the same
      breadcrumb and pane actions the real view will set, so navigating around
      the shell already feels like the finished app and the tree's selection
-     logic is exercised for real. */
+     logic is exercised for real.
+
+     They outlive the milestone they name. Once a view exists its stub becomes
+     the answer to "that file failed to parse" — the route still renders a
+     sentence instead of a blank pane and a TypeError. */
   function stub(crumb, title, milestone, body, actions) {
     return function () {
       BT.ui.crumb(crumb);
@@ -47,7 +59,11 @@ BT.boot = (function () {
      the older name is the one this file shipped against in M1. Accepting both
      costs an array scan and closes the one failure that would be invisible —
      a renamed export does not throw, it just leaves the M2 placeholder on the
-     front door for ever. */
+     front door for ever.
+
+     /scan is a single name because it was verified rather than guessed:
+     75-view-scan.js opens `BT.viewScan = (function () {`. Adding aliases on
+     spec would only make the next mismatch harder to see. */
   function viewOr(names, fallback) {
     const list = Array.isArray(names) ? names : [names];
     return function (params, query, alive) {
@@ -78,7 +94,14 @@ BT.boot = (function () {
 
     /* Scanning is discovery through a different door. A barcode names ONE
        edition, so what it adds is scope `closed`; search adds the work itself
-       and leaves the edition open. */
+       and leaves the edition open. That distinction is the whole of
+       12-repo.js's pinned-vs-candidate split, and it is why this is a route of
+       its own rather than a button on /search.
+
+       The route is all that lives here. The CAMERA does not: it is an overlay
+       (58-scanner.js) that the view opens without navigating, because iOS
+       standalone PWAs revoke camera permission on a location.hash change
+       (WebKit 215884). Routing to a scanner would close the scanner. */
     BT.router.on('/scan', viewOr('viewScan', stub(
       ['Discover', 'Scan'], 'Scan a barcode', 'M3',
       'Point a scanner or a camera at an ISBN and BookTrak adds that exact printing — publisher, page count and cover — rather than the work in general. Arrives in')));

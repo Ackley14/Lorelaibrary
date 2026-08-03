@@ -150,12 +150,41 @@
 <div class="scrim" id="scrim"></div>
 <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
-<!-- Host for the ISBN scanner overlay, and empty on purpose: opening a camera
-     means a permission prompt and a live video track, so nothing is built and
-     no camera light comes on until someone actually asks to scan. It also
-     needs a secure context — over file:// there is no camera at all, and the
-     scanner has to offer typing the ISBN instead. -->
+<!-- Host for the ISBN scanner overlay (js/58-scanner.js), and empty on purpose:
+     opening a camera means a permission prompt and a live video track, so
+     nothing is built and no camera light comes on until someone actually asks
+     to scan. It also needs a secure context — over file:// there is no camera
+     at all, and the scanner has to offer typing the ISBN instead.
+
+     It lives out here, a sibling of .app rather than a child of the view, so
+     that opening it never rewrites the pane underneath and never touches the
+     route: see the WebKit note by the script tag. -->
 <div class="scanner" id="scanner" hidden></div>
+
+<!-- Vendored third-party decoder, deliberately OUTSIDE the numeric convention
+     because it is not ours: the numbers describe BookTrak's own dependency
+     graph, and slotting someone else's bundle into it would imply we can
+     renumber or refactor it. It loads first because 58-scanner.js reads
+     `window.BarcodeDetectionAPI` while deciding which decode path exists —
+     and because it is the file that must override the bundle's hardcoded
+     jsdelivr default for the wasm before anything decodes. js/vendor/README.md
+     records the versions, licences, sizes and that override in full.
+
+     It is vendored — a file in this repository, not a CDN tag — for three
+     reasons. `BarcodeDetector` simply does not exist on Chrome or Edge for
+     Windows or Linux desktop (the constructor is undefined; it is macOS,
+     ChromeOS and Android-with-Play-Services only), so this is the PRIMARY
+     decode path on the machine this app is developed on, not a fallback. A
+     CDN would put a third party between a user and their own camera, and its
+     wasm would be fetched from a foreign origin on the one screen where the
+     permission prompt is already asking for trust. And a pinned local copy is
+     the only version that cannot change under us between two page loads —
+     `3.2.1` in the filename is there so an upgrade is a visible diff.
+
+     Its wasm sits next to it in js/vendor/ and is resolved relative to this
+     script, which is why the file is not renamed: the bundle looks for its
+     sibling by name. -->
+<script src="js/vendor/barcode-detector-3.2.1.min.js"></script>
 
 <!-- Classic scripts, numeric order, one BT global. The order IS the dependency
      graph — there are no modules to express it, because module scripts are
@@ -169,18 +198,37 @@
 <!-- Later milestones slot in here, still in numeric order: 15-crypto and
      16-cloud (encrypted passphrase sync). -->
 <script src="js/20-openlibrary.js"></script>
-<!-- 22-googlebooks belongs on this line when it arrives (M3). It is optional
+<!-- 22-googlebooks belongs on this line when it arrives. It slipped past M3:
+     nothing on the scan path wants it, and it cannot do anything at all until
+     there is a Settings screen to paste a key into (M5). It is optional
      enrichment behind a user-supplied key, never a fallback, so the catalogue
      below works whether or not it is ever loaded. -->
 <script src="js/38-normalize.js"></script>
+<!-- The scan PIPELINE, not the camera: it turns a string of digits into a
+     library change and knows nothing about video. It sits here, above the UI
+     layer, because it is the half that has to be testable without hardware —
+     everything below can be driven by hand from the console. -->
+<script src="js/39-scan.js"></script>
 <!-- …and here: 40-recommend / 45-alerts / 48-sync. -->
 <script src="js/49-router.js"></script>
 <script src="js/50-ui-core.js"></script>
 <script src="js/55-tree.js"></script>
 <script src="js/56-inspector.js"></script>
-<!-- 58-scanner slots in here (M3), still ahead of the views that link to it. -->
+<!-- The camera overlay, and the editions picker it hands off to. Both are
+     ahead of the views that open them.
+
+     58-scanner is an OVERLAY and not a route on purpose: iOS standalone PWAs
+     revoke camera permission the moment location.hash changes (WebKit 215884,
+     still open), so nothing may navigate while a MediaStream is live. It
+     parks the router with BT.router.suspend() instead. -->
+<script src="js/58-scanner.js"></script>
+<script src="js/59-editions.js"></script>
 <script src="js/61-view-search.js"></script>
 <script src="js/62-view-list.js"></script>
+<!-- The scan screen: the scan log, manual ISBN entry, and the button that
+     opens the overlay above. Numbered 75 rather than 63 because it is a
+     destination of its own rather than another way of listing the library. -->
+<script src="js/75-view-scan.js"></script>
 <!-- …and the remaining view files after these, in numeric order: 64-view-up,
      66-view-alerts, 67-view-people, 68-view-stats, 69-view-settings,
      70-view-unlock. -->

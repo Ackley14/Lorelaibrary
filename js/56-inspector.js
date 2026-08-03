@@ -345,6 +345,19 @@ BT.inspector = (function () {
     const pages = item.pageCount > 0 ? item.pageCount : null;
     const fmt = BT.ui.formatOf(item);
 
+    /* TWO ways out of `open`, and both are drawn because they fail in
+       different places. The picker is the only option for a copy whose barcode
+       is torn, foreign, or older than retail barcodes on books; the scan is the
+       only bearable option for a work with 481 catalogued editions, which is
+       what The Hobbit actually has. See scanPin() for the seam.
+
+       The scan button is omitted entirely — not disabled, not apologetic —
+       when there is no camera to open: 58-scanner.js absent, or present and
+       reporting no secure context (getUserMedia hands out nothing over
+       file://, and a LAN address counts as insecure even on your own network).
+       An affordance whose only possible outcome is an excuse is worse than no
+       affordance, and #/scan already explains that case at length for the
+       reader who came looking for it. */
     if (!closed) {
       return `
         <div class="blk">
@@ -354,8 +367,9 @@ BT.inspector = (function () {
             page count, cover, publisher and ISBN, so none of those is claimed
             here until you say which one is on your shelf.
           </div>
-          <div style="margin-top:var(--bt-space-3)">
+          <div style="margin-top:var(--bt-space-3);display:flex;gap:var(--bt-space-2);flex-wrap:wrap">
             <button class="btn btn--sm" type="button" data-act="edition">Specify edition</button>
+            ${scannerReady() ? '<button class="btn btn--sm" type="button" data-act="scanpin">Scan the copy I own</button>' : ''}
           </div>
         </div>`;
     }
@@ -389,6 +403,157 @@ BT.inspector = (function () {
         <span class="faint mono" style="font-size:var(--bt-fs-micro)">${esc(BT.util.timeAgo(x.observedAt))}</span>
       </div>`).join('')}
     </div>`;
+  }
+
+  /* ══ SCAN THE COPY I OWN ══════════════════════════════════════════════════
+     The other half of "specify edition". It opens the camera for exactly one
+     barcode and pins whatever comes back to THIS item — the same outcome as
+     picking a row in 59-editions, reached from the other end.
+
+     ── M3 SEAM ─────────────────────────────────────────────────────────────
+     Almost none of the work happens here. Five functions across two modules
+     are asked for, and every one of them is feature-detected, because this
+     pane has to survive either file being absent or having failed to parse:
+
+       BT.scanner.isAvailable()                  -> is there a camera to open
+       BT.scanner.open({ mode, onCode })         -> the overlay; onCode per read
+       BT.scanner.close()                        -> stop the tracks, tear down
+       BT.scan.lookup(isbn13)                    -> a normalized edition stub
+       BT.scan.pinEdition(uid, isbn13, stub)     -> narrows the item in place
+
+     The open/onCode/close shape is 58-scanner's own, as 75-view-scan uses it:
+     the overlay is CONTINUOUS by nature, so "one shot" is this pane's job, not
+     a mode the scanner has to grow. The first accepted code closes it. */
+  const scannerReady = () => {
+    const sc = BT.scanner;
+    if (!sc || typeof sc.open !== 'function' || typeof sc.isAvailable !== 'function') return false;
+    try { return !!sc.isAvailable(); }
+    catch (e) { console.warn('[inspector] the camera availability check threw', e); return false; }
+  };
+
+  /* Whatever the overlay hands over goes through normalizeScanCode, never a
+     bare checksum test. `onCode` carries the RAW read — 75-view-scan passes it
+     straight to BT.scan.handleScan, which normalizes it there — and a raw read
+     is not thirteen digits: a wedge scanner prefixes ']E0', and the price
+     add-on on a mass-market paperback makes it eighteen. That function already
+     knows all of it, including that 979-0 is sheet music rather than a book. */
+  function isbnFromScan(v) {
+    if (!v) return null;
+    const raw = typeof v === 'string' ? v : (v.isbn13 || v.isbn || v.code || '');
+    const out = BT.util.normalizeScanCode(raw);
+    return out && out.ok ? out.isbn13 : null;
+  }
+
+  /* Resolves with the first accepted barcode, or null if the reader closed the
+     overlay without one. The overlay is closed from HERE the moment a code
+     arrives, which is also what makes `open()`'s own promise settle. */
+  function scanOnce(item) {
+    const sc = BT.scanner;
+    if (!scannerReady()) return Promise.resolve(null);
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = code => {
+        if (settled) return;
+        settled = true;
+        if (typeof sc.close === 'function') {
+          try { sc.close(); } catch (e) { console.warn('[inspector] the scanner would not close', e); }
+        }
+        resolve(isbnFromScan(code));
+      };
+      let opened;
+      try {
+        /* `mode` is the overlay's own add/remove labelling, and 'add' is the
+           only honest value here — nothing is being removed. It cannot do more
+           than label: `onCode` is ours, so the code never reaches
+           BT.scan.handleScan and no add/remove pipeline runs at all. */
+        opened = sc.open({
+          mode: 'add', once: true,
+          uid: item.uid, title: item.title, reason: 'pin-edition',
+          onCode: finish,
+        });
+      } catch (e) { settled = true; reject(e); return; }
+      /* The overlay's own promise settles when it CLOSES, which is how a
+         cancel is heard. It is only consulted if it is a thenable, so a future
+         version returning nothing costs a dangling promise rather than a
+         TypeError — this pane holds no state open across the call. */
+      if (opened && typeof opened.then === 'function') {
+        opened.then(() => { if (!settled) { settled = true; resolve(null); } },
+                    e => { if (!settled) { settled = true; reject(e); } });
+      }
+    });
+  }
+
+  async function scanPin(item) {
+    if (!scannerReady()) return;
+    if (!(BT.scan && typeof BT.scan.pinEdition === 'function')) {
+      /* Never a half-pin. Narrowing rewrites this item's ISBN rows out of the
+         `isbncand:` namespace and into `isbn13:` (BT.repo.idKeysFor), and doing
+         part of that from here would leave the record claiming a copy nobody
+         verified — silently, since a later scan of a different printing would
+         then resolve to this item instead of adding the book in your hand. */
+      BT.ui.toast('Pinning a scanned copy needs the scan module, which is not on this page.', { bad: true });
+      return;
+    }
+
+    let isbn = null;
+    try { isbn = await scanOnce(item); }
+    catch (e) {
+      BT.ui.toast((e && e.message) || 'The scanner could not start.', { bad: true });
+      return;
+    }
+    /* Cancelled, or nothing readable. The scanner overlay has already said so
+       in its own status line — a second message from here would be the app
+       telling the reader twice that they closed something. */
+    if (!isbn) return;
+
+    /* NOT checked against this item's `isbnsCandidate`, deliberately. Candidates
+       are harvested fifty editions at a time and are never complete — The
+       Hobbit's work record lists 481 — so "not among the candidates" means "not
+       fetched yet" far more often than it means "wrong book", and refusing on
+       that basis would reject the correct copy most of the time.
+
+       What IS checked is the PINNED namespace. `isbn13:{isbn}` is one row in
+       the id index and two items cannot both hold it: the later write takes it
+       without complaint, and every future scan of that barcode then resolves to
+       whichever record wrote last. */
+    const held = await BT.repo.resolveScan(isbn);
+    if (held && held.via === 'pinned' && held.uid !== item.uid) {
+      const other = await BT.repo.getItem(held.uid);
+      BT.ui.toast(`That barcode is already pinned to “${
+        BT.util.truncate((other && other.title) || 'another record', 32)}”.`, { bad: true });
+      return;
+    }
+
+    /* pinEdition MERGES its third argument into the record, so it wants a
+       normalized item and not a raw Open Library payload. BT.scan.lookup is
+       the scan module's own one-request path — /api/books, with author names
+       and the cover already inline — and it returns exactly that shape,
+       including the "blind stub" that pinEdition knows to refuse rather than
+       merge (its title is the literal string 'ISBN 978…', and merging one
+       would rename the book to its own barcode).
+
+       A failure here is not fatal and is deliberately swallowed: the barcode
+       IS the ownership claim, and a record that keeps the work's date until
+       the next refresh is not a failed pin. */
+    let stub = null;
+    try {
+      if (typeof BT.scan.lookup === 'function') stub = await BT.scan.lookup(isbn);
+    } catch (e) {
+      console.warn('[inspector] edition lookup failed; pinning the barcode alone', e);
+    }
+
+    try { await BT.scan.pinEdition(item.uid, isbn, stub); }
+    catch (e) {
+      BT.ui.toast((e && e.message) || 'Could not pin that copy.', { bad: true });
+      return;
+    }
+
+    /* The record has changed underneath the paint signature, so drop it before
+       repainting — the Edition block is about to stop saying "a work, not a
+       copy" and start naming an ISBN. */
+    invalidate();
+    show(item.uid);
+    BT.router.resolve();
   }
 
   function wire(item) {
@@ -449,17 +614,15 @@ BT.inspector = (function () {
       }
 
       if (act && act.dataset.act === 'edition') {
-        /* ── M2 SEAM · deliberately inert ────────────────────────────────
-           Choosing an edition means listing /works/{OLID}/editions.json,
-           which needs BT.openlibrary, and PINNING one rewrites this item's
-           ISBN rows from the `isbncand:` namespace into `isbn13:` (see
-           BT.repo.idKeysFor). Wiring half of that now would leave items
-           claiming a pinned ISBN nobody ever verified — and the failure
-           mode is silent: a later scan of a different printing resolves to
-           the wrong copy instead of adding the one in your hand.
-           So it says what it is rather than opening an empty picker. */
-        BT.ui.toast('Choosing an edition arrives with the editions picker in M2.');
+        /* Feature-detected rather than assumed. A bare BT.editions.open(...)
+           on a page where 59-editions.js failed to parse is a TypeError raised
+           inside this one shared click handler — which would take the status
+           segment, the rating and the notes down with it. */
+        if (BT.editions && typeof BT.editions.open === 'function') BT.editions.open(item.uid);
+        else BT.ui.toast('The editions picker is not on this page.', { bad: true });
       }
+
+      if (act && act.dataset.act === 'scanpin') await scanPin(item);
 
       if (act && act.dataset.act === 'remove') {
         if (!BT.ui.confirmDialog(`Remove “${item.title}” from your library?`)) return;

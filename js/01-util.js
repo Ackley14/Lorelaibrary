@@ -404,17 +404,42 @@ BT.util = (function () {
   /* Rank a mixed result set by relevance, using each source's own popularity
      only to break ties WITHIN a relevance band — never across bands.
 
+     WHAT A ROW IS SCORED AGAINST. `title` and `originalTitle` as always, plus
+     anything in an optional `haystacks` array — either bare strings or
+     `{ text, weight }` pairs, where `weight` scales that haystack's score.
+     That is how a caller adds a field which is genuinely as relevant as the
+     title but slightly less specific (an author name matches thirty books, a
+     title matches one) without promoting it above a real title match. Rows
+     that offer no `haystacks` behave exactly as they did before.
+
+     COVERAGE IS THE BEST OF ALL HAYSTACKS, not the coverage of whichever one
+     happened to win on score. It answers a different question from the score —
+     "do the words the reader typed appear in this record AT ALL?" — and it is
+     what the filter below runs on, so tying it to the top-scoring string is
+     how a search for an author's name returns an empty screen: every title
+     scores 0 coverage, the multi-word gate insists on 1, and the entire result
+     set is dropped while the author field matched perfectly. That was a live
+     bug — `gwendolyn kiste`, 71 real hits, nothing shown. See rerank() in
+     61-view-search.js.
+
      The filter is adaptive: for a multi-word query, insist every word appears,
      which is what stops "Dune" answering "dune messiah". If that leaves too
      little, relax rather than show an empty screen. */
   function rankByRelevance(query, rows, opts) {
     opts = opts || {};
     const scored = rows.map(r => {
-      const best = [r.title, r.originalTitle]
-        .filter(Boolean)
-        .map(t => relevance(query, t))
-        .sort((a, b) => b.score - a.score)[0] || { score: 0, coverage: 0 };
-      return Object.assign({}, r, { _score: best.score, _coverage: best.coverage });
+      const cands = [r.title, r.originalTitle].concat(r.haystacks || []);
+      let score = 0, coverage = 0;
+      for (const c of cands) {
+        const obj = c && typeof c === 'object';
+        const text = obj ? c.text : c;
+        if (!text) continue;
+        const weight = (obj && c.weight != null) ? c.weight : 1;
+        const rel = relevance(query, text);
+        if (rel.score * weight > score) score = rel.score * weight;
+        if (rel.coverage > coverage) coverage = rel.coverage;
+      }
+      return Object.assign({}, r, { _score: score, _coverage: coverage });
     });
 
     const multiWord = normalizeTitle(query).split(' ').filter(Boolean).length > 1;

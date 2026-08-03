@@ -1,5 +1,9 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   #/search — find a book by title and put it on a shelf.
+   #/search — find a book by title OR AUTHOR and put it on a shelf.
+
+   Both, and the "or author" half is not a nicety — see FAILURE 2 in rerank().
+   Ranking here was title-only for a while and an author's name returned an
+   empty screen while the catalogue held seventy-one of her books.
 
    This screen is small. One input, one list, one button per row. Almost all of
    the code below exists for a single reason, and it is worth stating plainly
@@ -61,15 +65,23 @@ BT.viewSearch = (function () {
   }
 
   /* ══ RE-RANKING ═════════════════════════════════════════════════════════
-     THE MEASURED FAILURE THIS FUNCTION EXISTS TO FIX — do not delete it as
-     "over-engineering", and do not replace it with a `sort=` parameter.
+     TWO MEASURED FAILURES THIS FUNCTION EXISTS TO FIX. Both were reproduced
+     live, both are silent, and each is one "simplification" away from coming
+     back — the natural cleanup for either one REINTRODUCES THE OTHER. Do not
+     delete this as over-engineering, and do not replace it with a `sort=`
+     parameter.
 
+     ── FAILURE 1: the wrong book first (`q=dune`) ─────────────────────────
      Live, on openlibrary.org/search.json, `q=dune` returns:
 
-         #1  Children of Dune
-         #6  Go Ask Alice                (contains neither word)
-         #8  Dune                        ← the actual novel, attributed to
-                                           Brian Herbert, first_publish_year 2001
+         #1   Children of Dune
+         #6   Go Ask Alice               (contains neither word)
+         #8   Dune                       ← Brian Herbert, first_publish_year
+                                           2001, 10 editions
+         #24  Dune                       ← THE NOVEL. Frank Herbert, 1965,
+                                           160 editions — twenty-third place
+                                           for the most famous four-letter
+                                           title in science fiction
 
      Whatever Open Library's relevance model is optimising, it is not "the book
      the user just typed the name of". Their default ordering leans hard on
@@ -83,22 +95,71 @@ BT.viewSearch = (function () {
      the wrong answer looks exactly like a right one. Client-side is the only
      side.
 
+     ── FAILURE 2: no books at all (`q=gwendolyn kiste`) ───────────────────
+     Searching an AUTHOR'S NAME returned an empty screen. Open Library was
+     blameless: `q=gwendolyn+kiste` answers numFound 71 with all six top docs
+     hers — *Reluctant Immortals* (2022), *The Haunting of Velkwood* (2024),
+     *The Rust Maidens* (2018), *Pretty Marys All in a Row* (2017), *And Her
+     Smile Will Untether the Universe* (2017), *Boneset & Feathers* (2020).
+
+     This function threw every one of them away. Scoring was TITLE-ONLY, so
+     "gwendolyn" and "kiste" — words that appear in none of those titles —
+     scored 0 coverage on all 71 docs, and the multi-word coverage gate inside
+     rankByRelevance (insist every query word appears) then dropped the entire
+     result set. A domain mismatch inherited from MovieTrak, where you search
+     films by title and title-only relevance was fine. BOOKS ARE SEARCHED BY
+     AUTHOR AS A PRIMARY USE CASE, and this screen's own placeholder promises
+     it ("Search by title or author…").
+
+     AND `author=` IS NOT THE ALTERNATIVE. The tempting fix — detect an author
+     query and send `search.json?author=gwendolyn+kiste` — was tried live and
+     returns LAIRD BARRON'S books: *Occultation*, *Swift to Chase*, *The
+     Beautiful Thing That Awaits Us All*. Not an error, not empty: a confident
+     list of the wrong author. Name-scoped `author=` is fuzzy matching over a
+     name index and cannot be trusted with a user's query. Only OLID-scoped
+     author queries (`author=OL1394865A`, which is what authorWorks() sends)
+     mean what they say — worth remembering when the author-following feature
+     lands, because that one MUST resolve a name to an OLID first.
+
      The model, in order of authority:
 
-       1. TITLE MATCH QUALITY decides the band. BT.util.rankByRelevance is the
-          M1 implementation of that idea and is used as-is: it scores query
-          against title, filters on token coverage, and — the part that matters
-          — lets a source's own popularity number order results only WITHIN a
-          band, never across one. A better title match always wins.
+       1. MATCH QUALITY DECIDES THE BAND, and a match may be in the title OR
+          the author. BT.util.rankByRelevance is the M1 implementation and is
+          used as-is: it scores, filters on token coverage, and — the part that
+          matters — lets a source's own popularity number order results only
+          WITHIN a band, never across one. What changed for books is WHAT it is
+          handed: three haystacks per doc rather than one.
+             · the title            (weight 1.00)
+             · title + authors      (weight 0.95) — the mixed query. "kiste
+               rust maidens" and "sanderson mistborn" match neither field
+               alone; they only cover every typed word across BOTH.
+             · the authors          (weight 0.90) — the pure author query.
+          Best weighted score wins, best coverage of ANY of them passes the
+          gate. The weights are a tiebreak, not a hierarchy: an author name
+          names thirty books where a title names one, so on an equal raw score
+          the title match should lead — but 0.90 is nowhere near a band's
+          worth of demotion, so an author match still outranks a weak title
+          match, which is the whole point.
        2. An exact (or normalized-exact) title match gets a large boost, so the
           novel called "Dune" cannot sit below a novel called "Children of Dune"
           no matter how many editions the latter has.
-       3. Query-token coverage of the title adds a smaller boost, so a doc that
-          contains every word the reader typed beats one that dropped a word.
-       4. POPULARITY IS A TIEBREAK ONLY. edition_count, readinglog_count and
-          ratings_count order two docs that already match equally well. If any
-          of them is ever promoted above title match, this file is back to
-          answering "dune" with *Children of Dune*.
+       3. Query-token coverage adds a smaller boost, so a doc that contains
+          every word the reader typed beats one that dropped a word.
+       4. POPULARITY IS A TIEBREAK ONLY — for title queries. edition_count,
+          readinglog_count and ratings_count order two docs that already match
+          equally well. If any of them is ever promoted above match quality,
+          this file is back to answering "dune" with *Children of Dune*.
+
+          THE ONE EXCEPTION IS AN AUTHOR-DOMINANT QUERY, and it is not a
+          loophole, it is the same rule arriving at a different answer. When
+          every result matches on the author and none on the title, every
+          result is in the SAME BAND — there is no title signal left to order
+          them by, so the tiebreak is doing all the work by construction. What
+          it should say then is different too: not "which of these records is
+          the real one" (editions, see popOf) but "which of this author's books
+          is the one you have heard of" (readers, see notabilityOf). Typing
+          "gwendolyn kiste" should answer *Reluctant Immortals*, not whichever
+          anthology she has a story in.
        5. Summaries, study guides and workbooks are DEMOTED. They match the
           title of the book they are about — by construction, since that is
           what their own titles are made of — and there are dozens per popular
@@ -185,9 +246,85 @@ BT.viewSearch = (function () {
     return 0.55 * e + 0.30 * r + 0.15 * v;
   }
 
+  /* NOTABILITY, which is popularity asking a different question — see note 4
+     in the header. popOf answers "several records claim this title, which is
+     the real one?" and leads on editions because that is what volunteers
+     actually merge onto the canonical work. This one answers "which of this
+     author's books is the one a reader has heard of?", and for that the reader
+     counts are the whole point: a book nobody has shelved is not the answer to
+     someone typing an author's name, however many printings it has had.
+
+     Measured on `gwendolyn kiste` (readinglog / editions):
+
+         Reluctant Immortals   2022    6 readers    4 editions
+         Haunting of Velkwood  2024    2 readers    3 editions
+         The Rust Maidens      2018    2 readers    2 editions
+         Boneset & Feathers    2020    0 readers    1 edition
+
+     Readers lead and editions break the tie among the twos, which is exactly
+     the order a reader would write down. Editions are still weighted heavily
+     enough to carry a backlist title that predates Open Library's reading log
+     — a 1965 novel with 160 printings and one reader is not obscure. */
+  function notabilityOf(doc) {
+    const d = doc || {};
+    const editions = Number(d.edition_count) || 0;
+    const readers = Number(d.readinglog_count != null ? d.readinglog_count : d.want_to_read_count) || 0;
+    const ratings = Number(d.ratings_count) || 0;
+    const r = Math.min(1, Math.log10(readers + 1) / 5);
+    const e = Math.min(1, Math.log10(editions + 1) / 2.7);
+    const v = Math.min(1, Math.log10(ratings + 1) / 4);
+    return 0.60 * r + 0.28 * e + 0.12 * v;
+  }
+
   function primaryAuthorOf(doc) {
     const names = (doc && doc.author_name) || [];
     return Array.isArray(names) ? String(names[0] || '') : String(names || '');
+  }
+
+  /* EVERY author on the record, joined, not just the first. Anthologies and
+     collaborations list the person the reader is looking for anywhere in the
+     array — Open Library credits *Behold the Undead of Dracula* to "Matthew M
+     Bartlett; Gwendolyn Kiste; Jonathan Raab" — and scoring only `[0]` would
+     lose them. Joined with a space because BT.util.normalizeTitle reduces
+     every separator to one anyway, so this is already the shape it wants. */
+  function authorsOf(doc) {
+    const names = (doc && doc.author_name) || [];
+    const list = Array.isArray(names) ? names : [names];
+    return list.filter(Boolean).map(String).join(' ');
+  }
+
+  /* Weights for the non-title haystacks. See note 1 in the header for why
+     these are deliberately shallow: they settle a tie between two equally good
+     raw matches in favour of the title, and they must NOT be deep enough to
+     push an author match out of the band an equally-strong title match is in.
+     One band is 0.05 wide; these cost 0.05 and 0.10 of a raw 1.0 score. */
+  const W_TITLE_AND_AUTHOR = 0.95;
+  const W_AUTHOR = 0.90;
+
+  /* How good an author match has to be, and how far it has to beat the title,
+     before a doc counts as "matched on the author". 0.86 is relevance()'s
+     "the title contains the query somewhere" tier, so this admits "Céline
+     Chevet Clémence Godefroy Gwendolyn Kiste" as well as an exact name. */
+  const AUTHOR_HIT = 0.86;
+  const AUTHOR_GAP = 0.2;
+  /* And how much of the result set has to look like that before the whole
+     QUERY is treated as an author query. A clear majority rather than all of
+     them: one companion volume or one biography with the author's name in its
+     title must not flip a plain author search back to title ordering. */
+  const AUTHOR_RUN = 0.6;
+
+  /* True when the reader typed a name, not a title. Read off the docs rather
+     than guessed from the query string, because there is no way to tell
+     "gwendolyn kiste" from a title by looking at it — but there is every way
+     to tell by looking at what came back. */
+  function authorDominant(ranked) {
+    if (!ranked.length) return false;
+    let hits = 0;
+    for (const r of ranked) {
+      if ((r._authorScore || 0) >= AUTHOR_HIT
+          && (r._authorScore || 0) > (r._titleScore || 0) + AUTHOR_GAP) hits++;
+    }
+    return hits >= Math.ceil(ranked.length * AUTHOR_RUN);
   }
 
   function rerank(q, docs) {
@@ -197,11 +334,25 @@ BT.viewSearch = (function () {
     for (const d of (docs || [])) {
       const title = String((d && d.title) || '').trim();
       if (!title) continue;                       // a doc with no title is unshowable
+      const authors = authorsOf(d);
       shaped.push({
         doc: d,
         title,
         originalTitle: altTitleOf(d),
         pop: popOf(d),
+        notability: notabilityOf(d),
+        /* The two extra haystacks rankByRelevance scores alongside the title.
+           An authorless doc contributes none, which costs it nothing. */
+        haystacks: authors ? [
+          { text: title + ' ' + authors, weight: W_TITLE_AND_AUTHOR },
+          { text: authors, weight: W_AUTHOR },
+        ] : [],
+        /* Scored again here, unweighted and on their own, ONLY to answer "did
+           this doc match because of its author?" — which is a different
+           question from "how well did it match", and the one authorDominant()
+           needs. Two extra relevance() calls over at most thirty docs. */
+        _titleScore: BT.util.relevance(q, title).score,
+        _authorScore: authors ? BT.util.relevance(q, authors).score : 0,
         _norm: BT.util.normalizeTitle(title),
         _main: BT.util.normalizeTitle(mainTitle(title)),
       });
@@ -210,9 +361,13 @@ BT.viewSearch = (function () {
     /* Step 1 — M1's banded ranker. This is where the coverage filter lives
        (for a multi-word query, insist every word appears, then relax rather
        than show an empty screen) and where popularity is confined to a
-       tiebreak. Everything below adjusts its result; nothing below replaces
-       it. */
+       tiebreak. It is handed the author haystacks above rather than being
+       bypassed, so the gate sees the author field too — the `gwendolyn kiste`
+       zero-results bug WAS that gate, firing on a coverage number computed
+       from titles alone. Everything below adjusts its result; nothing below
+       replaces it. */
     const ranked = BT.util.rankByRelevance(q, shaped);
+    const byAuthor = authorDominant(ranked);
 
     /* Step 2 — the book-specific corrections. */
     for (const r of ranked) {
@@ -241,11 +396,21 @@ BT.viewSearch = (function () {
        0.05-wide bands: one decimal collapses "starts with the query" and
        "contains it somewhere" into the same band, and then edition count
        decides — which is the original bug wearing a different hat. Array sort
-       is stable, so rankByRelevance's ordering survives inside a band. */
+       is stable, so rankByRelevance's ordering survives inside a band.
+
+       WHICH TIEBREAK, and it is only ever a tiebreak — the band is compared
+       first on both paths, so neither number can lift a doc over a better
+       match. On a title query it is popOf (editions lead: "which record is the
+       real Dune?"). On an author query every doc scored on the same author and
+       every doc is therefore in the same band, so the question has become
+       "which of this author's books is the known one?" and notabilityOf
+       (readers lead) is the one that answers it. See note 4 in the header. */
     ranked.sort((a, b) => {
       const band = Math.round(b._score * 20) - Math.round(a._score * 20);
       if (band) return band;
-      return (b.pop || 0) - (a.pop || 0);
+      return byAuthor
+        ? (b.notability || 0) - (a.notability || 0)
+        : (b.pop || 0) - (a.pop || 0);
     });
 
     /* Step 4 — collapse near-duplicate works.
