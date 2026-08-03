@@ -75,6 +75,21 @@ BT.config = (function () {
       graphic: true,
       general: true,
     },
+    /* GENRES THE USER INVENTED. `[{ id, label, keywords: [], hue }]`, and the
+       one part of the genre system that is data rather than code.
+
+       Empty by default, and it stays a plain array here: everything that reads
+       a genre — the tree, the list, the inspector's chips, the recalculation
+       rules and the injected CSS — is derived from it by BT.genres.rebuild(),
+       which is also the only thing that validates it. Nothing else in the app
+       should index into this list, because a settings file can be hand-edited
+       or imported from another device and the raw shape is therefore untrusted.
+
+       `id` is stored rather than re-derived from the label on every boot, and
+       that is deliberate: a stored book carries the id, so re-slugging a
+       renamed label would orphan every record filed under it. Rename the label,
+       keep the id. See BT.genres for the namespacing rules. */
+    customGenres: [],
     keys: { googlebooks: '' },
     /* Open Library asks API consumers to identify themselves so they can
        contact you before they block you. Optional, empty by default, and never
@@ -92,6 +107,12 @@ BT.config = (function () {
       return Object.assign(structuredCloneSafe(DEFAULTS), parsed, {
         keys: Object.assign({}, DEFAULTS.keys, parsed.keys || {}),
         genres: Object.assign({}, DEFAULTS.genres, parsed.genres || {}),
+        /* Shape-checked here and CONTENT-checked in BT.genres.rebuild(). The
+           guard is not paranoia about our own writer: this key survives an
+           import from another device and a hand-edited localStorage, and a
+           non-array here would throw inside the first `for…of` that touched it
+           — at boot, in the file that every other module is loaded after. */
+        customGenres: Array.isArray(parsed.customGenres) ? parsed.customGenres : [],
       });
     } catch (_) {
       return structuredCloneSafe(DEFAULTS);
@@ -138,15 +159,31 @@ BT.config = (function () {
         language: settings.language,
         region: settings.region,
         genres: settings.genres,
+        /* Custom genres TRAVEL, and they have to: a book in the same export
+           carries `x-weird-fiction` in its `genres` array, so a library
+           imported without this list would show that book filed under nothing
+           the app can name. They are also the only setting here that is
+           authored rather than configured — losing them on a device move would
+           be losing work, not losing a preference. */
+        customGenres: settings.customGenres,
       };
     },
     importSettings(obj) {
       if (!obj || typeof obj !== 'object') return;
-      const allow = ['language', 'region', 'genres'];
+      const allow = ['language', 'region', 'genres', 'customGenres'];
       for (const k of allow) if (k in obj) settings[k] = obj[k];
       save();
+      /* The imported list is raw — another device's export, or a file somebody
+         edited. rebuild() is what validates it, re-registers the labels and
+         repaints the injected CSS; without this call the app would carry the
+         new ids in its records and know nothing about them until a reload. */
+      if (BT.genres) BT.genres.rebuild();
     },
-    reset() { settings = structuredCloneSafe(DEFAULTS); save(); },
+    reset() {
+      settings = structuredCloneSafe(DEFAULTS);
+      save();
+      if (BT.genres) BT.genres.rebuild();
+    },
   };
 })();
 
@@ -657,16 +694,21 @@ BT.GENRE_RULES = [
      ways is a bucket whose contents nobody can explain. */
 ];
 
-/* Every bucket id the app knows about, in display order — which is FAMILY
-   order, so the tree's "By genre" section reads as five pairs and a residue
-   rather than as twelve unrelated rows. `general` last because it is the
-   residue, and it renders with neutral text rather than a hue (see the
+/* The twelve buckets that ship with the app, in display order — which is
+   FAMILY order, so the tree's "By genre" section reads as five pairs and a
+   residue rather than as twelve unrelated rows. `general` last because it is
+   the residue, and it renders with neutral text rather than a hue (see the
    --bt-genre-* tokens: there is deliberately no --bt-genre-general).
 
-   This array is the single source of the genre list: 55-tree builds its rows
-   from it, 56-inspector builds its chips from it, and 62-view-list sorts by
-   position in it. Adding a bucket here and a label below is the whole job. */
-BT.GENRE_BUCKETS = [
+   FIXED, and frozen to say so. These twelve cannot be renamed or removed from
+   Settings: they are the ids stored in every library in the wild, the ids the
+   rules table below emits, and the ids css/03-components.css writes static
+   rules for. A user who wants a shelf the app does not have adds their own —
+   see BT.genres — which is additive and cannot shadow one of these.
+
+   READ BT.GENRE_BUCKETS, NOT THIS, unless you specifically mean "the built-in
+   twelve". That property is defined below as built-ins + the user's own. */
+BT.GENRE_BUILTINS = Object.freeze([
   'fiction', 'historical',
   'fantasy', 'scifi',
   'mystery', 'horror',
@@ -674,8 +716,15 @@ BT.GENRE_BUCKETS = [
   'nonfiction', 'biography',
   'graphic',
   'general',
-];
+]);
 
+/* The word for each id. MUTATED AT RUNTIME in two places, both of them below
+   in this file and neither of them optional: the legacy-alias loop gives dead
+   ids their heir's word, and BT.genres.rebuild() adds one entry per custom
+   genre. That is why this is a plain object rather than a frozen table —
+   BT.ui.genresOf uses "is there a label for this id" as its test for whether a
+   stored id is real, so a genre missing from here is a genre that does not
+   render at all, which is exactly what a DELETED custom genre should do. */
 BT.GENRE_LABELS = {
   fiction: 'Literary Fiction',
   historical: 'Historical',
@@ -714,7 +763,12 @@ BT.GENRE_LABELS = {
 
    `general` is null, not a hue. It is the bucket a book lands in when nothing
    matched, and colouring it would dress an absence of information up as a
-   classification. */
+   classification.
+
+   A custom genre picks ONE OF THESE SIX (or null, and wears the `general`
+   treatment). BT.genres.rebuild() adds its entry to this map and emits the
+   matching CSS, so the answer to "may I have a seventh hue" is still no —
+   the user chooses a family, never a colour. */
 BT.GENRE_FAMILY = {
   fiction: 'violet',
   historical: 'violet',
@@ -729,6 +783,14 @@ BT.GENRE_FAMILY = {
   graphic: 'teal',
   general: null,
 };
+
+/* The whole supply, named once so a custom genre can be offered a CHOICE OF
+   FAMILY rather than a colour. Every one of these has a -text/-wash/-edge set
+   in css/01-tokens.css and is MovieTrak's value for value; a seventh entry
+   here would be a hue one app has and the other does not, which is the one
+   thing the shared palette exists to prevent. Order is the order the picker
+   lists them in — the four MovieTrak hues, then the two a library added. */
+BT.HUE_FAMILIES = ['teal', 'coral', 'amber', 'ice', 'violet', 'moss'];
 
 /* ── Legacy bucket ids ────────────────────────────────────────────────────
    Books added before Fantasy and Science Fiction were split carry the id
@@ -761,8 +823,22 @@ BT.genreId = id => (BT.GENRE_ALIASES[id] || id);
 
 /* The word for a bucket id, legacy ids included. Falls back to the raw id so a
    miss shows as 'fantasysf' in the UI — visibly wrong, therefore reported —
-   rather than as an empty tag nobody notices. */
-BT.genreLabel = id => BT.GENRE_LABELS[BT.genreId(id)] || id;
+   rather than as an empty tag nobody notices.
+
+   ONE EXCEPTION, and it is the deleted-custom-genre case. A book filed under a
+   genre the user has since removed still carries `x-weird-fiction` in its
+   record, and a breadcrumb or a hand-typed #/library?genre= route reads the id
+   straight out of the URL rather than through BT.ui.genresOf (which drops
+   unknown ids entirely). Echoing the raw id back at the reader would caption
+   the page 'x-weird-fiction', which looks like the app broke rather than like a
+   shelf they took down. The id is a slug of the label they typed, so turning it
+   back into words gives them their own name for it — an honest epitaph, and no
+   stored data has to be touched to produce it. */
+BT.genreLabel = id => {
+  const live = BT.GENRE_LABELS[BT.genreId(id)];
+  if (live) return live;
+  return (BT.genres && BT.genres.isCustomId(id)) ? BT.genres.labelFromId(id) : id;
+};
 
 /* The hue family, legacy ids included — null for 'general' and for anything
    unknown, both of which mean "paint this in muted text, not in a colour".
@@ -782,6 +858,426 @@ BT.genreFamily = id => BT.GENRE_FAMILY[BT.genreId(id)] || null;
 for (const legacy of Object.keys(BT.GENRE_ALIASES)) {
   BT.GENRE_LABELS[legacy] = BT.GENRE_LABELS[BT.GENRE_ALIASES[legacy]];
 }
+
+/* ══ USER-DEFINED GENRES ═══════════════════════════════════════════════════
+   The twelve above are a taxonomy somebody else chose. This is the seam where
+   a reader adds the shelf their library actually has — Weird Fiction, Cookbooks
+   I Cook From, Danish Crime — without any of it becoming a special case
+   downstream. Everything that draws a genre keeps reading BT.GENRE_BUCKETS,
+   BT.GENRE_LABELS and BT.GENRE_FAMILY exactly as it did; this module is what
+   puts the user's genres INTO those three tables.
+
+   TWO KINDS, and the difference is only whether keywords were given:
+     · no keywords — a label you apply by hand from a book's detail pane. It
+       never matches anything on its own, which is the point: "Books Dad Lent
+       Me" is not a property of the catalogue.
+     · with keywords — matched against subject strings on the next Settings →
+       Recalculate genres, exactly as the built-in rules are. See
+       38-normalize.js's bucketGenres, which runs the built-in table first and
+       this one second, in its own pass.
+
+   ID NAMESPACING — the whole reason ids are not just slugs.
+   Every custom id is `x-` + slug(label), and no built-in id contains a dash or
+   an `x-` prefix. That single rule buys three guarantees at once:
+     1. A custom genre called "Fiction" becomes `x-fiction` and CANNOT shadow
+        the built-in `fiction`. Without the prefix it would silently take over
+        every stored fiction book's tag, its tree row and its CSS rule, and the
+        user would have no way to tell what happened.
+     2. `x-` is a valid CSS identifier start, so `.tag.x-fiction` is a legal
+        selector — a bare slug beginning with a digit ("1970s Paperbacks") is
+        not, and would emit CSS that silently does not apply.
+     3. Anything reading an id can ask "is this one of ours" with a regex
+        rather than a lookup, which is what lets a DELETED genre's id still be
+        turned back into words (see BT.genreLabel).
+   Collisions between two customs are auto-suffixed (`x-crime-2`); collisions
+   by LABEL are rejected at the point of entry by the Settings form, because two
+   chips reading the same word is a puzzle no id scheme can solve for the reader.
+
+   NOTHING HERE TRUSTS ITS INPUT. The list arrives from localStorage or from an
+   imported export file, so rebuild() re-validates every field on every load:
+   ids are shape-checked before they are written into a CSS selector, hues are
+   checked against the six families, and lengths are capped. An invalid entry is
+   dropped rather than repaired, because a repaired one would look like it
+   worked. ═════════════════════════════════════════════════════════════════ */
+BT.genres = (function () {
+  const PREFIX = 'x-';
+  /* The shape a custom id is allowed to have, and the ONLY gate between a
+     settings file and a stylesheet. Lowercase alphanumerics in dash-separated
+     runs, nothing else — no dots, no braces, no quotes, so an id cannot close
+     the rule it is written into and open something else. */
+  const ID_RX = /^x-[a-z0-9]+(?:-[a-z0-9]+)*$/;
+  const STYLE_ID = 'bt-genre-css';
+
+  const MAX_LABEL = 40;      // a tag is 17px tall and uppercase; longer is unreadable
+  const MAX_KEYWORD = 40;    // a subject heading longer than this is a pasted sentence
+  const MAX_KEYWORDS = 24;
+  const MAX_GENRES = 60;     // a ceiling, not a target — see the CSS note in paint()
+
+  /* The validated list currently in force, and the two tables derived from it.
+     Cached rather than recomputed per read: BT.GENRE_BUCKETS is read inside
+     render loops (once per row in 62-view-list's sort), and the keyword regexes
+     are compiled once per rebuild rather than once per subject — a full
+     recalculation over a 500-book library tests them tens of thousands of
+     times. */
+  let applied = [];
+  let bucketCache = BT.GENRE_BUILTINS.slice();
+  let ruleCache = [];
+
+  /* ── Ids and labels ───────────────────────────────────────────────────── */
+
+  function slug(label) {
+    return String(label == null ? '' : label).toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 32)
+      .replace(/-+$/, '');
+  }
+
+  /* Every id that must not be handed out again: the twelve built-ins, the dead
+     ids the alias table still resolves, and whatever customs already exist. */
+  function reserved(list) {
+    const taken = new Set(BT.GENRE_BUILTINS);
+    for (const legacy of Object.keys(BT.GENRE_ALIASES)) taken.add(legacy);
+    for (const g of (list || applied)) taken.add(g.id);
+    return taken;
+  }
+
+  /* A label of nothing but punctuation or non-Latin script slugs to the empty
+     string — '科幻' and '★★★' both do. That is not a reason to refuse the
+     label: the label is what the reader sees, and the id is plumbing. So the
+     slug falls back to a generic stem and the de-duplicator numbers it, which
+     gives '科幻' the id `x-genre` and a second one `x-genre-2`. Both work
+     everywhere; only a URL looks anonymous. */
+  function mintId(label, taken) {
+    const base = PREFIX + (slug(label) || 'genre');
+    if (!taken.has(base)) return base;
+    for (let n = 2; n < 100; n++) {
+      const tryId = `${base}-${n}`;
+      if (!taken.has(tryId)) return tryId;
+    }
+    /* 98 genres sharing one slug is not a real library, it is a loop that got
+       away. A timestamped id is ugly and unique, which beats returning a
+       duplicate that would silently overwrite an existing genre. */
+    return `${base}-${Date.now().toString(36)}`;
+  }
+
+  const cleanLabel = v =>
+    String(v == null ? '' : v).trim().replace(/\s+/g, ' ').slice(0, MAX_LABEL);
+
+  /* The id turned back into the words it was made from. Used for a genre that
+     no longer exists — see BT.genreLabel. */
+  function labelFromId(id) {
+    return String(id || '').slice(PREFIX.length).split('-')
+      .filter(Boolean)
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ');
+  }
+
+  const isCustomId = id => ID_RX.test(String(id || ''));
+
+  /* ── Keywords ─────────────────────────────────────────────────────────── */
+
+  /* Accepts the stored array OR the comma-separated string the Settings form
+     collects, so the form does not have to know the storage shape. */
+  function cleanKeywords(v) {
+    const raw = Array.isArray(v) ? v : String(v == null ? '' : v).split(',');
+    const out = [];
+    const seen = new Set();
+    for (const r of raw) {
+      const s = String(r == null ? '' : r).trim().replace(/\s+/g, ' ');
+      if (!s || s.length > MAX_KEYWORD) continue;
+      const low = s.toLowerCase();
+      if (seen.has(low)) continue;
+      seen.add(low);
+      out.push(s);
+      if (out.length >= MAX_KEYWORDS) break;
+    }
+    return out;
+  }
+
+  /* A keyword is a WORD the user typed, not a regex — 'c++' and 'sci-fi' are
+     both legitimate and both are regex syntax, so every character is escaped
+     before it goes anywhere near a pattern.
+
+     Matched on a boundary rather than as a substring, because a bare
+     `indexOf('art')` files every book about Cartography under Art. Written as
+     explicit character classes rather than \b because a keyword may legally
+     begin or end with a non-word character ('science & nature', '#booktok'),
+     and \b beside one of those asserts the opposite of what it looks like.
+     Consuming the boundary character is harmless here: these patterns are only
+     ever asked `.test()`, never walked for successive matches.
+
+     Note the negated class under /i does NOT match uppercase ASCII (it is
+     case-folded before the negation), so 'Fiction' still boundaries correctly.
+     Non-ASCII letters do count as boundaries, which makes matching very
+     slightly looser for accented headings and has never yet been wrong. */
+  function keywordRx(kw) {
+    const esc = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp('(?:^|[^a-z0-9])' + esc + '(?:[^a-z0-9]|$)', 'i');
+  }
+
+  /* ── Validation ───────────────────────────────────────────────────────── */
+
+  const hueOf = h => (BT.HUE_FAMILIES.indexOf(h) >= 0 ? h : null);
+
+  /* Structural validation only — this is the LOAD path, and a library that
+     will not boot because one genre in the settings file is malformed is worse
+     than a library missing that genre. Duplicate LABELS are deliberately not
+     rejected here (the add form does that); an imported file that contains two
+     "Crime" genres still loads, and the user can see and fix it. */
+  function sanitize(raw) {
+    const out = [];
+    const taken = reserved([]);
+    for (const entry of (Array.isArray(raw) ? raw : [])) {
+      if (!entry || typeof entry !== 'object') continue;
+      const label = cleanLabel(entry.label);
+      if (!label) continue;
+      /* A VALID STORED ID IS KEPT, always. Stored books carry it, so minting a
+         fresh one here — on a rename, on an import, on any boot — would orphan
+         every record filed under the old id while the genre appeared to
+         survive. A new id is minted only when the stored one is missing,
+         malformed or already in use by something else, which cannot happen to
+         a list this module wrote. */
+      const stored = String(entry.id || '');
+      const id = (isCustomId(stored) && !taken.has(stored)) ? stored : mintId(label, taken);
+      taken.add(id);
+      out.push({ id, label, keywords: cleanKeywords(entry.keywords), hue: hueOf(entry.hue) });
+      if (out.length >= MAX_GENRES) break;
+    }
+    return out;
+  }
+
+  /* The reason a label cannot be used, or null. Called by the form, not by the
+     loader: this is a question about what a READER can tell apart, and the
+     answer is that they cannot tell two identically-labelled chips apart at
+     all — the label is the only thing on a tag that names the genre. */
+  function labelClash(label, ignoreId) {
+    const low = label.toLowerCase();
+    for (const id of BT.GENRE_BUILTINS) {
+      if (String(BT.GENRE_LABELS[id] || '').toLowerCase() === low) {
+        return `“${BT.GENRE_LABELS[id]}” is one of the twelve built-in genres. `
+          + 'Those cannot be replaced — pick another name, or use the built-in.';
+      }
+    }
+    for (const g of applied) {
+      if (g.id !== ignoreId && g.label.toLowerCase() === low) {
+        return `You already have a genre called “${g.label}”.`;
+      }
+    }
+    return null;
+  }
+
+  /* ── Derivation ───────────────────────────────────────────────────────── */
+
+  /* Customs sit between `graphic` and `general`, never after it. `general` is
+     the residue — the bucket a book lands in when nothing fit — so it reads
+     last in the tree, sorts last in 62-view-list's bucketRank, and is the last
+     chip in the inspector. A user's own genre is a real shelf and belongs
+     above it. */
+  function orderedIds() {
+    if (!applied.length) return BT.GENRE_BUILTINS.slice();
+    return BT.GENRE_BUILTINS.filter(id => id !== 'general')
+      .concat(applied.map(g => g.id), ['general']);
+  }
+
+  /* Re-derive everything from the stored list. Called on load, after any edit,
+     and after an import. Cheap enough to be called freely — a personal library
+     has a handful of custom genres, not a thousand. */
+  function rebuild() {
+    const next = sanitize(BT.config.get('customGenres'));
+
+    /* Remove the PREVIOUS entries by the ids we actually added, not by "every
+       id that is not a built-in". BT.GENRE_LABELS also holds the legacy alias
+       words (fantasysf → 'Fantasy'), and a blanket sweep would delete those —
+       which would orphan every pre-split book on the shelf, silently, on the
+       first genre edit. */
+    for (const g of applied) {
+      delete BT.GENRE_LABELS[g.id];
+      delete BT.GENRE_FAMILY[g.id];
+    }
+    applied = next;
+    for (const g of applied) {
+      BT.GENRE_LABELS[g.id] = g.label;
+      BT.GENRE_FAMILY[g.id] = g.hue;      // null is legitimate — the `general` treatment
+    }
+
+    bucketCache = orderedIds();
+    /* Only genres that were GIVEN keywords become rules. A manual-only label
+       with an empty match list would match nothing and cost a scan per subject
+       per book; leaving it out of the table is the same answer, stated once. */
+    ruleCache = applied.filter(g => g.keywords.length)
+      .map(g => ({ bucket: g.id, match: g.keywords.map(keywordRx) }));
+
+    paint();
+    return applied;
+  }
+
+  /* ── The injected stylesheet ──────────────────────────────────────────────
+     `.tag.<id>` and `.dot.c-<id>` are static rules in css/03-components.css,
+     one per built-in — which is impossible for a genre that did not exist when
+     the stylesheet was written. So this emits them, into ONE <style> element
+     that is rebuilt whole whenever the list changes. One element rather than
+     one per genre because a rebuild then has nothing to track and nothing to
+     leak: replacing `textContent` cannot leave an orphaned rule behind for a
+     genre that was deleted, which is the failure a per-genre element invites.
+
+     NO NEW COLOUR IS INVENTED HERE. Each rule points at the -wash/-edge pair of
+     one of the six existing families, exactly as the built-in rules do, and
+     declares a `--bt-genre-<id>` alias so the tag text and the tree dot resolve
+     through the same token — the property css/03-components.css relies on to
+     keep one genre one colour across the app. A genre with no hue gets the
+     `general` treatment: muted text on the sunk ground, which is what "no
+     colour chosen" honestly looks like.
+
+     The ID_RX test is not decoration. This is the one place a value that came
+     out of a JSON file is written into a stylesheet, and an id like
+     `x-a{}html{display:none}` would otherwise be a working attack on anybody
+     who imported a stranger's export. sanitize() already guarantees the shape;
+     this checks it again at the boundary that matters. */
+  function css() {
+    /* The aliases are collected into ONE :root block rather than one per
+       genre, so the emitted sheet reads like the hand-written half of
+       01-tokens.css instead of like machine output. */
+    const vars = [];
+    const rules = [];
+    for (const g of applied) {
+      if (!ID_RX.test(g.id)) continue;
+      if (g.hue) {
+        vars.push(`  --bt-genre-${g.id}: var(--bt-${g.hue});`);
+        rules.push(`.tag.${g.id} { color: var(--bt-genre-${g.id}); background: var(--bt-${g.hue}-wash);`
+          + ` box-shadow: inset 0 0 0 1px var(--bt-${g.hue}-edge); }`);
+        rules.push(`.c-${g.id} { color: var(--bt-genre-${g.id}); }`);
+      } else {
+        /* No alias at all for a hueless genre, exactly as there is no
+           --bt-genre-general: an alias that resolved to muted text would look
+           like a colour choice in the inspector rather than the absence of
+           one. */
+        rules.push(`.tag.${g.id} { color: var(--bt-text-muted); background: var(--bt-surface-sunk);`
+          + ' box-shadow: inset 0 0 0 1px var(--bt-line-rule); }');
+        rules.push(`.c-${g.id} { color: var(--bt-text-muted); }`);
+      }
+    }
+    if (!rules.length) return '';
+    return (vars.length ? `:root {\n${vars.join('\n')}\n}\n` : '') + rules.join('\n') + '\n';
+  }
+
+  function paint() {
+    if (typeof document === 'undefined') return;
+    /* This file is loaded from the end of <body>, so <head> is always there by
+       now — but rebuild() is also reachable from an import, and one defensive
+       branch is cheaper than a genre list that renders as unstyled text
+       because of a load-order change nobody remembered this depended on. */
+    if (!document.head) {
+      document.addEventListener('DOMContentLoaded', paint, { once: true });
+      return;
+    }
+    let el = document.getElementById(STYLE_ID);
+    if (!el) {
+      el = document.createElement('style');
+      el.id = STYLE_ID;
+      document.head.appendChild(el);
+    }
+    el.textContent = css();
+  }
+
+  /* ── Reads ────────────────────────────────────────────────────────────── */
+
+  /* Copies, because callers render from these and a view that mutated the
+     list in place would edit the user's settings without saving them —
+     changes that survive until the next reload and then vanish. */
+  const list = () => applied.map(g => ({ id: g.id, label: g.label, keywords: g.keywords.slice(), hue: g.hue }));
+  const byId = id => { const g = applied.find(x => x.id === id); return g ? { id: g.id, label: g.label, keywords: g.keywords.slice(), hue: g.hue } : null; };
+  const buckets = () => bucketCache;
+  const rules = () => ruleCache;
+  const keywordText = g => (g && g.keywords || []).join(', ');
+
+  /* ── Writes ───────────────────────────────────────────────────────────── */
+
+  function commit(next) {
+    BT.config.set('customGenres', next.map(g => ({
+      id: g.id, label: g.label, keywords: g.keywords.slice(), hue: g.hue,
+    })));
+    return rebuild();
+  }
+
+  function add(input) {
+    const label = cleanLabel(input && input.label);
+    if (!label) return { ok: false, reason: 'Give the genre a name.' };
+    const clash = labelClash(label, null);
+    if (clash) return { ok: false, reason: clash };
+    if (applied.length >= MAX_GENRES) {
+      return { ok: false, reason: `That is already ${MAX_GENRES} genres of your own — remove one first.` };
+    }
+    const g = {
+      id: mintId(label, reserved()),
+      label,
+      keywords: cleanKeywords(input && input.keywords),
+      hue: hueOf(input && input.hue),
+    };
+    commit(applied.concat([g]));
+    return { ok: true, id: g.id, genre: byId(g.id) };
+  }
+
+  /* Renaming changes the LABEL and never the id — the id is what every stored
+     book holds, so re-slugging it would quietly empty the shelf it renamed. */
+  function update(id, patch) {
+    const cur = applied.find(x => x.id === id);
+    if (!cur) return { ok: false, reason: 'That genre is not in the list any more.' };
+    const label = (patch && patch.label != null) ? cleanLabel(patch.label) : cur.label;
+    if (!label) return { ok: false, reason: 'Give the genre a name.' };
+    const clash = labelClash(label, id);
+    if (clash) return { ok: false, reason: clash };
+    commit(applied.map(g => g.id !== id ? g : {
+      id: g.id,
+      label,
+      keywords: (patch && patch.keywords != null) ? cleanKeywords(patch.keywords) : g.keywords,
+      hue: (patch && 'hue' in patch) ? hueOf(patch.hue) : g.hue,
+    }));
+    return { ok: true, id };
+  }
+
+  /* Removes the GENRE, and deliberately not the id from anybody's books. The
+     reasoning, and the confirm dialog that states it to the user, are in
+     69-view-settings.js — the short version is that this app does not silently
+     bulk-edit stored records, and an unknown id already degrades to nothing
+     everywhere it is read (BT.ui.genresOf drops ids with no label). */
+  function remove(id) {
+    const g = byId(id);
+    if (!g) return null;
+    commit(applied.filter(x => x.id !== id));
+    return g;
+  }
+
+  return {
+    list, byId, buckets, rules, add, update, remove, rebuild, paint,
+    isCustomId, labelFromId, labelClash, cleanKeywords, keywordText, slug,
+  };
+})();
+
+/* Every bucket id the app knows about RIGHT NOW: the twelve built-ins with the
+   user's own genres folded in, in display order.
+
+   An accessor rather than a plain array, and that is what makes custom genres
+   appear everywhere without a single consumer changing. 55-tree maps it into
+   rows, 56-inspector maps it into chips and validates a toggle against it,
+   62-view-list takes indexOf() for its sort order — all of them keep the exact
+   code they had, and all of them see a genre added thirty seconds ago because
+   they re-read this property on every render.
+
+   There is no setter on purpose. The list is derived from BT.config's
+   `customGenres` and rebuilt by BT.genres.rebuild(); an assignment here would
+   be thrown away by the next rebuild, so it is better that it fails loudly.
+   The returned array is the module's own cache — read it, never push to it. */
+Object.defineProperty(BT, 'GENRE_BUCKETS', {
+  get() { return BT.genres.buckets(); },
+  enumerable: true,
+  configurable: true,
+});
+
+/* Build the tables and inject the stylesheet once, at load, so that the first
+   render already knows about the user's genres. Everything after this point is
+   driven by edits in Settings and by an import. */
+BT.genres.rebuild();
 
 /* ── Subject stoplist ─────────────────────────────────────────────────────
    Open Library `subjects` arrays are not a taste vocabulary. They are whatever

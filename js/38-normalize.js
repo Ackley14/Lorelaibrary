@@ -252,15 +252,35 @@ BT.normalize = (function () {
     return out;
   }
 
+  /* One table, one subject, first rule wins. Pulled out of bucketGenres so the
+     custom-genre table can be scanned the same way WITHOUT the two tables
+     sharing a single first-wins scan — see the note at the second call site,
+     which is the whole reason this is a separate function.
+
+     `rankBase` offsets the rule's index so that ties WITHIN a table are broken
+     by specificity, the way the table is ordered. `mine` marks a hit as coming
+     from the user's own table, which is what the cap below reads — see the
+     RESERVED SLOT note there. */
+  function scanRules(rules, subject, hits, rankBase, mine) {
+    for (let i = 0; i < rules.length; i++) {
+      const rule = rules[i];
+      if (!rule.match.some(rx => rx.test(subject))) continue;
+      const cur = hits.get(rule.bucket) || { count: 0, rank: rankBase + i, mine: !!mine };
+      cur.count++;
+      hits.set(rule.bucket, cur);
+      return;
+    }
+  }
+
   /* Map noisy subjects onto at most three buckets.
 
-     TWO ordering rules, and both matter:
+     THREE ordering rules now, and all of them matter:
 
-     1. WITHIN a subject, the FIRST matching rule wins and matching stops. That
-        is why BT.GENRE_RULES is ordered specific-first: 'Fantasy fiction',
-        'Detective and mystery stories' and 'Love stories' all contain or imply
-        fiction, so testing `fiction` first would collapse every genre in the
-        app into one.
+     1. WITHIN a subject and WITHIN one table, the FIRST matching rule wins and
+        matching stops. That is why BT.GENRE_RULES is ordered specific-first:
+        'Fantasy fiction', 'Detective and mystery stories' and 'Love stories'
+        all contain or imply fiction, so testing `fiction` first would collapse
+        every genre in the app into one.
 
      2. ACROSS subjects, buckets are ranked by how many subjects hit them, ties
         broken by rule order (i.e. by specificity). Count first, because a work
@@ -268,28 +288,81 @@ BT.normalize = (function () {
         specificity second, because at equal counts the reader wants the chip
         that tells them something. Three is the cap — BT.ui draws two and the
         third is a spare for the facet tree; past that every extra bucket is
-        less specific than the ones before it. */
+        less specific than the ones before it.
+
+     3. THE USER'S OWN KEYWORD RULES ARE A SEPARATE TABLE, scanned in a second
+        pass over the same subject, and they can only ever ADD a bucket. The
+        argument is at the call site below.
+
+     4. A BUCKET THE USER ASKED FOR IS NOT A GUESS, and the cap must not treat
+        it like one. Rules 2 and 3 alone had a bug you could not see from the
+        code: John Langan's The Fisherman carries the subjects 'Horror',
+        'Fiction', 'Fantasy', 'Weird Fiction', 'Thriller', 'Mystery',
+        'Supernatural' and 'cosmic horror'. A custom "Weird Fiction" keyed on
+        'weird fiction, cosmic horror' matched TWO of those — an exact,
+        deliberate hit — but tied on count with `fantasy` and `mystery`, lost
+        both ties to the built-ins, and was cut by slice(0, 3). Settings then
+        reported "Re-bucketed 0 books" and the shelf the reader had just built
+        stayed empty, which reads as the whole feature being broken.
+
+        So the tie goes to the user, and one slot in the three is reserved for
+        them. The built-in table still scans first and still takes first claim
+        on every subject — a custom rule can never take Horror away from a
+        horror novel — but where the machine is guessing at equal evidence, the
+        rule somebody typed on purpose wins, and it can never be crowded out
+        entirely by guesses. Count still leads: a book with six mystery
+        subjects and one weird-fiction subject is still a mystery first. */
   function bucketGenres(subjects) {
     const clean = cleanSubjects(subjects);
+    /* The user's own keyword rules, compiled once by BT.genres and empty for
+       anybody who has not made a genre. Read defensively so this module stays
+       usable by a host that loaded the normalizer without the config file. */
+    const custom = (BT.genres && BT.genres.rules()) || [];
     const hits = new Map();
     for (const s of clean) {
-      for (let i = 0; i < BT.GENRE_RULES.length; i++) {
-        const rule = BT.GENRE_RULES[i];
-        if (!rule.match.some(rx => rx.test(s))) continue;
-        const cur = hits.get(rule.bucket) || { count: 0, rank: i };
-        cur.count++;
-        hits.set(rule.bucket, cur);
-        break;
-      }
+      scanRules(BT.GENRE_RULES, s, hits, 0);
+      /* A SECOND, SEPARATE PASS over the same subject rather than one scan of
+         a concatenated table, and the difference is the whole behaviour of
+         custom genres.
+
+         Appended to the built-in table, a custom rule could only ever be
+         reached by a subject NO built-in claimed — 'Weird fiction' is already
+         taken by horror on the first rule in the table, so a custom "Weird
+         Fiction" with that keyword would never once match and would look
+         broken. Put ABOVE the built-ins it would be worse: a keyword typed in
+         Settings could quietly take 'Fiction' away from every book on the
+         shelf at the next recalculation.
+
+         Scanning separately means a custom genre is purely ADDITIVE. It cannot
+         change what the built-in rules make of a subject, and a book whose
+         subject says 'Weird fiction' lands in Horror AND in the user's own
+         bucket — which is correct, not a double-file: they are two different
+         claims about one book, and the three-bucket cap below still applies. */
+      scanRules(custom, s, hits, BT.GENRE_RULES.length, true);
     }
     /* `general` is reached ONLY by falling through. There is no `general` rule
        in the table for the same reason: a bucket you can arrive at two ways is
        a bucket whose contents nobody can explain. */
     if (!hits.size) return [genre('general')];
-    return [...hits.entries()]
-      .sort((a, b) => (b[1].count - a[1].count) || (a[1].rank - b[1].rank))
-      .slice(0, 3)
-      .map(([id]) => genre(id));
+
+    /* Count, then the user's own over a built-in guess, then specificity. */
+    const ranked = [...hits.entries()].sort((a, b) =>
+      (b[1].count - a[1].count)
+      || ((b[1].mine ? 1 : 0) - (a[1].mine ? 1 : 0))
+      || (a[1].rank - b[1].rank));
+
+    const top = ranked.slice(0, 3);
+    /* THE RESERVED SLOT. If the user's rules matched at all and the cap still
+       cut every one of them, the weakest guess in the three gives up its place
+       to the strongest of theirs. Only ever one slot: the cap exists because
+       the fourth bucket is always noise, and a reader with six custom genres
+       should not get a row of six chips — but "you matched, and you were
+       dropped anyway" is the one outcome that makes the feature look broken. */
+    if (ranked.length > 3 && !top.some(e => e[1].mine)) {
+      const best = ranked.find(e => e[1].mine);
+      if (best) top[top.length - 1] = best;
+    }
+    return top.map(([id]) => genre(id));
   }
 
   const genre = id => ({ id, name: BT.GENRE_LABELS[id] || id, source: 'openlibrary' });

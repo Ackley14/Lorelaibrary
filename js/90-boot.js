@@ -145,7 +145,7 @@ BT.boot = (function () {
        switch. It gains one with the code that honours it. */
     BT.router.on('/settings', viewOr('viewSettings', stub(
       ['System', 'Settings'], 'Settings', 'M5',
-      'Recalculate genres after a rules change, an optional Google Books key, region and language, diagnostics, and Export / Import. Part of')));
+      'Recalculate genres after a rules change, add genres of your own, an optional Google Books key, region and language, diagnostics, and Export / Import. Part of')));
 
     BT.router.on('/unlock', viewOr('viewUnlock', stub(
       ['System', 'Sync'], 'Sign in', 'M5',

@@ -13,6 +13,16 @@
    not help — 38-normalize buckets the payload it was handed, and a book whose
    record has not changed is never re-fetched.
 
+   Beneath it sits the other half of the same idea: GENRES OF YOUR OWN. The
+   twelve built-in buckets are somebody else's taxonomy, and they are fixed —
+   their ids are in every stored book and every export — so the answer to "my
+   library has a shelf yours does not" is to add one. Give it keywords and it
+   joins the recalculation above as a rule of its own; give it none and it is a
+   label you apply by hand from a book's detail pane. The storage and the id
+   rules live in BT.genres; the long note further down is about what deleting
+   one does to the books filed under it, which is the only part of this feature
+   that can lose anything.
+
    Everything else on this screen is honest bookkeeping: the two settings that
    actually do something (a Google Books key and a contact address), the
    region, what storage we ended up with, and the export/import/erase trio.
@@ -105,11 +115,21 @@ BT.viewSettings = (function () {
   async function survey() {
     const items = await BT.repo.allItems();
     let overridden = 0, noSubjects = 0;
+    /* Books per CUSTOM genre, counted on the same pass rather than in a scan of
+       its own — this screen already reads every record once and a second full
+       walk to put a number beside four rows would double the cost of opening
+       Settings on a large library. Keyed by the raw stored id, so a genre the
+       user removed still counts here; nothing renders it, and it is what makes
+       re-adding the same name visibly restore the shelf. */
+    const byCustom = {};
     for (const it of items) {
       if (hasGenreOverride(it)) overridden++;
       if (!subjectsOf(it).length) noSubjects++;
+      for (const id of genreIdsRaw(it)) {
+        if (BT.genres.isCustomId(id)) byCustom[id] = (byCustom[id] || 0) + 1;
+      }
     }
-    return { total: items.length, overridden, noSubjects };
+    return { total: items.length, overridden, noSubjects, byCustom };
   }
 
   /* opts.includeManual — true means "re-derive the ones I set by hand too",
@@ -289,6 +309,19 @@ BT.viewSettings = (function () {
     /* Re-checked: the element can have gone while the scan was running. */
     const still = document.getElementById('genreStats');
     if (still) still.textContent = statsLine(stats);
+    paintCustomCounts();
+  }
+
+  /* The per-genre counts are patched in place rather than by repainting the
+     panel, and that is not a micro-optimisation: a repaint rebuilds the add
+     form from `cgDraft`, which is only written on submit, so anything half
+     typed would vanish the moment a recalculation finished. */
+  function paintCustomCounts() {
+    const by = (stats && stats.byCustom) || {};
+    for (const el of document.querySelectorAll('[data-cg-n]')) {
+      const n = by[el.getAttribute('data-cg-n')] || 0;
+      el.textContent = n ? BT.util.pluralize(n, 'book') : '—';
+    }
   }
 
   /* ── Re-fetching subjects for the skipped books ────────────────────────
@@ -505,6 +538,336 @@ BT.viewSettings = (function () {
     on('refetchStop', () => { if (refetch) { refetch.stop = true; paintRecalc(); paintProgress(); } });
   }
 
+  /* ══ YOUR OWN GENRES ══════════════════════════════════════════════════════
+     Add and remove genres the twelve built-ins do not cover. The storage,
+     validation, id namespacing and CSS injection all live in BT.genres
+     (00-config.js); this is the form that drives it.
+
+     TWO KINDS OF GENRE, and the form does not make the user choose between
+     them — the keywords box does it for them:
+
+       no keywords   a label you apply by hand from a book's detail pane. It
+                     matches nothing on its own and it never will. "Books Dad
+                     Lent Me" is not a property of any catalogue.
+       keywords      also matched against Open Library's subject strings the
+                     next time Recalculate genres runs, in its own pass after
+                     the built-in table — so it can ADD a bucket to a book but
+                     never take one away. A novel catalogued 'Weird fiction'
+                     landing in both Horror and a custom Weird Fiction is the
+                     correct answer, not a double-file.
+
+     Which is why the keywords field says "optional" rather than being a mode
+     switch: a genre that starts as a hand-applied label becomes an automatic
+     one the moment you give it a word, with nothing to migrate.
+
+     THE BUILT-IN TWELVE ARE NOT EDITABLE HERE, and that is a data decision
+     rather than a UI one. Their ids are stored in every library in the wild,
+     emitted by BT.GENRE_RULES, and written as static rules in
+     css/03-components.css — a rename would be a lie on the shelf and a removal
+     would orphan books in every export ever made. A custom genre can carry any
+     label the user likes; it just cannot claim to be one of those twelve.
+
+     ── WHAT DELETING DOES TO BOOKS ────────────────────────────────────────
+     Deliberately NOTHING, and this is the decision worth stating plainly.
+
+     A book filed under a removed genre keeps that id in its record. It is not
+     stripped, and there are three reasons in order of weight:
+
+       1. This app does not silently bulk-edit the user's own data. That refusal
+          is already written down for the Fantasy/SF split (see BT.GENRE_ALIASES)
+          and it is not weaker here — deleting a shelf is not consent to rewrite
+          two hundred records.
+       2. A strip is not one write per book, it is two. The reader's hand-set
+          genres live at `meta.manualOverrides.genres` as well, and mergeItem
+          replays that ledger over every refresh — so stripping only `genres`
+          would appear to work and then put the dead id back hours later. Doing
+          it properly means editing the override ledger too, which is deleting
+          something the user typed, in bulk, with no undo.
+       3. Leaving it makes the delete REVERSIBLE. The id is a slug of the label,
+          so re-adding a genre with the same name mints the same id and every
+          book comes straight back. Nobody has to remember which fifty books
+          they were.
+
+     The cost is one dangling id per record, and it is already handled at every
+     surface that reads one: BT.ui.genresOf keeps only ids that still have a
+     label, so the chip, the tree row and the list group all lose it silently,
+     and a book left with none falls back to General exactly as an unclassified
+     book does. The one place an id can still be seen is a bookmarked
+     #/library?genre= route, and BT.genreLabel turns it back into the words it
+     was made from rather than echoing `x-weird-fiction` at the reader.
+
+     The confirm dialog says all of this in two sentences, WITH the count of
+     books affected — a "remove" that quietly changes two hundred rows, or one
+     that quietly changes none, must not look the same. ═══════════════════ */
+
+  /* Module-level, for the same reason the recalculation state is: a rejected
+     add must not lose what the user typed, and a re-render is how this panel
+     redraws. */
+  let cgEditing = null;                              // id being edited, or null
+  let cgDraft = { label: '', keywords: '', hue: '' };  // the add form
+  let cgError = '';                                  // why the last add/rename was refused
+
+  /* RAW stored ids, deliberately not BT.ui.genresOf. That helper drops ids it
+     cannot find a label for — which is precisely what a genre we are about to
+     delete becomes — so counting through it would report zero books every time
+     and the warning would always say "nothing to lose". A count has to read
+     what the RECORD says, not what the app can currently draw. */
+  function genreIdsRaw(it) {
+    const idx = (it && it.idx && it.idx.genreIds) || null;
+    if (idx && idx.length) return idx;
+    return ((it && it.genres) || [])
+      .map(g => (typeof g === 'string' ? g : (g && g.id)))
+      .filter(Boolean);
+  }
+
+  /* Counted fresh at the moment of the confirm rather than taken from the last
+     survey: the panel can have been on screen for ten minutes while a scan ran
+     in another tab, and a stale number in a destructive prompt is worse than no
+     number. */
+  async function countGenreUse(id) {
+    const items = await BT.repo.allItems();
+    let n = 0;
+    for (const it of items) if (genreIdsRaw(it).indexOf(id) >= 0) n++;
+    return n;
+  }
+
+  /* The hue picker names the FAMILY and says who else wears it, built from
+     BT.GENRE_FAMILY rather than typed out — the pairing is the palette's whole
+     scheme ("the speculative shelf", "the true shelf") and a hardcoded copy
+     here would be one more place for it to drift. There are exactly six, there
+     is no "custom colour" option, and 01-tokens.css explains why at length. */
+  function hueOptions(selected) {
+    const share = {};
+    for (const id of BT.GENRE_BUILTINS) {
+      const fam = BT.GENRE_FAMILY[id];
+      if (!fam) continue;
+      (share[fam] = share[fam] || []).push(BT.GENRE_LABELS[id]);
+    }
+    const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+    /* The colour word leads, because a closed <select> shows only the start of
+       the option and that is the part the reader is choosing. Who else wears
+       the hue follows it as context. */
+    return `<option value=""${selected ? '' : ' selected'}>No colour (like General)</option>`
+      + BT.HUE_FAMILIES.map(h =>
+        `<option value="${esc(h)}"${selected === h ? ' selected' : ''}>${
+          esc(cap(h))} · with ${esc((share[h] || []).join(', '))}</option>`).join('');
+  }
+
+  /* The live preview tag. Inline styles rather than a class because the genre
+     being previewed does not exist yet, so BT.genres has not emitted a rule for
+     it — and the hue is re-validated against the six families before it is
+     interpolated, because this string is written into a style attribute. */
+  function huePreviewStyle(hue) {
+    return BT.HUE_FAMILIES.indexOf(hue) >= 0
+      ? `color:var(--bt-${hue});background:var(--bt-${hue}-wash);box-shadow:inset 0 0 0 1px var(--bt-${hue}-edge)`
+      : 'color:var(--bt-text-muted);background:var(--bt-surface-sunk);box-shadow:inset 0 0 0 1px var(--bt-line-rule)';
+  }
+
+  /* One row per genre. `stats.byCustom` is the last survey's count and is
+     allowed to be a little behind — it is context, not a warning; the number
+     that has to be right is the one in the delete confirm. */
+  function cgRow(g) {
+    if (cgEditing === g.id) return cgForm(g);
+    const n = (stats && stats.byCustom && stats.byCustom[g.id]) || 0;
+    const kw = BT.genres.keywordText(g);
+    return `
+      <div class="cgen__row">
+        <span class="tag ${esc(g.id)}">${esc(g.label)}</span>
+        <span class="cgen__kw">${kw
+          ? esc(kw)
+          : '<i>no keywords — you apply this one yourself</i>'}</span>
+        <span class="cgen__n" data-cg-n="${esc(g.id)}">${n ? esc(BT.util.pluralize(n, 'book')) : '—'}</span>
+        <button class="btn btn--sm btn--ghost" data-cg-edit="${esc(g.id)}">Edit</button>
+        <button class="btn btn--sm btn--ghost" data-cg-del="${esc(g.id)}">Remove</button>
+      </div>`;
+  }
+
+  /* One form serves both jobs. `g` is the genre being edited, or null for the
+     add form — the fields, the validation and the preview are identical, and
+     two copies would be two chances for them to disagree about what a legal
+     genre is. */
+  function cgForm(g) {
+    const editing = !!g;
+    const label = editing ? g.label : cgDraft.label;
+    const kw = editing ? BT.genres.keywordText(g) : cgDraft.keywords;
+    const hue = editing ? g.hue : cgDraft.hue;
+    /* An id prefix per mode. Only one form is ever on screen — the add form is
+       withheld while a row is being edited — but two element ids that differ by
+       mode mean getElementById can never read the wrong one if that ever
+       changes. */
+    const p = editing ? 'e' : 'a';
+    return `
+      <div class="cgen__form${editing ? ' cgen__form--edit' : ''}">
+        <div class="cgen__f">
+          <label class="cgen__lbl" for="cg-${p}-label">Name</label>
+          <input id="cg-${p}-label" type="text" maxlength="40" autocomplete="off"
+                 placeholder="Weird Fiction" value="${esc(label || '')}">
+        </div>
+        <div class="cgen__f cgen__f--wide">
+          <label class="cgen__lbl" for="cg-${p}-kw">Keywords <span class="faint">(optional)</span></label>
+          <input id="cg-${p}-kw" type="text" autocomplete="off" spellcheck="false"
+                 placeholder="weird fiction, cosmic horror" value="${esc(kw || '')}">
+        </div>
+        <div class="cgen__f cgen__f--hue">
+          <label class="cgen__lbl" for="cg-${p}-hue">Colour</label>
+          <select id="cg-${p}-hue">${hueOptions(hue || '')}</select>
+        </div>
+        <div class="cgen__f cgen__f--go">
+          <span class="cgen__lbl">Looks like</span>
+          <div class="cgen__go">
+            <span class="tag" id="cg-${p}-preview" style="${huePreviewStyle(hue || '')}">${
+              esc(label || 'New genre')}</span>
+            <span class="spacer"></span>
+            ${editing
+              ? `<button class="btn btn--sm btn--primary" data-cg-save="${esc(g.id)}">Save</button>
+                 <button class="btn btn--sm btn--ghost" data-cg-cancel="1">Cancel</button>`
+              : '<button class="btn btn--sm btn--primary" data-cg-add="1">Add genre</button>'}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function customPanel() {
+    const list = BT.genres.list();
+    return `
+      ${list.length
+        ? `<div class="cgen">${list.map(cgRow).join('')}</div>`
+        : '<div class="field__state">None yet — the twelve built-in genres are all this library has.</div>'}
+      ${cgEditing ? '' : cgForm(null)}
+      ${cgError ? `<div class="field__state field__state--bad">✕ ${esc(cgError)}</div>` : ''}`;
+  }
+
+  function paintCustom() {
+    const el = document.getElementById('cgPanel');
+    if (!el) return;
+    el.innerHTML = customPanel();
+    wireCustom();
+  }
+
+  /* Read the form back out of the DOM rather than tracking every keystroke in
+     module state. The draft only has to survive a REJECTED submit, which is the
+     one moment this function is called before a repaint. */
+  function readForm(p) {
+    const val = id => {
+      const el = document.getElementById(`cg-${p}-${id}`);
+      return el ? el.value : '';
+    };
+    return { label: val('label'), keywords: val('kw'), hue: val('hue') };
+  }
+
+  function wireCustom() {
+    const panel = document.getElementById('cgPanel');
+    if (!panel) return;
+
+    /* Delegated, because the rows are rebuilt on every edit and re-binding a
+       handler per button per repaint is how a stale closure ends up deleting
+       the wrong genre. */
+    panel.onclick = ev => {
+      const btn = ev.target.closest && ev.target.closest('button[data-cg-edit], button[data-cg-del], button[data-cg-save], button[data-cg-cancel], button[data-cg-add]');
+      if (!btn || !panel.contains(btn)) return;
+      const d = btn.dataset;
+      if (d.cgEdit) { cgEditing = d.cgEdit; cgError = ''; paintCustom(); focusFirst('e'); return; }
+      if (d.cgCancel) { cgEditing = null; cgError = ''; paintCustom(); return; }
+      if (d.cgDel) { removeCustom(d.cgDel); return; }
+      if (d.cgSave) { saveCustom(d.cgSave); return; }
+      if (d.cgAdd) { addCustom(); return; }
+    };
+
+    /* The preview follows the two fields that change it, and nothing else
+       re-renders while typing — a repaint on every keystroke would move the
+       caret to the end of the input. */
+    for (const p of ['a', 'e']) {
+      const label = document.getElementById(`cg-${p}-label`);
+      const hue = document.getElementById(`cg-${p}-hue`);
+      const prev = document.getElementById(`cg-${p}-preview`);
+      if (!prev) continue;
+      const sync = () => {
+        prev.textContent = (label && label.value.trim()) || 'New genre';
+        prev.setAttribute('style', huePreviewStyle(hue ? hue.value : ''));
+      };
+      if (label) label.oninput = sync;
+      if (hue) hue.onchange = sync;
+      /* Enter in a text field submits, which is what every reader expects of a
+         two-field form and what a bare <div> of inputs otherwise refuses to
+         do. Not a <form> element: this panel lives inside the Settings screen,
+         and a real submit would reload the page on any browser that decided the
+         handler had not cancelled it. */
+      const go = ev => {
+        if (ev.key !== 'Enter') return;
+        ev.preventDefault();
+        if (p === 'e') saveCustom(cgEditing); else addCustom();
+      };
+      if (label) label.onkeydown = go;
+      const kw = document.getElementById(`cg-${p}-kw`);
+      if (kw) kw.onkeydown = go;
+    }
+  }
+
+  function focusFirst(p) {
+    const el = document.getElementById(`cg-${p}-label`);
+    if (el) { el.focus(); el.select(); }
+  }
+
+  /* Every write goes through here: the tree has a row per genre and the open
+     shelf paints tags from the same table, so a genre that changed without a
+     refresh leaves the index disagreeing with Settings about what exists. */
+  function afterGenreChange() {
+    BT.tree.refresh();
+    refreshGenreStats();
+    paintCustom();
+  }
+
+  function addCustom() {
+    const form = readForm('a');
+    cgDraft = form;
+    const res = BT.genres.add(form);
+    if (!res.ok) { cgError = res.reason; paintCustom(); focusFirst('a'); return; }
+    cgDraft = { label: '', keywords: '', hue: '' };
+    cgError = '';
+    afterGenreChange();
+    focusFirst('a');
+    /* The toast says what the genre WILL do, because the two kinds behave
+       completely differently and the difference is invisible in the list. */
+    const g = res.genre;
+    BT.ui.toast(g.keywords.length
+      ? `Added “${g.label}” · its keywords are applied by Recalculate genres`
+      : `Added “${g.label}” · apply it to a book from its detail pane`, { ms: 7000 });
+  }
+
+  function saveCustom(id) {
+    if (!id) return;
+    const form = readForm('e');
+    const res = BT.genres.update(id, form);
+    if (!res.ok) { cgError = res.reason; paintCustom(); focusFirst('e'); return; }
+    cgEditing = null;
+    cgError = '';
+    afterGenreChange();
+    BT.ui.toast('Genre saved');
+  }
+
+  async function removeCustom(id) {
+    const g = BT.genres.byId(id);
+    if (!g) return;
+    const n = await countGenreUse(id);
+    /* The count is the whole point of this prompt, and so is the sentence about
+       what happens to those books — see the long note above. Both halves are
+       stated, because "Remove?" on its own gives the reader no way to tell a
+       harmless tidy-up from a change to two hundred records. */
+    const body = n
+      ? `${BT.util.pluralize(n, 'book')} ${n === 1 ? 'is' : 'are'} filed under it.\n\n`
+        + `Those books are NOT edited. The genre simply stops being drawn, so each one keeps its `
+        + `other genres — or shows General if this was its only one — and adding a genre with the `
+        + `same name again brings them all back exactly as they were.`
+      : 'No books are filed under it.';
+    if (!BT.ui.confirmDialog(`Remove “${g.label}”?\n\n${body}`)) return;
+    BT.genres.remove(id);
+    if (cgEditing === id) cgEditing = null;
+    cgError = '';
+    afterGenreChange();
+    BT.ui.toast(`Removed “${g.label}”`
+      + (n ? ` · ${BT.util.pluralize(n, 'book')} kept the filing, invisibly` : ''), { ms: 7000 });
+  }
+
   /* ══ KEY VERIFICATION ═════════════════════════════════════════════════════
      There is no Google Books client module yet — 22-googlebooks.js is the gap
      noted in index.html — so this is the one place that URL is built, and it
@@ -547,6 +910,14 @@ BT.viewSettings = (function () {
     const gb = BT.config.hasKey('googlebooks') ? await BT.net.budgetState('googlebooks') : null;
     if (alive && !alive()) return;
     stats = s;
+
+    /* The genre editor's transient state does NOT survive leaving the screen,
+       unlike the recalculation ledger above it. An open edit form is a keystroke
+       someone abandoned; the ledger is the only way back from a bulk write. And
+       `cgEditing` can name a genre that an import replaced while we were away,
+       which would render a form for something that no longer exists. */
+    cgEditing = null;
+    cgError = '';
 
     const onGithubIo = /\.github\.io$/i.test(location.hostname);
 
@@ -604,6 +975,31 @@ BT.viewSettings = (function () {
           </div>
           <div class="field__state" id="genreStats">${esc(statsLine(s))}</div>
           <div id="recalcPanel">${recalcPanel()}</div>
+        </div>
+
+        <div class="field">
+          <label class="field__label">Your own genres</label>
+          <div class="field__help">
+            The twelve built-in genres cannot be renamed or removed — their ids are stored in
+            every book on your shelf and in every export you have ever made — but you can add
+            as many of your own as you like, and they appear everywhere the built-ins do: the
+            index tree, the shelf, and a book’s genre chips.
+            <br><br>
+            <b>Keywords are optional, and they are what decides the kind of genre you get.</b>
+            Leave them empty and you get a label you apply yourself from a book’s detail pane —
+            which is the right shape for a shelf the catalogue knows nothing about, like
+            <span class="num">Books Dad Lent Me</span>. Give it keywords and it is <em>also</em>
+            matched against Open Library’s subject strings the next time you press Recalculate
+            genres, exactly as the built-in rules are. Custom keywords only ever <em>add</em> a
+            genre to a book — they can never take a built-in one away — so a novel catalogued
+            “weird fiction” can sit under Horror and under your own shelf at once.
+            <br><br>
+            Colour picks one of the six hue families the palette has, and a family is shared by
+            two genres by design: the hue says which part of the shelf, the label says which
+            genre. There is no seventh colour to invent — this palette is shared with a sibling
+            app, and the reasoning is in <span class="num">css/01-tokens.css</span>.
+          </div>
+          <div id="cgPanel">${customPanel()}</div>
         </div>
       </section>`;
   }
@@ -831,6 +1227,7 @@ BT.viewSettings = (function () {
     const on = (id, ev, fn) => { const el = document.getElementById(id); if (el) el[ev] = fn; };
 
     wireRecalc();
+    wireCustom();
 
     /* ── Google Books key ─────────────────────────────────────────────── */
     on('key-gb-save', 'onclick', async () => {

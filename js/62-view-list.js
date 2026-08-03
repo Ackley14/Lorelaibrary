@@ -47,6 +47,12 @@ BT.viewLibrary = (function () {
      (see BT.GENRE_RULES — the first rule that hits wins, and the specific
      buckets are tested first). */
   const bucketOf = it => BT.ui.genresOf(it)[0] || 'general';
+  /* BT.GENRE_BUCKETS is an accessor — built-ins plus the user's own genres, in
+     display order, with `general` last — so a genre added in Settings sorts and
+     groups here without this file knowing it exists. `indexOf` is read per row
+     rather than hoisted for exactly that reason: the array is rebuilt whenever
+     the custom list changes, and a captured copy would sort a shelf by an order
+     that no longer exists. */
   const bucketRank = it => {
     const i = BT.GENRE_BUCKETS.indexOf(bucketOf(it));
     return i < 0 ? BT.GENRE_BUCKETS.length : i;   // unknown bucket sorts last

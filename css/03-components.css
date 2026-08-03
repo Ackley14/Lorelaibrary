@@ -374,6 +374,19 @@ td.num { text-align: right; }
   color: var(--bt-text-muted); background: var(--bt-surface-sunk);
   box-shadow: inset 0 0 0 1px var(--bt-line-rule);
 }
+/* ── Genres the USER invented (`.tag.x-…`, `.c-x-…`) ──────────────────────
+   Not here, and they cannot be: a genre added in Settings did not exist when
+   this file was written, so BT.genres (js/00-config.js) emits one rule per
+   custom genre into a single <style> element at boot and rebuilds it whenever
+   the list changes. Those rules are byte-for-byte the shape of the ones above —
+   the tag text reads a `--bt-genre-<id>` alias, the ground and border read that
+   family's -wash/-edge pair — because the whole point is that a user's genre is
+   not a second-class citizen with its own look.
+
+   Every custom id starts `x-`, which is why nothing above can collide with one
+   and why the selector is always a legal identifier. If you are debugging a
+   genre tag that renders as bare uppercase text, the question is whether that
+   style element has a rule for its id, not whether this file is missing one. */
 
 /* ── Format. Deliberately monochrome and deliberately tiny: format is a
       property of the copy you own, not of the book, so it must never pull

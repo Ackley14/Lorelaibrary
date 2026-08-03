@@ -602,6 +602,75 @@ a.src:hover { background: var(--bt-surface-hover); }
 .runres__l { font-size: var(--bt-fs-base); color: var(--bt-text-primary); }
 .runres .field__help:last-child { margin-bottom: 0; }
 
+/* ── Your own genres ──────────────────────────────────────────────────────
+   The list of user-defined genres and the form that adds one. Built out of the
+   pieces already on this screen — `.deck`'s framed panel, `.field`'s inputs,
+   `.tag`'s chip — because a genre editor that invented its own controls would
+   be the only place in the app where a text box looked different.
+
+   THE TAG IS THE POINT of the row, and it is a REAL tag: the class is the
+   genre's own id, so the ground and the border come from the stylesheet
+   BT.genres injects at runtime. That means the row shows exactly what the shelf
+   will show, including the fact that the hue is shared with two built-ins — a
+   swatch of the raw colour would have looked like a promise of a colour of its
+   own, which is the one thing this palette does not offer.
+
+   The form is a flex row that wraps rather than a grid, for the reason the
+   segmented control gives: this pane is 720px at most and becomes a phone-width
+   column, and a four-column grid at that size squeezes the keywords field —
+   the longest value here — down to about eight characters. */
+.cgen {
+  border: var(--bt-rule-w) solid var(--bt-line-hairline);
+  border-radius: var(--bt-radius); background: var(--bt-surface-raised);
+  box-shadow: var(--bt-shadow-inset-top);
+  padding: 0 var(--bt-space-4); margin-bottom: var(--bt-space-4);
+}
+.cgen__row {
+  display: flex; align-items: center; gap: var(--bt-space-3);
+  padding: var(--bt-space-3) 0;
+  border-bottom: var(--bt-rule-w) solid var(--bt-line-hairline);
+}
+.cgen__row:last-child { border-bottom: 0; }
+.cgen__row .tag { flex: 0 0 auto; max-width: 42%; overflow: hidden; }
+/* Keywords take whatever is left and truncate. A genre with twenty of them is
+   legal and would otherwise push the buttons off the end of the row. */
+.cgen__kw {
+  flex: 1 1 auto; min-width: 0;
+  font-size: var(--bt-fs-sm); color: var(--bt-text-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cgen__kw i { color: var(--bt-text-faint); }
+.cgen__n {
+  flex: 0 0 auto; font-family: var(--bt-font-mono);
+  font-size: var(--bt-fs-mini); color: var(--bt-text-faint);
+}
+
+.cgen__form { display: flex; flex-wrap: wrap; gap: var(--bt-space-3); align-items: flex-end; }
+/* The edit form REPLACES a row inside the framed list, so it takes the same
+   teal "this is a decision in progress" treatment as `.ask` — without it the
+   row being edited is indistinguishable from the rows that are not. */
+.cgen__form--edit {
+  padding: var(--bt-space-4);
+  margin: var(--bt-space-3) calc(var(--bt-space-4) * -1);
+  background: var(--bt-teal-wash);
+  box-shadow: inset var(--bt-marker-w) 0 0 var(--bt-teal);
+}
+.cgen__f { flex: 1 1 160px; min-width: 0; }
+.cgen__f--wide { flex: 2 1 240px; }
+/* The hue picker gets its own basis because its options carry the most text on
+   the row — the colour word plus the two built-in genres that share it — and a
+   closed <select> truncates rather than wrapping. */
+.cgen__f--hue { flex: 1 1 210px; }
+.cgen__f--go { flex: 1 1 230px; }
+.cgen__lbl {
+  display: block; font-size: var(--bt-fs-micro); text-transform: uppercase;
+  letter-spacing: var(--bt-tracking-caps); color: var(--bt-text-muted); margin-bottom: 4px;
+}
+/* Matches the height of the inputs beside it so the buttons and the preview sit
+   on the same baseline as the fields, not above them. */
+.cgen__go { display: flex; align-items: center; gap: var(--bt-space-2); height: var(--bt-control-h); }
+.cgen__go .tag { flex: 0 1 auto; overflow: hidden; }
+
 /* ══ FIRST RUN / UNLOCK ═══════════════════════════════════════════════════ */
 
 .firstrun { padding: var(--bt-space-7) var(--bt-space-6); max-width: 620px; }

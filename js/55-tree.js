@@ -151,7 +151,15 @@ BT.tree = (function () {
         { id: 'st-finished', label: 'Finished', route: '#/library?status=finished', n: byStatus.finished, dot: 'finished' },
         { id: 'st-dropped', label: 'Dropped', route: '#/library?status=dropped', n: byStatus.dropped, dot: 'dropped' },
         /* Ids and labels both come from config so the tree can never drift out
-           of step with the bucketing rules or with any other screen. */
+           of step with the bucketing rules or with any other screen.
+
+           BT.GENRE_BUCKETS is an ACCESSOR, not a constant: it answers with the
+           twelve built-ins plus whatever genres the user has added in Settings,
+           re-read on every refresh. That is why adding a genre needs no change
+           here — the row, its count and its dot all fall out of this map. The
+           dot's class is `c-<id>`, and for a custom genre the rule behind it is
+           injected at runtime by BT.genres rather than written in
+           03-components.css. */
         { id: 'genres', label: 'By genre', children: BT.GENRE_BUCKETS.map(id => ({
           id: 'g-' + id,
           label: BT.GENRE_LABELS[id] || id,

@@ -220,7 +220,16 @@ BT.ui = (function () {
 
      Dedupe AFTER resolving, not before: a part-migrated record can carry both
      `fantasysf` and `fantasy`, and the raw check would pass them as two ids and
-     draw the same chip twice. */
+     draw the same chip twice.
+
+     THE `BT.GENRE_LABELS[id]` TEST IS ALSO THE DELETE POLICY for user-defined
+     genres. Removing one in Settings does not touch a single stored record —
+     the app refuses to bulk-edit the user's data, exactly as it refuses to
+     rewrite `fantasysf` — so books keep the dead id and this line is what makes
+     that harmless: an id with no label is dropped here, so it never reaches a
+     tag, a tree count or a list group, and a book left with nothing falls
+     through to 'general' on the last line. Re-adding a genre with the same name
+     mints the same id and every one of those books comes straight back. */
   function genresOf(item) {
     const raw = (item && item.genres) || [];
     const ids = [];

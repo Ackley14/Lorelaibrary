@@ -487,10 +487,18 @@ BT.inspector = (function () {
   }
 
   /* ══ GENRE ════════════════════════════════════════════════════════════════
-     The seven buckets are DERIVED, by mapping Open Library's subjects through
+     The buckets are DERIVED, by mapping Open Library's subjects through
      BT.GENRE_RULES — and those subjects are whatever fell out of a MARC record,
      an Internet Archive ingest or a bestseller-list scrape. The result is wrong
      often enough that a reader must be able to say so, which is what this is.
+
+     THE CHIP ROW IS NOT JUST THE BUILT-IN TWELVE. BT.GENRE_BUCKETS is an
+     accessor that answers with the built-ins plus every genre the user added in
+     Settings, so a custom genre is offered here automatically — and a
+     manual-only one (a custom genre given no keywords, which therefore never
+     matches a subject string) can ONLY ever be applied from this row. That is
+     the whole delivery mechanism for half the feature, and it needs no code
+     here beyond reading the same array this always read.
 
      THE ONE DETAIL THAT MATTERS is where the correction is stored. Writing
      `item.genres` alone lasts exactly until the next background refresh: 38-
@@ -526,6 +534,11 @@ BT.inspector = (function () {
         : '');
   }
 
+  /* The membership test is what keeps a stale chip from writing a dead id: the
+     Settings screen can remove a custom genre while this pane is open, and the
+     chip for it is still in the DOM until something re-renders. Reading the
+     accessor rather than a captured copy means the removed genre is simply no
+     longer a legal answer. */
   async function toggleGenre(uid, id) {
     if (BT.GENRE_BUCKETS.indexOf(id) < 0) return;
     const cur = await BT.repo.getItem(uid);

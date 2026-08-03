@@ -128,6 +128,11 @@
      no hue: it renders in muted text on a sunk ground, exactly the treatment
      .prec.unknown gets. Colouring it would dress an absence of information up
      as a classification. */
+  /* A genre the USER adds in Settings gets its own --bt-genre-x-… alias, but it
+     is emitted at runtime by BT.genres rather than written here — a token for a
+     genre that does not exist yet cannot be. It always points at one of the six
+     families below, because the picker offers families and never colours; the
+     rule about not inventing a seventh hue is enforced there as well as here. */
   --bt-precision-day: var(--bt-teal);
   --bt-precision-month: var(--bt-amber);
   --bt-precision-year: var(--bt-coral);
