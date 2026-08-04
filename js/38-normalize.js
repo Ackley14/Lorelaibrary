@@ -1,12 +1,20 @@
 /* ══════════════════════════════════════════════════════════════════════════
    Normalization — the single choke point where a remote payload may become a
-   stored item. Nothing outside this file is allowed to read a raw Open Library
+   stored item. Nothing outside this file is allowed to read a raw catalogue
    response into a record.
 
-   MovieTrak had four SOURCES to reconcile. BookTrak has one source and four
-   SHAPES, which is harder, because they all look plausible and none of them
-   agrees with the others about anything:
+   TWO SOURCES AND FIVE SHAPES, and they all look plausible while agreeing with
+   each other about almost nothing:
 
+     GOOGLE BOOKS — the primary source
+     volume         ONE PRINTING, and by far the richest single payload in the
+                    app: title, author NAMES, a real 'YYYY-MM-DD' publication
+                    date, a description, BISAC categories, a page count, a
+                    publisher, a cover URL and ISBNs — all in one response. What
+                    it has NO concept of is a WORK: no editions-of-a-work
+                    endpoint, no work id, and no author id space at all.
+
+     OPEN LIBRARY — retained for the graph Google does not have
      search doc     lean, work-level, no ISBNs (asking for them is a 22x
                     payload blowup — see 20-openlibrary.js), a `first_publish_year`
                     that is frequently wrong, and relevance ordering that has to
@@ -23,13 +31,26 @@
                     inline, which is why it is the scan path's first choice.
                     It carries no work key, so it cannot reach the work.
 
-   Three things in here are load-bearing and are commented where they happen:
+   Four things in here are load-bearing and are commented where they happen:
 
    1. IDENTITY. `book:<source>:<id>` — three parts, never two. `parseUid`
       rejoins everything after the second colon, which is what keeps
-      alphanumeric OLIDs (`OL27482W`) and 13-digit ISBNs safe. The uid is
-      immutable once assigned: it is the foreign key in snapshots, the feed,
-      the URL, and every id-index row.
+      alphanumeric OLIDs (`OL27482W`), Google volume ids (`LLSpngEACAAJ`) and
+      13-digit ISBNs safe. The uid is immutable once assigned: it is the foreign
+      key in snapshots, the feed, the URL, and every id-index row.
+
+      `<source>` is now one of `openlibrary`, `isbn` or `googlebooks`. THE THIRD
+      IS ONLY EVER MINTED FOR A BOOK OPEN LIBRARY HAS NEVER HEARD OF — which is
+      the ordinary state of a forthcoming title and the reason the pivot
+      happened. Where both catalogues hold the book, mergeSearchStubs keeps the
+      Open Library uid, so every record already on the reader's shelves keeps
+      deduping exactly as it did before. Nothing migrates and nothing is
+      renumbered.
+
+   4. THE CROSS-SOURCE MERGE (mergeSearchStubs) is where the two catalogues are
+      reconciled: Open Library supplies identity and the work graph, Google
+      supplies the metadata and the date, and pickRelease arbitrates so that a
+      coarser answer can never overwrite a finer one in either direction.
 
    2. PINNED vs CANDIDATE ISBNs. `isbnsPinned` is an OWNERSHIP CLAIM;
       `isbnsCandidate` is a list of POSSIBILITIES. They go to different id
@@ -74,6 +95,178 @@ BT.normalize = (function () {
   }
 
   const arr = v => (Array.isArray(v) ? v : (v == null ? [] : [v]));
+
+  /* ══ THE IDENTITY FOLDS ═══════════════════════════════════════════════════
+     "Is this the same book?" and "is this the same person?" are asked in four
+     places — collapsing duplicate work records in search, collapsing Google's
+     printings into books, merging a Google row against an Open Library one, and
+     the date matcher's confidence test. ONE fold answers all four, because two
+     folds is two answers and the disagreement shows up as a duplicate row that
+     nobody can explain from either call site.
+
+     ── TITLES ──────────────────────────────────────────────────────────────
+     Folded for COMPARISON only, never for display. A trailing parenthetical is
+     dropped — Google routinely appends edition furniture ('Dune (40th
+     Anniversary Edition)') that Open Library does not, and without this every
+     anniversary reissue fails a match it should pass.
+
+     AND THE LEADING ARTICLE IS NORMALISED AWAY, because the two catalogues
+     genuinely disagree about it and the disagreement is not an edge case.
+     Measured live, on the exact book the date feature was built for:
+
+         Open Library work OL37620147W  title 'Haunting of Velkwood'
+         Google Books                   title 'The Haunting of Velkwood'
+                                              publishedDate '2024-03-05'
+
+     One row came back, it was unmistakably the right book, and an exact fold
+     refused it — so the record kept its bare '2024'. Open Library drops or
+     inverts the article on a large share of its work records; the MARC-derived
+     ones carry the inverted form ('Hobbit, The'), which is the same
+     disagreement written backwards, so both shapes are handled.
+
+     Safe to drop, and this is the part worth being sure about: the article is
+     never the distinguishing part of a title, and every caller pairs this with
+     an author test. Two different books by one author whose titles differ ONLY
+     by a leading 'the' is not a case that exists. */
+  const ARTICLE_INVERTED = /,\s*(the|an|a)\s*$/i;
+  const ARTICLE_LEADING = /^(the|an|a) /;
+  /* A trailing parenthetical: '(Movie Tie-In)', '(40th Anniversary Edition)',
+     '(Star Wars)'. Edition furniture a PRINTING carries and a WORK does not. */
+  const TRAILING_PAREN = /\s*\([^)]*\)\s*$/;
+
+  /* The display-safe title. Same strip foldTitle applies for COMPARISON, so a
+     title can never render one way and match another. Used by fromVolume,
+     where the payload is a printing rather than a work. */
+  function stripEditionFurniture(s) {
+    const out = String(s == null ? '' : s).replace(TRAILING_PAREN, '').trim();
+    /* Never strip a title down to nothing. A volume genuinely titled
+       '(Untitled)' would otherwise become a record with no title, which
+       mergeItem discards outright. */
+    return out || String(s == null ? '' : s).trim();
+  }
+
+  function foldTitle(s) {
+    const trimmed = String(s == null ? '' : s)
+      .replace(TRAILING_PAREN, '')
+      /* Before normalizeTitle, which turns the comma into a space and destroys
+         the only signal that says this is an inverted title rather than a real
+         one ending in the word 'a'. */
+      .replace(ARTICLE_INVERTED, '');
+    return BT.util.normalizeTitle(trimmed).replace(ARTICLE_LEADING, '');
+  }
+
+  /* ── PEOPLE ──────────────────────────────────────────────────────────────
+     Surnames rather than full names, because every catalogue in this app
+     disagrees about initials and middle names far more often than about the
+     family name: 'J.R.R. Tolkien', 'J. R. R. Tolkien' and 'John Ronald Reuel
+     Tolkien' are one author and three strings. */
+  function surnameOf(name) {
+    const parts = BT.util.normalizeTitle(name).split(' ').filter(Boolean);
+    /* Single-token names are real ('Homer', 'Colette') and are their own
+       surname; for everything else the last token is the family name. */
+    return parts.length ? parts[parts.length - 1] : '';
+  }
+
+  function surnameSet(names) {
+    const out = new Set();
+    for (const n of arr(names)) {
+      const s = surnameOf(typeof n === 'string' ? n : (n && n.name) || '');
+      if (s) out.add(s);
+    }
+    return out;
+  }
+
+  /* `surname|first initial`, AND THE INITIAL IS THE WHOLE POINT.
+
+     A surname-only test is not close enough, and the failure is not
+     theoretical — it was measured on this app's own search screen. Live
+     `q=dune` returns, from two catalogues:
+
+         Google        'Dune', Frank Herbert, publishedDate 1990-09-01
+         Open Library  OL893414W  'Dune', Frank Herbert, 1965
+                       OL19618275W 'Dune', BRIAN Herbert, 2001
+
+     Same folded title, same surname. On a surname test the Google row merged
+     with the WRONG Open Library work — Brian's — and the merged row then took
+     Google's 1990 printing date because it was earlier than Brian's 2001,
+     rendering the most famous novel in the list as "Dune, Sep 1 1990" under an
+     identity belonging to a different book. Two errors from one loose compare.
+
+     The same notch keeps Tabitha King out of Stephen King's bibliography in
+     25-googlebooks' credit check, which is the same fold asking the same
+     question about a different payload. */
+  function personKey(name) {
+    const parts = BT.util.normalizeTitle(name).split(' ').filter(Boolean);
+    if (!parts.length) return '';
+    const last = parts[parts.length - 1];
+    return parts.length > 1 ? `${last}|${parts[0][0]}` : last;
+  }
+
+  /* Do two person keys name one person? Exact, or the same surname where one
+     side carries no forename at all — a follow stored as a bare surname, a
+     volume credited to 'Colette'. Where BOTH sides have a forename the initials
+     must agree, because that is the only thing separating Frank from Brian. */
+  function personMatches(a, b) {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    const [sa, ia] = a.split('|');
+    const [sb, ib] = b.split('|');
+    if (sa !== sb) return false;
+    return !ia || !ib;
+  }
+
+  /* A grouping key for rows FROM ONE SOURCE, where author order is consistent:
+     folded title plus the primary author's person key. Used to collapse
+     Google's printings into books and to collapse near-duplicate search rows.
+
+     personKey rather than the bare surname for the reason above: 'Dune' by
+     Frank Herbert and 'Dune' by Brian Herbert are two books, and a key that
+     folds them together silently deletes one of them from the results.
+
+     Returns '' for anything untitled, and a caller must drop those rather than
+     bucket them together — a shared empty key folds every untitled record into
+     one. */
+  function matchKey(title, authors) {
+    const t = foldTitle(title);
+    if (!t) return '';
+    const first = arr(authors).map(a => (typeof a === 'string' ? a : (a && a.name) || ''))
+      .find(Boolean) || '';
+    const p = personKey(first);
+    return p ? `${t}|${p}` : t;
+  }
+
+  /* "Are these two records the same book?" — the CROSS-SOURCE test, and it is
+     looser than matchKey in exactly one way: it compares author SETS rather
+     than primary authors, because Google and Open Library disagree about author
+     order on anthologies and collaborations constantly, and insisting on the
+     same person being listed first would refuse a genuine match on a
+     co-authored book. It is NOT looser about who the people are.
+
+     An author-less side is admitted on the title alone. That is a real risk and
+     a bounded one — the alternative is refusing to merge a Google row against
+     the Open Library work record it obviously belongs to whenever Open Library
+     lost the byline, which produces two rows for one book on the search screen
+     and, worse, adds the book twice. */
+  function personKeys(authors) {
+    const out = [];
+    for (const a of arr(authors)) {
+      const k = personKey(typeof a === 'string' ? a : (a && a.name) || '');
+      if (k && out.indexOf(k) < 0) out.push(k);
+    }
+    return out;
+  }
+
+  function sameBook(a, b) {
+    if (!a || !b) return false;
+    const ta = foldTitle(a.title), tb = foldTitle(b.title);
+    if (!ta || ta !== tb) return false;
+    const ka = personKeys(a.authors);
+    const kb = personKeys(b.authors);
+    if (!ka.length || !kb.length) return true;
+    for (const x of ka) for (const y of kb) if (personMatches(x, y)) return true;
+    return false;
+  }
+
   /* Page counts and extents: 0 and null both mean "not recorded", never "zero
      pages". Emitting 0 would survive the merge prune and blank a good figure. */
   const posInt = v => {
@@ -268,7 +461,15 @@ BT.normalize = (function () {
        This is the structural half of the never-downgrade guarantee; the other
        half is in 25-googlebooks.js, which declines to spend a request at all
        when the record is already finer than year. Both exist because one of
-       them is a policy and the other is an invariant. */
+       them is a policy and the other is an invariant.
+
+       IT RUNS IN BOTH DIRECTIONS, which matters now that two catalogues are
+       live. Google usually holds the finer date and usually wins — a
+       full-weight day (1.0) against a half-weight year (0.2) is not close. But
+       Google is coarse about the backlist ('The Hobbit, 2012 edition' ->
+       '2012'), and an Open Library EDITION record occasionally carries a real
+       day; in that case the ratchet refuses the Google year and Open Library
+       keeps it. Neither source is trusted by name here. Precision is. */
     if (precisionRank(fresh.precision) < precisionRank(existing.precision)) {
       return keep(existing);
     }
@@ -557,6 +758,93 @@ BT.normalize = (function () {
     return [...byId.values()].sort((a, b) => (a.order || 0) - (b.order || 0));
   }
 
+  /* ══ DUAL AUTHOR IDENTITY ════════════════════════════════════════════════
+     One person, two names, and BOTH have to be kept.
+
+     A follow is only reliable when it is keyed on an Open Library OLID — a
+     name-scoped author query answers `author=gwendolyn+kiste` with LAIRD
+     BARRON'S bibliography at HTTP 200, so a name-keyed follow is not a degraded
+     follow, it is a confident feed of the wrong writer.
+
+     But Google has no author id space AT ALL, so the Google half of that
+     follow can only ever be queried by name — and it has to be Google's OWN
+     spelling of the name, because that is the string its index matches on.
+     'J.R.R. Tolkien' and 'J. R. R. Tolkien' are one author and two query
+     results. Google will have the forthcoming book; Open Library will not. So
+     the OLID without the Google name is a follow that cannot see what is
+     coming, and the Google name without the OLID is a follow that may be
+     watching a stranger.
+
+     This function is where the two are joined, at the one moment both are on
+     the table: a search row that Google and Open Library both returned. The
+     merged author carries
+
+         name    Google's exact string — the display name AND the Google query
+         gbName  the same string, kept under its own key so a caller can tell a
+                 name that came FROM Google from one that merely survived a
+                 merge. A follow stores this verbatim.
+         olid    Open Library's id — the Open Library query, and the follow key
+
+     Matched on `personKey` (surname + first initial) rather than on the exact
+     string, because the exact strings are what disagree. Where the counts and
+     the keys do not line up — an anthology Open Library credits to nine people
+     and Google to two — the unmatched Google names are kept without an OLID
+     rather than paired by position, and a follow simply is not offered for
+     them. An unfollowable author is visible and harmless; a follow pointing at
+     the wrong person is neither. */
+  function mergeAuthorIdentities(gbAuthors, olAuthors) {
+    const ol = arr(olAuthors).filter(Boolean);
+    const taken = new Set();
+    const out = [];
+
+    arr(gbAuthors).filter(Boolean).forEach((g, i) => {
+      const want = personKey(g.name);
+      let match = null;
+      for (let j = 0; j < ol.length; j++) {
+        if (taken.has(j) || !ol[j].olid) continue;
+        /* An Open Library author record reached through a WORK carries a key
+           and no name (see authorsFromKeys), so there is nothing to compare —
+           those are left for the positional pass in 20-openlibrary's
+           defendGoogleFields, which only runs when there is exactly one of
+           each and therefore no ambiguity to get wrong. */
+        if (!ol[j].name || !personMatches(personKey(ol[j].name), want)) continue;
+        match = ol[j]; taken.add(j); break;
+      }
+      out.push({
+        id: (match && match.olid) || g.id || slug(g.name),
+        olid: (match && match.olid) || '',
+        name: g.name,
+        gbName: g.gbName || g.name,
+        role: g.role || 'author',
+        order: i,
+        source: match ? 'merged' : 'googlebooks',
+      });
+    });
+
+    /* Anyone Open Library credits that Google did not. Kept because a byline
+       missing a co-author is a wrong byline, and they are followable — they
+       have an OLID. They have no Google name, which is the honest state: the
+       Google half of that follow will have to fall back to the OLID's own
+       recorded name.
+
+       EXCEPT A NAME THAT FOLDS TO NOTHING. Open Library carries transliterated
+       duplicate author records — the live `q=dune` work OL893414W is credited
+       to both 'Frank Herbert' and 'Френк Герберт', which are one man and two
+       rows. `personKey` folds to the empty string for a name with no Latin
+       characters at all, so such a row can never be matched to a Google author
+       and would sit in the byline for ever as a second, unfollowable-in-
+       practice copy of somebody already listed. Dropped only when Google
+       supplied a byline to compare against — with no Google side there is
+       nothing better available and the row is the only credit there is. */
+    ol.forEach((a, j) => {
+      if (taken.has(j) || !a.name) return;
+      if (out.length && !personKey(a.name)) return;
+      out.push(Object.assign({}, a, { order: out.length, gbName: a.gbName || '' }));
+    });
+
+    return out;
+  }
+
   /* ══ ISBNs — THE HEART OF THE APP ════════════════════════════════════════
      Two arrays, two id namespaces, and they MUST NEVER BE CONFLATED:
 
@@ -795,6 +1083,437 @@ BT.normalize = (function () {
         normalizerVersion: 1, partial: 1, manualOverrides: {},
       },
     };
+  }
+
+  /* ══════════════════════════════════════════════════════════════════════════
+     GOOGLE VOLUME → ITEM
+     ══════════════════════════════════════════════════════════════════════════
+     The primary metadata shape. A Google volume is ONE PRINTING and carries, in
+     a single response, everything the four Open Library shapes only manage
+     between them: title, author NAMES, a real publication date, a description,
+     BISAC categories, a page count, a publisher, a cover URL and ISBNs.
+
+     SO IT IS BOTH THE SEARCH STUB AND THE DETAIL RECORD, which is why there is
+     one function here rather than the stub/work/edition trio Open Library
+     needs. `opts.partial` is the only difference between the two uses, and it
+     means something specific: "an Open Library work record is known to exist
+     for this book and will fill in the work-level half". A Google-ONLY row sets
+     it to 0, because there is genuinely nothing more to fetch — leaving it at 1
+     would re-run a hydrate that can only ever return null, once per pane open,
+     for ever.
+
+     SCOPE IS 'open' BY DEFAULT AND THAT IS NOT A COMPROMISE. A volume names one
+     printing, but a reader who searched for "Dune" meant the book — pinning the
+     printing Google's ranker happened to return would stamp a publisher, an
+     extent and an ISBN onto the record that they never chose. So the ISBNs go
+     to `isbnsCandidate`, never `isbnsPinned`. The scan door passes
+     `opts.isbn13` and gets 'closed', which is the one case where the reader
+     really did name a printing: they were holding it.
+
+     ── WHY NO WORK OLID IS INVENTED ────────────────────────────────────────
+     Google has no work concept at all. There is no id here that could become
+     `ids.olWork`, and guessing one from a title match would put a wrong
+     `olwork:` row in the id index — which is a silent dedup failure that makes
+     two different books resolve to one item. The merge with an Open Library row
+     (mergeSearchStubs, below) is the ONLY way a Google record acquires a work
+     id, and it does so from an Open Library record that actually stated it. */
+
+  function isbnsFromVolume(raw) {
+    const out = [];
+    for (const row of arr(raw && raw.volumeInfo && raw.volumeInfo.industryIdentifiers)) {
+      const t = row && row.type;
+      if (t !== 'ISBN_10' && t !== 'ISBN_13') continue;
+      const v = String((row && row.identifier) || '').toUpperCase().replace(/[^0-9X]/g, '');
+      const c = v.length === 13
+        ? (BT.util.isValidEan13(v) ? v : '')
+        : (v.length === 10 ? (BT.util.isbn10to13(v) || '') : '');
+      if (c && out.indexOf(c) < 0) out.push(c);
+    }
+    return out;
+  }
+
+  /* BISAC headings arrive as one slash-delimited string per category:
+     'Fiction / Fantasy / Epic', 'Juvenile Fiction / Fantasy & Magic'. Both the
+     whole heading AND its segments are kept as subjects.
+
+     The whole heading matters because BT.GENRE_RULES is written to match those
+     compound strings directly ('Juvenile Fiction / Fantasy & Magic' is one
+     string and only one rule may claim it — see the ordering note in
+     00-config.js). The segments matter because `rec.terms` is a taste vector,
+     and 'Epic' on its own is a term two epic fantasies can actually share while
+     the full heading is too specific to ever collide. */
+  function expandCategories(categories) {
+    const out = [];
+    for (const c of arr(categories)) {
+      const s = String(c || '').trim();
+      if (!s) continue;
+      out.push(s);
+      if (s.indexOf('/') < 0) continue;
+      for (const part of s.split('/')) {
+        const p = part.trim();
+        if (p && out.indexOf(p) < 0) out.push(p);
+      }
+    }
+    return out;
+  }
+
+  const GB_BASE = 'https://books.google.com';
+
+  function fromVolume(raw, opts) {
+    opts = opts || {};
+    if (!raw || !raw.id) return null;
+    const info = raw.volumeInfo || {};
+    const id = String(raw.id);
+
+    const rawTitle = String(info.title || '').trim();
+    /* A volume with no title is not a record. It would also be discarded by
+       mergeItem a moment later, so it is refused here where the caller can
+       still tell the difference between "nothing came back" and "something
+       unusable came back". */
+    if (!rawTitle) return null;
+
+    /* EDITION FURNITURE IS STRIPPED FROM THE DISPLAY TITLE, and the original is
+       kept in `originalTitle` so nothing is lost.
+
+       A Google volume is ONE PRINTING and its title is that printing's title,
+       marketing and all. Measured live on `q=dune`, on separate runs, the top
+       result was titled 'Dune' once and 'Dune (Movie Tie-In)' the next — same
+       book, same author, same catalogue, different printing promoted by the
+       ranker that day. The parenthetical is not part of the novel's title, and
+       carrying it through does two visible kinds of damage:
+
+         · the row reads 'Dune (Movie Tie-In)' to somebody who typed 'dune';
+         · it MISSES THE EXACT-TITLE BOOST in 61-view-search's rerank, which
+           compares the normalised title against the normalised query. On the
+           run where Google promoted the tie-in, the real novel fell to third
+           behind two Brian Herbert sequels that did match exactly — which is
+           FAILURE 1, the whole reason that re-ranking exists, arriving through
+           a side door.
+
+       Stripped with the same rule foldTitle already uses for COMPARISON, so
+       display and matching cannot disagree about what a title is. Titles that
+       genuinely end in a parenthetical are vanishingly rare in book
+       cataloguing, and the raw string is one field away. */
+    const title = stripEditionFurniture(rawTitle);
+
+    const isbns = isbnsFromVolume(raw);
+    const scanned = opts.isbn13 && BT.util.isValidEan13(opts.isbn13) ? String(opts.isbn13) : null;
+    const closed = !!scanned || opts.scope === 'closed';
+    /* THE SCANNED CODE WINS ABSOLUTELY, exactly as it does in pinnedIsbns for
+       an Open Library edition, and for the same measured reason: field presence
+       is unreliable enough that a record fetched BY ISBN can come back without
+       carrying it, and round-tripping the barcode through the response pins the
+       book to nothing. Trust what came off the barcode. */
+    const pinned = closed ? [...new Set((scanned ? [scanned] : []).concat(isbns))] : [];
+
+    const rawSubjects = expandCategories(info.categories);
+    const subjects = cleanSubjects(rawSubjects);
+    /* Empty in, nothing out — see ensureGenres. A volume with no categories
+       must not answer "General" over a bucket an Open Library work record
+       already worked out. */
+    const genres = subjects.length ? bucketGenres(rawSubjects) : [];
+
+    const authors = authorsFromNames(info.authors);
+    /* Author records from Google carry NO id of any kind — there is no author
+       id space in this API — so `olid` stays empty and `id` falls back to the
+       name slug. Marked with their true source so nothing downstream mistakes a
+       name-derived id for an OLID.
+
+       `gbName` is the EXACT string Google's index matches on, kept under its own
+       key rather than left to be inferred from `name` later. A follow stores it
+       verbatim, because a follow that queries Google with Open Library's
+       spelling of a name gets a different result set — see the dual-identity
+       note above mergeAuthorIdentities. */
+    for (const a of authors) { a.olid = ''; a.source = 'googlebooks'; a.gbName = a.name; }
+
+    const release = buildRelease(info.publishedDate || '', {
+      basis: 'googlebooks-published',
+      source: 'googlebooks',
+      /* A volume in the index is a book that exists — including one that has
+         not published yet, which the date itself then says. */
+      inPrint: true,
+    });
+
+    const publishers = info.publisher ? publishersOf({ publishers: [info.publisher] }) : [];
+    const series = seriesOf(info);
+    const language = BT.lang.short(info.language);
+
+    const item = {
+      uid: uidOf('googlebooks', id),
+      kind: KIND,
+      scope: closed ? 'closed' : 'open',
+      facets: {},
+
+      ids: {
+        /* No work id and no edition OLID: Google has neither. `isbn13` is set
+           only on a CLOSED record, because 59-editions reads it as part of the
+           pinned set and an open item claiming it would render an arbitrary
+           printing as already chosen. */
+        olWork: null, workOlid: null,
+        olEdition: null, editionOlid: null,
+        isbn13: closed ? (pinned[0] || null) : null,
+        isbn10: null,
+        goodreads: null, librarything: null, oclc: null, lccn: null,
+        googlebooks: id,
+      },
+
+      title,
+      subtitle: String(info.subtitle || '').trim(),
+      /* The printing's own title, verbatim. Kept because it is real data and
+         because rankByRelevance scores it as a second haystack — a reader who
+         genuinely types "dune movie tie in" should still find the row. */
+      originalTitle: rawTitle,
+      description: String(info.description || ''),
+      firstSentence: '',
+
+      authors,
+      publishers,
+      pageCount: posInt(info.pageCount),
+      languages: language ? [language] : [],
+
+      subjects,
+      subjectFacets: { people: [], places: [], times: [] },
+      genres,
+      /* `coverUrl` rather than a cover id, because Google's covers are not
+         Open Library's and there is no id to rebuild one from. BT.ui.posterUrl
+         passes an absolute URL straight through; BT.GB.cover has already forced
+         https, stripped the server-side page-curl effect and set the zoom. */
+      images: {
+        coverId: null,
+        covers: [],
+        coverUrl: BT.GB.cover(info.imageLinks, 'lg'),
+        source: 'googlebooks',
+      },
+
+      release,
+      firstPublishYear: null,
+
+      /* CANDIDATES, NEVER PINNED, on an open record. A volume's one or two
+         ISBNs are far short of the forty a work carries, but the namespace rule
+         is about MEANING rather than count: an open item has not told us which
+         copy is on the shelf, so its ISBNs are possibilities the scanner may
+         offer to pin — not an ownership claim that would make a later scan of
+         that printing refuse to add anything. See the block above pinnedIsbns. */
+      isbnsPinned: pinned,
+      isbnsCandidate: closed ? [] : isbns,
+      /* Google cannot say how many printings exist — it has no work graph — so
+         this stays null rather than being guessed from a result count. The
+         editions picker resolves an Open Library work from a candidate ISBN when
+         the reader actually opens it. */
+      editionsTotal: null,
+      editionsSeen: 0,
+      editionsFetchedAt: 0,
+
+      /* Google's own ranking is the popularity signal on this side, and it is
+         supplied by the caller (search order) rather than read off the record —
+         `ratingsCount` is present on a minority of volumes and is a Google Play
+         Books figure rather than a readership one. Kept so the search view's
+         tiebreak has something when it is there. */
+      pop: posInt(info.ratingsCount) || 0,
+
+      links: { googlebooks: BT.GB.infoLink(id) || `${GB_BASE}/books?id=${id}` },
+      externalLinks: [],
+      ratings: info.averageRating ? {
+        googlebooks: { score: Number(info.averageRating), votes: posInt(info.ratingsCount) || 0 },
+      } : {},
+
+      rec: {
+        fetchedAt: Date.now(),
+        franchiseKey: series.key ? `series:${series.key}` : null,
+        terms: buildTerms({ genres, subjects, authors, publishers, seriesKey: series.key }),
+        candidates: {},
+        seedEligible: 1,
+      },
+      meta: {
+        schema: 1,
+        primarySource: 'googlebooks',
+        detailsFetchedAt: opts.partial ? 0 : Date.now(),
+        normalizerVersion: 1,
+        partial: opts.partial ? 1 : 0,
+        manualOverrides: {},
+      },
+    };
+
+    if (series.name) item.seriesName = series.name;
+    /* Identity prefers the ISBN on a CLOSED record — that is what the reader
+       will scan again — and the volume id otherwise. An open record keeps the
+       volume id even when it carries ISBNs, because `book:isbn:…` is the uid of
+       a specific copy and an open item is not one. */
+    if (closed && pinned[0]) item.uid = uidOf('isbn', pinned[0]);
+    return item;
+  }
+
+  /* The search-result flavour. `partial: 1` because a merged row is expected to
+     be filled out from Open Library's work record afterwards; a Google-only row
+     is created with `fromVolume(vol)` directly and is complete as it stands. */
+  const stubFromVolume = (raw, opts) =>
+    fromVolume(raw, Object.assign({ partial: 1 }, opts || {}));
+
+  /* ══════════════════════════════════════════════════════════════════════════
+     THE CROSS-SOURCE MERGE
+     ══════════════════════════════════════════════════════════════════════════
+     -> ONE item from a Google row and the Open Library row that is the same
+        book. This is the single place the two catalogues are reconciled, and
+        the division of spoils is not a preference — each side supplies what it
+        is measurably better at.
+
+     IDENTITY COMES FROM OPEN LIBRARY, ALWAYS, and this is the migration-safety
+     rule as much as a modelling one. The uid stays `book:openlibrary:{OLID}`
+     and `ids.olWork` is preserved, so:
+
+       · a book already on the reader's shelves still dedupes — BT.ui.addItem
+         resolves `olwork:{OLID}` and finds it, exactly as it did before the
+         pivot. Minting a Google uid here would make every book in an existing
+         library addable a second time.
+       · the editions picker, the scanner's candidate net and every stored
+         snapshot keep working unchanged.
+
+     METADATA COMES FROM GOOGLE, because that is the whole point of the pivot:
+     the live `q=dune` Open Library row is titled 'Dune', credited to BRIAN
+     Herbert and dated 2001. Taking its title and byline over Google's would
+     reinstate the exact defect being fixed.
+
+     THE DATE GOES THROUGH pickRelease AND IS NOT SIMPLY TAKEN. Google usually
+     wins — a full-weight day beats a half-weight year — but "usually" is not
+     "always", and the ratchet in pickRelease is what guarantees a COARSER
+     answer can never overwrite a finer one whichever side it came from. A
+     Google volume for a backlist title often carries a bare year while an Open
+     Library EDITION record occasionally carries a real day; in that one case
+     Open Library is right and keeps it.
+
+     SUBJECTS COME FROM OPEN LIBRARY WHERE IT HAS ANY. Its subject headings are
+     a far richer taste signal than BISAC categories — 'Dune (Imaginary place)'
+     and 'Ecology in literature' say more about a reader than 'Fiction /
+     Science Fiction' — and `rec.terms` is what the recommender runs on. */
+  /* ── WHEN DID THIS *WORK* COME OUT? ─────────────────────────────────────
+     -> the Google release to merge, or null to leave Open Library's alone.
+
+     GOOGLE'S INDEX IS PRINTINGS, AND ITS RANKER PREFERS RECENT ONES. Measured
+     live: `q=dune`, first result, correctly titled *Dune* and correctly credited
+     to Frank Herbert — `publishedDate: '1990-09-01'`. That is a real date about
+     a real object, and it is the wrong date for the row, because a search
+     result is a WORK. Taking it verbatim renders "Dune, Sep 1 1990" for the
+     most famous novel in the list, and it would do it for every backlist
+     classic, precisely because Google is best at recent trade publishing.
+
+     So the same YEAR GATE the date-upgrade path uses (see findVolumeFor in
+     25-googlebooks.js) is applied here, and it reads as three cases:
+
+       same year        Google is SHARPENING a year Open Library already holds.
+                        '2024' + '2024-03-05' -> Mar 5, 2024. This is the case
+                        the whole pivot exists for, and it is the common one.
+       Google is LATER  Google is showing a reprint of an older book. Open
+                        Library's year stands. This is the Dune case.
+       Google is EARLIER  Open Library's `first_publish_year` is a computed
+                        minimum over its edition records, so being beaten
+                        downward means it missed the first printing. The earlier
+                        date is the work's.
+
+     WHAT THIS COSTS, stated honestly: where Open Library's year is simply wrong
+     and TOO EARLY — The Alloy of Law, published 2011, reports 2001 — the gate
+     refuses Google's correct 2011 date and the row keeps 2001. That is exactly
+     what the app displayed before the pivot, so it is not a regression, and it
+     is bounded to work-level search rows: once such a book is added, the
+     enrichment path and any pinned edition can still correct it.
+
+     NONE OF THIS APPLIES TO A GOOGLE-ONLY ROW. There is no Open Library
+     release to gate against — mergeSearchStubs is not even called — so a
+     forthcoming title keeps its real street date untouched. That is the whole
+     point of asking Google. */
+  function workDate(olRel, gbRel) {
+    if (!gbRel || gbRel.sortKey >= BT.util.SK_UNKNOWN) return null;
+    if (!olRel || olRel.sortKey >= BT.util.SK_UNKNOWN) return gbRel;
+    const g = BT.util.sortKeyToParts(gbRel.sortKey);
+    const o = BT.util.sortKeyToParts(olRel.sortKey);
+    if (!g || !o) return gbRel;
+    return g.y > o.y ? null : gbRel;
+  }
+
+  /* Which of two printings dates the WORK. Earliest wins, and precision only
+     breaks a tie on the same day — the opposite priority from pickRelease,
+     and deliberately so. pickRelease arbitrates a REFRESH of one record, where
+     throwing away precision loses information; this arbitrates between SIBLING
+     PRINTINGS of one book, where the question is "when did this book come
+     out" and the answer is the first time it did. */
+  function earlierRelease(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    const ad = a.sortKey < BT.util.SK_UNKNOWN;
+    const bd = b.sortKey < BT.util.SK_UNKNOWN;
+    if (ad !== bd) return ad ? a : b;
+    if (!ad) return a;
+    if (a.sortKey !== b.sortKey) return a.sortKey < b.sortKey ? a : b;
+    return precisionRank(b.precision) > precisionRank(a.precision) ? b : a;
+  }
+
+  function mergeSearchStubs(gb, ol) {
+    if (!gb) return ol;
+    if (!ol) return gb;
+
+    const out = Object.assign({}, gb);
+
+    out.uid = ol.uid;
+    out.scope = 'open';
+    out.ids = Object.assign({}, gb.ids, prune(ol.ids), { googlebooks: gb.ids.googlebooks });
+    out.links = Object.assign({}, ol.links, gb.links);
+
+    /* Google's title and byline lead; Open Library fills a gap rather than
+       overriding one. The author merge is the DUAL IDENTITY join — Google's
+       exact name string plus Open Library's OLID on one record — and it is the
+       only moment in the app where both are on the table at once. See
+       mergeAuthorIdentities. */
+    out.title = gb.title || ol.title;
+    out.subtitle = gb.subtitle || ol.subtitle;
+    out.authors = mergeAuthorIdentities(gb.authors, ol.authors);
+
+    out.release = pickRelease(ol.release, workDate(ol.release, gb.release));
+    out.firstPublishYear = ol.firstPublishYear != null ? ol.firstPublishYear : null;
+
+    out.description = gb.description || ol.description || '';
+    out.subjects = (ol.subjects && ol.subjects.length) ? ol.subjects : (gb.subjects || []);
+    out.genres = (ol.genres && ol.genres.length) ? ol.genres : (gb.genres || []);
+    out.pageCount = gb.pageCount || ol.pageCount || null;
+    out.languages = (gb.languages && gb.languages.length) ? gb.languages : (ol.languages || []);
+
+    /* COVER: Open Library's id wins where it has one, and dropping Google's URL
+       is what makes that happen. BT.ui.posterUrl checks `images.coverUrl`
+       FIRST — an absolute URL is treated as a deliberate override — so leaving
+       both on the record would silently pick Google's ~256px thumbnail over
+       Open Library's ~500px L. Where Open Library has no cover at all, Google's
+       is the only one there is and it stays. */
+    const olCover = ol.images && ol.images.coverId;
+    out.images = olCover
+      ? Object.assign({}, gb.images, ol.images, { coverUrl: null })
+      : Object.assign({}, ol.images, gb.images);
+
+    out.isbnsPinned = [];
+    out.isbnsCandidate = [...new Set([].concat(gb.isbnsCandidate || [], ol.isbnsCandidate || []))];
+    out.editionsTotal = ol.editionsTotal || null;
+
+    /* Both popularity figures survive, because the search view asks two
+       different questions of them and 61-view-search decides which. */
+    out.pop = ol.pop || gb.pop || 0;
+
+    out.rec = gb.rec && Object.keys((gb.rec.terms) || {}).length ? gb.rec : ol.rec;
+    if (out.subjects && out.subjects.length) {
+      out.rec = Object.assign({}, out.rec, {
+        terms: buildTerms({
+          genres: out.genres, subjects: out.subjects, authors: out.authors,
+          publishers: out.publishers, seriesKey: null,
+        }),
+      });
+    }
+
+    out.meta = Object.assign({}, ol.meta, gb.meta, {
+      primarySource: 'googlebooks',
+      /* An Open Library work record IS known to exist, so the work-level half
+         (subjects, description, the editions list that feeds the candidate
+         net) is worth one hydrate. */
+      partial: 1,
+      detailsFetchedAt: 0,
+      manualOverrides: {},
+    });
+    return out;
   }
 
   /* ══ WORK DOC → ITEM FIELDS ══════════════════════════════════════════════
@@ -1401,7 +2120,15 @@ BT.normalize = (function () {
       out[k] = v;
     }
     out.genres = (item.genres || []).map(g => ({ id: g.id, name: g.name, source: g.source }));
-    out.authors = (item.authors || []).map(a => ({ id: a.id, olid: a.olid, name: a.name, role: a.role, order: a.order }));
+    /* `gbName` TRAVELS, and it is the one field here that looks derivable and
+       is not. Google's index matches on its own spelling of a name, so the
+       string is what a follow queries with — and it can only be re-derived by
+       spending a Google request against a key the receiving device may not
+       have. Twenty bytes to keep an author findable on a phone that has never
+       seen the Google half. */
+    out.authors = (item.authors || []).map(a => ({
+      id: a.id, olid: a.olid, name: a.name, gbName: a.gbName || '', role: a.role, order: a.order,
+    }));
 
     /* Candidates are dropped and their bookkeeping is reset with them, so the
        receiving device re-fills the list lazily instead of trusting a count it
@@ -1465,8 +2192,28 @@ BT.normalize = (function () {
   return {
     uidOf, parseUid,
     stubFromSearchDoc, fromWork, fromEdition, fromApiBooks,
+    /* The Google half of the choke point. `fromVolume` is both the search stub
+       and the detail record because a Google volume carries both; the two are
+       told apart by `meta.partial`, which means "an Open Library work record
+       exists and will fill in the work-level fields". */
+    fromVolume, stubFromVolume, mergeSearchStubs,
+    /* The two release rules that are NOT pickRelease, exported because both
+       encode measured third-party behaviour and have to be assertable without
+       a network round trip: the year gate that stops a 1990 printing dating a
+       1965 novel, and the earliest-printing rule that dates a work. */
+    workDate, earlierRelease,
     withDefaults, mergeItem, bucketGenres,
     leanForSync, absorbSynced,
+    /* ONE fold in the app, exported so that 25-googlebooks, 61-view-search and
+       70-follows all answer "same book?" and "same person?" identically. A
+       private copy anywhere is a second answer, and the symptom is a duplicate
+       row that neither call site can explain. */
+    foldTitle, stripEditionFurniture, surnameOf, surnameSet,
+    personKey, personMatches, matchKey, sameBook,
+    /* The dual-identity join: Google's exact author-name string plus Open
+       Library's OLID on one author record. Exported so a follow can be built
+       from a byline without re-deriving either half. */
+    mergeAuthorIdentities,
     /* Exported below the contract line: internals that other M2 modules have a
        legitimate reason to reuse rather than re-implement. */
     buildRelease, emptyRelease, pickRelease, buildTerms,

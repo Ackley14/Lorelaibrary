@@ -34,6 +34,26 @@
       put in it. Such a row says so where its button would be, rather than
       offering one that could only fail.
 
+   ── ENGLISH ONLY, AND THE COUNT IS SHOWN ──────────────────────────────────
+   A classic's editions list is largely translations, and scrolling past forty
+   Spanish and German printings to find the paperback in your hand is not a
+   picker. BT.lang is the app's ONE language rule and is applied here as it is
+   on every other discovery surface: a row that positively declares another
+   language is dropped, a row that declares nothing is KEPT — 38% of these
+   entries carry no `languages` field at all, and a strict test would delete
+   most of the list rather than narrow it.
+
+   THE NUMBER HIDDEN IS PUT IN THE FOOTER. A picker that silently shows eleven
+   of fifty rows is a picker that tells the reader their edition does not exist,
+   which is the same failure as showing fifty of four hundred and eighty-one
+   without saying so.
+
+   THE FILTER NEVER TOUCHES PAGING. `nextOffset` advances by what the ENDPOINT
+   returned, not by what survived — advancing by the kept count would re-request
+   rows already seen, forever, against a source that grants one request per
+   second. And scanning is exempt from all of this: a barcode resolves through
+   BT.scan and never comes near this file.
+
    Scrolling 481 rows is not a picker, so there is a filter over publisher,
    year and ISBN. It filters what has been FETCHED, which is why the footer
    states how far through the list we are and why "no match" is phrased as
@@ -79,6 +99,7 @@ BT.editions = (function () {
   let workOlid = '';
   let rows = [];
   let total = 0;          // what the endpoint says the work has, not what we hold
+  let hidden = 0;         // fetched, then dropped for declaring another language
   let nextOffset = 0;
   let hasMore = false;
   let busy = false;
@@ -151,17 +172,6 @@ BT.editions = (function () {
       if (m) return m[1].toLowerCase();
     }
     return '';
-  }
-
-  /* The reader's own language, in the MARC form edition records use. A code is
-     shown on a row only when it is NOT this one: a Spanish printing of an
-     English novel is the single most useful thing on its row, and 'ENG'
-     repeated four hundred times is noise that hides it. */
-  function homeLang() {
-    const ol = BT.openlibrary;
-    const code = BT.config.get('language') || 'en';
-    const marc = (ol && typeof ol.marcLang === 'function') ? ol.marcLang(code) : '';
-    return marc || 'eng';
   }
 
   /* One raw entry → everything the row needs, resolved once.
@@ -239,14 +249,17 @@ BT.editions = (function () {
      registration-group and registrant ranges, which we do not carry — an
      invented grouping is a wrong ISBN printed on the screen, and the reader is
      about to compare it against the one on the book in their hand. */
-  function rowHtml(r, i, pinned, home) {
+  /* No language column. Every row that reaches here either declares the
+     reader's language or declares none, so a code would be either constant or
+     blank — and a column that is always the same is a column that hides the
+     three that are not. What was dropped is counted in the footer instead. */
+  function rowHtml(r, i, pinned) {
     const picked = !!(r.isbn13 && pinned.has(r.isbn13));
 
     const bits = [];
     bits.push(r.year ? `<span class="mono">${r.year}</span>` : hatch(4));
     bits.push(r.format ? `<span>${esc(BT.util.truncate(r.format, 26))}</span>` : hatch(3));
     bits.push(r.pages ? `<span><span class="mono">${r.pages}</span> pp</span>` : hatch(3));
-    if (r.lang && r.lang !== home) bits.push(`<span class="mono">${esc(r.lang.toUpperCase())}</span>`);
     const meta = bits.join('<span class="sep">·</span>');
 
     const isbnCell = r.isbn13
@@ -311,19 +324,15 @@ BT.editions = (function () {
       box.innerHTML = `<div class="editions-empty">${
         busy ? 'Fetching editions…'
         : needle ? `Nothing fetched so far matches <b>${esc(needle)}</b>.`
-                   + (hasMore ? ' Editions arrive fifty at a time — there may be more to load.' : '')
-        : 'Open Library lists no editions for this work. That is a gap in the'
-          + ' catalogue rather than a fault here: scanning the barcode on your'
-          + ' copy pins it without needing the list at all.'
+        : 'No editions listed. Scan the barcode on your copy to pin it.'
       }</div>`;
       domFullCount = -1;
       return;
     }
 
     const pinned = pinnedSet();
-    const home = homeLang();
     let html = '';
-    for (const [r, i] of shown) html += rowHtml(r, i, pinned, home);
+    for (const [r, i] of shown) html += rowHtml(r, i, pinned);
     box.innerHTML = html;
     domFullCount = needle ? -1 : rows.length;
   }
@@ -339,9 +348,8 @@ BT.editions = (function () {
     const box = root && root.querySelector('#edRows');
     if (!box) return;
     const pinned = pinnedSet();
-    const home = homeLang();
     let html = '';
-    for (let i = start; i < rows.length; i++) html += rowHtml(rows[i], i, pinned, home);
+    for (let i = start; i < rows.length; i++) html += rowHtml(rows[i], i, pinned);
     box.insertAdjacentHTML('beforeend', html);
     domFullCount = rows.length;
   }
@@ -380,12 +388,14 @@ BT.editions = (function () {
       parts.push('<button class="btn btn--sm" type="button" data-act="more">Load 50 more</button>');
       parts.push(`<span>${rows.length} of ${total} fetched</span>`);
     } else if (rows.length) {
-      parts.push(`<span>All ${BT.util.pluralize(rows.length, 'edition')} Open Library holds.</span>`);
+      parts.push(`<span>${BT.util.pluralize(rows.length, 'edition')}</span>`);
     }
     const noIsbn = rows.reduce((n, r) => n + (r.isbn13 ? 0 : 1), 0);
-    if (noIsbn) {
-      parts.push(`<span class="faint">${noIsbn} carry no usable ISBN and cannot be pinned.</span>`);
-    }
+    if (noIsbn) parts.push(`<span class="faint">${noIsbn} with no ISBN cannot be pinned</span>`);
+    /* Stated, never silent. Without this the reader searching for a printing
+       that IS in the list but is catalogued in another language reads an empty
+       filter box as "your edition is not in the catalogue". */
+    if (hidden) parts.push(`<span class="faint">${hidden} in other languages hidden</span>`);
     write(parts.join(''));
   }
 
@@ -440,8 +450,14 @@ BT.editions = (function () {
 
     const start = rows.length;
     const got = (page.entries || []).length;
-    for (const e of (page.entries || [])) rows.push(rowOf(e));
-    total = Math.max(Number(page.size) || 0, rows.length);
+    /* THE FILTER RUNS OVER WHAT ARRIVED; THE PAGER DOES NOT SEE IT. `got` is
+       the endpoint's own count and is what `nextOffset` advances by — using the
+       kept count instead would re-request rows already seen, for ever, against
+       a source that grants about one request per second. */
+    const sifted = BT.lang.keep(page.entries || [], BT.lang.acceptsEdition);
+    hidden += sifted.dropped;
+    for (const e of sifted.kept) rows.push(rowOf(e));
+    total = Math.max(Number(page.size) || 0, rows.length + hidden);
     /* Advance by what ARRIVED, not by PAGE. A short page — which happens on the
        last one, and on works whose entries are being merged upstream — would
        otherwise leave a hole in the sequence that nothing ever fetches. */
@@ -703,14 +719,16 @@ BT.editions = (function () {
     root = null;
   }
 
-  /* No work id, no list. Stated plainly and with the way out, because this is
-     not a failure the reader can fix by trying again. */
+  /* No work id, no list — which is now an ORDINARY state rather than a broken
+     record: a book added from a Google-only result has a volume id and no
+     OLID, because Google has no work graph and Open Library has not catalogued
+     next spring's books. The empty state names the way out rather than the
+     cause; the cause is in this comment, where it belongs. */
   function renderNoWork() {
     const box = root && root.querySelector('#edRows');
     if (box) {
-      box.innerHTML = '<div class="editions-empty">This record carries no Open Library'
-        + ' work id, so its other printings cannot be listed. Scanning the barcode on'
-        + ' the copy you hold pins it without needing the list.</div>';
+      box.innerHTML = '<div class="editions-empty">No printings listed for this book.'
+        + ' Scan the barcode on your copy to pin it.</div>';
     }
     const foot = root && root.querySelector('#edFoot');
     if (foot) { foot.innerHTML = ''; foot.style.display = 'none'; }
@@ -728,19 +746,15 @@ BT.editions = (function () {
      the only shape with a `works[]` array on it. */
   async function workOlidFromIsbn(it) {
     const ol = BT.openlibrary;
-    if (!ol || typeof ol.editionByIsbn !== 'function') return '';
-    const isbn = (it.ids && it.ids.isbn13)
-      || (it.isbnsPinned || [])[0]
-      || (it.isbnsCandidate || [])[0];
-    if (!isbn) return '';
-    try {
-      const ed = await ol.editionByIsbn(isbn, { signal: ac ? ac.signal : undefined });
-      const w = ed && Array.isArray(ed.works) ? ed.works[0] : null;
-      return BT.util.olid(w && w.key);
-    } catch (e) {
-      console.warn('[editions] could not resolve a work from the ISBN', e);
-      return '';
-    }
+    if (!ol || typeof ol.workOlidForIsbns !== 'function') return '';
+    /* Pinned first — that is the copy the reader actually holds and the ISBN
+       most likely to resolve — then the candidates a Google record supplied. */
+    const isbns = [].concat(
+      (it.ids && it.ids.isbn13) ? [it.ids.isbn13] : [],
+      it.isbnsPinned || [],
+      it.isbnsCandidate || []);
+    if (!isbns.length) return '';
+    return ol.workOlidForIsbns(isbns, { signal: ac ? ac.signal : undefined });
   }
 
   async function open(targetUid) {
@@ -777,6 +791,7 @@ BT.editions = (function () {
     workOlid = '';
     rows = [];
     total = 0;
+    hidden = 0;
     nextOffset = 0;
     hasMore = false;
     busy = false;

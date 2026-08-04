@@ -1,12 +1,30 @@
 /* ══════════════════════════════════════════════════════════════════════════
    Open Library — the ONLY file that knows Open Library's URL shapes.
 
-   MovieTrak's 20-tmdb.js opens by checking for a key, because without one
-   nothing works. There is no such gate here and that is the whole reason
-   BookTrak needs no setup: search, works, editions, authors and covers are all
-   keyless, unauthenticated GETs. What replaces the key gate is a much longer
-   list of measured quirks, because Open Library is generous and old and its
-   data model shows every year of it.
+   ── WHAT THIS IS FOR NOW ──────────────────────────────────────────────────
+   Google Books is the primary source for search, metadata and dates (see
+   25-googlebooks.js for the measurements that decided it). Open Library is
+   retained, unchanged in every particular, for the two things Google
+   structurally cannot do and for one thing it is not allowed to do:
+
+     1. THE WORK/EDITION GRAPH. A Google volume id names ONE PRINTING and there
+        is no editions-of-a-work endpoint anywhere in that API. Every ISBN a
+        work is known by, the "Specify edition" picker, and the `isbncand:` net
+        that lets the scanner say "you already have an unspecified copy of this"
+        all come from here and can come from nowhere else.
+
+     2. STABLE AUTHOR OLIDs. A Google author is a bare NAME. `OL1394865A` is an
+        identity; "Gwendolyn Kiste" is a string that a name search will happily
+        answer with Laird Barron's books. A follow is keyed on the OLID.
+
+     3. RUNNING THE WHOLE APP WITH NO KEY. Google needs one and has no
+        anonymous tier at all. Everything here is keyless, so with the Google
+        half switched off BookTrak still searches, still adds, still scans —
+        with year-granular dates and the catalogue's own ranking, which the
+        search view is still obliged to re-rank.
+
+   What replaces a key gate is a much longer list of measured quirks, because
+   Open Library is generous and old and its data model shows every year of it.
 
    FIVE things in this file are load-bearing. Each was verified against the
    live API, each fails SILENTLY when broken, and each will be "cleaned up" by
@@ -194,7 +212,7 @@ BT.openlibrary = (function () {
     /* An empty `q` is not an empty result to Open Library, it is a request for
        the entire catalogue — the most expensive query the service has, on the
        endpoint they most ask us not to hammer. Answer it locally. */
-    if (!query) return { docs: [], numFound: 0, offset: 0 };
+    if (!query) return { docs: [], numFound: 0, offset: 0, dropped: 0, checked: true };
 
     const limit = BT.util.clamp(opts.limit || BT.LIMITS.searchResults, 1, 100);
     const offset = Math.max(0, opts.offset || 0);
@@ -204,22 +222,35 @@ BT.openlibrary = (function () {
       fields: SEARCH_FIELDS,
       limit,
       offset: offset || undefined,
-      /* Language filtering is OPT-IN and off by default, even though a
-         language is always set in BT.config. Open Library matches this against
-         the EDITION language codes attached to a work, and a work whose
-         editions were catalogued without one matches nothing — so switching it
-         on globally quietly deletes results rather than narrowing them. The
-         config setting stores the short form ('en'); the widening to the
-         MARC code the API wants ('eng') happens here, at the one place that
-         talks to the API, so no other file has to learn a source's vocabulary. */
+      /* NOT SENT, and the empty default is the decision rather than an omission.
+         Open Library matches `language=` against the EDITION language codes
+         attached to a work, and a work whose editions were catalogued without
+         one matches NOTHING — so filtering here quietly deletes results rather
+         than narrowing them, and it deletes the thinnest and newest records
+         first. The English rule is applied below instead, by BT.lang, which
+         keeps a record that declares no language and drops only one that
+         positively declares another. A caller that really wants the server-side
+         behaviour can still ask for it; nothing in the app does. */
       language: opts.language ? marcLang(opts.language) : undefined,
     }), netOpts(opts, BT.TTL.search));
 
-    const docs = Array.isArray(data && data.docs) ? data.docs : [];
+    const raw = Array.isArray(data && data.docs) ? data.docs : [];
+    const { kept, dropped } = opts.anyLanguage
+      ? { kept: raw, dropped: 0 }
+      : BT.lang.keep(raw, BT.lang.acceptsDoc);
     return {
-      docs,
-      numFound: Number(data && data.numFound) || docs.length,
+      docs: kept,
+      /* Upstream's own estimate, over the UNFILTERED set. It is already a loose
+         number ("N in the catalogue"), and recomputing it from the kept rows
+         would make it agree with the visible count and therefore say nothing. */
+      numFound: Number(data && data.numFound) || raw.length,
       offset,
+      dropped,
+      /* Open Library needs no key, so it is always consulted when it is
+         reachable. The field exists so a caller unioning the two sources can
+         apply one rule — "only say nothing is coming when every source was
+         actually asked" — without special-casing which source it is holding. */
+      checked: true,
     };
   }
 
@@ -564,13 +595,35 @@ BT.openlibrary = (function () {
      `sort=new` IS SAFE HERE, and only here. The prohibition in the file header
      is about sort= eating a free-text `q`; this query has no `q` at all — it
      is a pure `?author=` filter — so there is nothing for the sort to discard.
-     Do not add a `q` to this function. */
-  const AUTHOR_WORK_FIELDS = 'key,title,first_publish_year,publish_year,cover_i';
+     Do not add a `q` to this function.
+
+     ── ONE HALF OF AN ANSWER, NEVER THE WHOLE ONE ─────────────────────────
+     This is the Open Library arm of "what is this author releasing" and
+     BT.googlebooks.authorWorks is the other. Neither may answer alone:
+
+       · Open Library has NO forthcoming-title concept. No announcement flag,
+         no street date, no publisher feed — so on its evidence a book coming
+         out next spring simply does not exist. It is also year-granular, so a
+         current-year work cannot be told from one that came out in March.
+       · Google has no author id, so its arm is keyed on a NAME and a name
+         query is a net rather than an identity. It also has no work graph, so
+         its rows are printings that have to be collapsed.
+
+     `checked` travels on the result for exactly this reason: a caller may only
+     tell the reader an author has nothing coming once BOTH arms have answered.
+     "We could not check" and "there is nothing" are different sentences, and
+     conflating them is how an outage becomes a false statement about a book.
+
+     ONLY AN OLID. Name-scoped `author=` is fuzzy matching over a name index and
+     returns confident nonsense — `author=gwendolyn+kiste` answers with Laird
+     Barron's bibliography at HTTP 200. `BT.util.olid` returning '' is therefore
+     an answer, not a failure: without an id there is no query worth sending. */
+  const AUTHOR_WORK_FIELDS = 'key,title,first_publish_year,publish_year,cover_i,language';
 
   async function authorWorks(olid, opts) {
     opts = opts || {};
     const id = BT.util.olid(olid);
-    if (!id) return { docs: [], numFound: 0 };
+    if (!id) return { docs: [], numFound: 0, dropped: 0, checked: false };
 
     const data = await BT.net.get('openlibrary', url(BT.OL.search, {
       author: id,
@@ -580,8 +633,60 @@ BT.openlibrary = (function () {
       offset: (opts.offset || 0) || undefined,
     }), netOpts(opts, BT.TTL.search));
 
-    const docs = Array.isArray(data && data.docs) ? data.docs : [];
-    return { docs, numFound: Number(data && data.numFound) || docs.length };
+    const raw = Array.isArray(data && data.docs) ? data.docs : [];
+    /* `language` was added to the field list for this filter and costs almost
+       nothing — it is a short array of three-letter codes, unlike `isbn`, which
+       is the 22x blowup documented in the header. Filtering here rather than at
+       the view keeps one rule for "what is in this author's catalogue" however
+       many screens ask the question. */
+    const { kept, dropped } = opts.anyLanguage
+      ? { kept: raw, dropped: 0 }
+      : BT.lang.keep(raw, BT.lang.acceptsDoc);
+    return {
+      docs: kept,
+      numFound: Number(data && data.numFound) || raw.length,
+      dropped,
+      checked: true,
+    };
+  }
+
+  /* ══ THE BRIDGE: A GOOGLE RECORD → ITS OPEN LIBRARY WORK ════════════════
+     -> an OLID, or ''.
+
+     Google has no work id, so a record that arrived from Google carries none —
+     which means no editions list, no "other printings", and no `olwork:` row to
+     dedupe against a book already on the shelves. This is the one path back,
+     and an ISBN is the only thing the two catalogues share.
+
+     ONE REQUEST, and it is `/isbn/` rather than `/api/books` because /api/books
+     famously carries NO work key at all (see byIsbn above) — the work array is
+     the entire reason this call exists.
+
+     Tries the candidates in order and stops at the first hit. A Google volume
+     normally carries one or two ISBNs describing the same printing, so this is
+     one request in the ordinary case; the loop exists for the record that lists
+     an ISBN-10 Open Library holds and an ISBN-13 it does not. Bounded at three
+     so a pathological record cannot walk a source that grants one request per
+     second.
+
+     Failures are swallowed and answer '': the caller already has a usable
+     Google record and a missing work id costs a lazier editions picker, not a
+     broken screen. */
+  async function workOlidForIsbns(isbns, opts) {
+    const list = (Array.isArray(isbns) ? isbns : [isbns]).map(cleanIsbn).filter(Boolean).slice(0, 3);
+    for (const isbn of list) {
+      let ed = null;
+      try {
+        ed = await editionByIsbn(isbn, opts);
+      } catch (e) {
+        console.warn('[openlibrary] could not resolve a work from', isbn, e && e.message);
+        return '';
+      }
+      const w = ed && Array.isArray(ed.works) ? ed.works[0] : null;
+      const id = BT.util.olid(w && w.key);
+      if (id) return id;
+    }
+    return '';
   }
 
   /* ══ COVERS ═════════════════════════════════════════════════════════════
@@ -727,12 +832,72 @@ BT.openlibrary = (function () {
     if (!item || !BT.normalize) return null;
 
     const ids = item.ids || {};
-    const workId = BT.util.olid(ids.olWork || '');
+    const workId = BT.util.olid(ids.olWork || ids.workOlid || '');
     const isbn = cleanIsbn(ids.isbn13);
 
-    return item.scope === 'closed'
-      ? hydrateClosed(item, workId, isbn, opts)
-      : hydrateOpen(item, workId, opts);
+    const fresh = item.scope === 'closed'
+      ? await hydrateClosed(item, workId, isbn, opts)
+      : await hydrateOpen(item, workId, opts);
+
+    return fresh ? defendGoogleFields(item, fresh) : fresh;
+  }
+
+  /* ══ WHAT AN OPEN LIBRARY REFRESH MAY NOT TAKE BACK ═════════════════════
+     A record whose metadata came from Google is enriched here for the things
+     Google does not have — subjects, a work id, the editions graph — and the
+     enrichment must not undo the reason the pivot happened.
+
+     THE TITLE AND THE BYLINE ARE THE WHOLE ARGUMENT. Live `q=dune`, Open
+     Library's own answer: a work record titled 'Dune' credited to BRIAN
+     HERBERT and dated 2001. Google gets it right. mergeItem is a shallow
+     Object.assign over a pruned payload, so an Open Library work refresh
+     landing on a Google-sourced record would replace a correct title and a
+     correct author with those — silently, minutes after the reader added the
+     book, and looking exactly like a bug in the search screen rather than in a
+     refresh nobody watched.
+
+     The date needs no defending here: pickRelease already refuses a coarser
+     payload and half-weights `first_publish_year`. This is the same rule
+     applied to the two fields that have no precision ladder of their own.
+
+     WHAT IT DOES *NOT* BLOCK is the useful half. Subjects, description,
+     `ids.olWork`, `links` and the candidate ISBNs all land normally — and the
+     author OLID is STITCHED onto the name Google supplied, which is what turns
+     a Google-discovered book into one whose author can actually be followed.
+     A follow needs an OLID (a name-scoped author query returns the wrong
+     writer's books at HTTP 200); Google has no id space; this is the join. */
+  function defendGoogleFields(item, fresh) {
+    if (!item.meta || item.meta.primarySource !== 'googlebooks') return fresh;
+
+    /* mergeItem discards any payload with no title, so the existing title has
+       to travel rather than simply be omitted. */
+    if (item.title) fresh.title = item.title;
+    if (item.subtitle) fresh.subtitle = item.subtitle;
+
+    const mine = (item.authors || []).filter(a => a && a.name);
+    const theirs = (fresh.authors || []);
+    if (!mine.length || !theirs.length) return fresh;
+
+    /* ONE AND ONE ONLY. An Open Library work record gives author KEYS with no
+       names, so there is nothing to match them on except position — and
+       position is trustworthy for a single-author book and a guess for an
+       anthology, where the two catalogues order and truncate bylines
+       differently. So the single-author case is stitched and every other case
+       drops the nameless rows rather than adding a second, blank author to the
+       byline. The cost is that a co-authored Google row cannot be followed
+       until Open Library is the source for it, which is visible and harmless;
+       the alternative is a Follow button watching the wrong person. */
+    if (mine.length === 1 && theirs.length === 1 && !theirs[0].name) {
+      fresh.authors = [Object.assign({}, mine[0], {
+        olid: theirs[0].olid || '',
+        /* `id` follows the OLID once there is one, because that is what
+           12-repo and BT.follows key on. */
+        id: theirs[0].olid || mine[0].id,
+      })];
+      return fresh;
+    }
+    fresh.authors = theirs.filter(a => a && a.name);
+    return fresh;
   }
 
   /* CLOSED — one specific physical copy, normally arrived at by scanning it.
@@ -789,7 +954,23 @@ BT.openlibrary = (function () {
   /* OPEN — a work, with no edition chosen. The user meant "Dune", not the 1990
      Ace paperback, so nothing here may pin an edition. */
   async function hydrateOpen(item, workId, opts) {
-    if (!workId) return null;
+    /* NO WORK ID IS NOW AN ORDINARY STATE, not a broken record. A book added
+       from a Google-only search result — which is what every forthcoming title
+       is, because Open Library has no concept of one — carries a volume id and
+       no OLID at all. The candidate ISBNs Google supplied are the bridge back,
+       and this is the one place that crossing happens on a refresh.
+
+       It costs at most one extra request and only runs when 50-ui-core's
+       hydrate gate opens, which for a complete Google record is once per
+       BT.TTL.work rather than once per pane. Coming back empty is fine and
+       common: Open Library genuinely has not catalogued next spring's books
+       yet, and the Google record is already complete enough to render. */
+    if (!workId) {
+      const cands = Array.isArray(item.isbnsCandidate) ? item.isbnsCandidate : [];
+      if (!cands.length) return null;
+      workId = await workOlidForIsbns(cands, opts);
+      if (!workId) return null;
+    }
     const w = await work(workId, opts);
     if (!w) return null;
 
@@ -891,9 +1072,17 @@ BT.openlibrary = (function () {
   return {
     search, byIsbn, editionByIsbn, work, editionsOfWork,
     author, searchAuthors, authorWorks,
+    /* The one path from a Google record back into the work graph. Exported
+       because the editions picker needs it on demand for a record that never
+       had an OLID, and because 61-view-search uses it to give a Google-only
+       add a work id at the moment it is added rather than a week later. */
+    workOlidForIsbns,
     coverUrl, coverUrlForIsbn,
     verifyReachable,
     hydrate, lookupUid,
+    /* Exported so the rule that an Open Library sweep may not take back
+       Google's title and byline can be asserted without a network round trip. */
+    defendGoogleFields,
     /* Exposed so tests and the Settings diagnostics can assert the two rules
        that cannot be seen from a response: that the field list stayed lean,
        and that no URL this module builds carries a `sort=` next to a `q=`. */

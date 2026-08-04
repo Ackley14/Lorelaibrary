@@ -708,7 +708,7 @@ BT.viewSettings = (function () {
                  placeholder="Weird Fiction" value="${esc(label || '')}">
         </div>
         <div class="cgen__f cgen__f--wide">
-          <label class="cgen__lbl" for="cg-${p}-kw">Keywords <span class="faint">(optional)</span></label>
+          <label class="cgen__lbl" for="cg-${p}-kw">Subjects that auto-file a book here <span class="faint">(optional)</span></label>
           <input id="cg-${p}-kw" type="text" autocomplete="off" spellcheck="false"
                  placeholder="weird fiction, cosmic horror" value="${esc(kw || '')}">
         </div>
@@ -998,6 +998,15 @@ BT.viewSettings = (function () {
 
     const onGithubIo = /\.github\.io$/i.test(location.hostname);
 
+    /* THERE IS NO "ABOUT" SECTION, and its removal is not only a copy decision.
+       It asserted that Open Library "is the primary source here rather than a
+       fallback", and that "Open Library holds no forthcoming-title data ...
+       which is why most publication dates in the app are year-only" — both made
+       false by the Google Books pivot. That is precisely how explainer prose
+       fails: it describes an implementation, so it rots the moment the
+       implementation moves, and then it goes on lying with authority. Source
+       attribution lives in the footer, as one string in index.html. The
+       reasoning lives in DECISIONS.md. */
     view.innerHTML = `
       <div class="settings">
         <div class="pagehead"><h1>Settings</h1></div>
@@ -1015,21 +1024,6 @@ BT.viewSettings = (function () {
         ${regionSection()}
         ${diagnosticsSection(items, cache, onGithubIo)}
         ${dataSection(items, sync)}
-
-        <section class="section">
-          ${BT.ui.groupHead('About')}
-          <div class="prose" style="font-size:var(--bt-fs-sm)">
-            <p>BookTrak is a personal, non-commercial tool. Everything is stored in this
-            browser and there is no server.</p>
-            <p>Catalogue data and covers come from <b>Open Library</b>, which is free, keyless
-            and openly licensed — which is why it is the primary source here rather than a
-            fallback, and why the app needs no setup at all.</p>
-            <p>Open Library holds no forthcoming-title data: no announcement flag, no street
-            date, no publisher feed. That is why Activity says “newly listed in this
-            catalogue” and never “new release”, and why most publication dates in the app are
-            year-only and drawn with the day hatched out rather than invented.</p>
-          </div>
-        </section>
       </div>`;
 
     wire();
@@ -1041,48 +1035,28 @@ BT.viewSettings = (function () {
       <section class="section">
         ${BT.ui.groupHead('Genres')}
         <div class="field">
-          <label class="field__label">Recalculate genres</label>
-          <div class="field__help">
-            Genres are not stored by the catalogue — they are derived, by mapping Open
-            Library’s subject strings through a table of rules that gains entries whenever
-            somebody spots a book in the wrong bucket. A book is bucketed once, when it is
-            added or refreshed, so a rule added afterwards never reaches it.
-            <b>Horror is the current example</b>: that bucket was added recently, and anything
-            on your shelves from before it is still filed under Fantasy &amp; SF, where those
-            subjects used to land. This re-runs the rules over every book’s stored subjects.
-          </div>
+          <label class="field__label">Re-file every book under the current genre rules</label>
           <div class="field__state" id="genreStats">${esc(statsLine(s))}</div>
           <div id="recalcPanel">${recalcPanel()}</div>
         </div>
 
         <div class="field">
           <label class="field__label">Your own genres</label>
-          <div class="field__help">
-            The twelve built-in genres cannot be renamed or removed — their ids are stored in
-            every book on your shelf and in every export you have ever made — but you can add
-            as many of your own as you like, and they appear everywhere the built-ins do: the
-            index tree, the shelf, and a book’s genre chips.
-            <br><br>
-            <b>Keywords are optional, and they are what decides the kind of genre you get.</b>
-            Leave them empty and you get a label you apply yourself from a book’s detail pane —
-            which is the right shape for a shelf the catalogue knows nothing about, like
-            <span class="num">Books Dad Lent Me</span>. Give it keywords and it is <em>also</em>
-            matched against Open Library’s subject strings the next time you press Recalculate
-            genres, exactly as the built-in rules are. Custom keywords only ever <em>add</em> a
-            genre to a book — they can never take a built-in one away — so a novel catalogued
-            “weird fiction” can sit under Horror and under your own shelf at once.
-            <br><br>
-            Colour picks one of the six hue families the palette has, and a family is shared by
-            two genres by design: the hue says which part of the shelf, the label says which
-            genre. There is no seventh colour to invent — this palette is shared with a sibling
-            app, and the reasoning is in <span class="num">css/01-tokens.css</span>.
-          </div>
           <div id="cgPanel">${customPanel()}</div>
         </div>
       </section>`;
   }
 
-  /* ── Keys ────────────────────────────────────────────────────────────── */
+  /* ── Keys ──────────────────────────────────────────────────────────────
+     THIS IS THE ONE PLACE THE MISSING KEY IS ALLOWED TO BE MENTIONED, and it
+     says what to DO rather than why. The six paragraphs that used to live here
+     explained Open Library's free-text date field, the HTTP 429 with
+     `"quota_limit_value":"0"` that killed anonymous access, the lazy per-book
+     sharpening strategy and the self-imposed request ceiling — all true, all
+     reasoning, none of it actionable by somebody looking at an empty input.
+     They are in DECISIONS.md, where changing the strategy changes one document
+     instead of leaving a settings screen describing a build that no longer
+     exists. What is left is a state line, a link that mints a key, and a field. */
   function keySection(gb) {
     const stored = BT.config.keyIsLocal('googlebooks');
     const active = BT.config.hasKey('googlebooks');
@@ -1090,36 +1064,14 @@ BT.viewSettings = (function () {
       <section class="section">
         ${BT.ui.groupHead('Google Books key')}
         <div class="warnbox">
-          <strong>Optional — but it is the only way to get an exact publication date</strong>
-          Open Library needs no key and covers search, works, editions, authors and covers on
-          its own. What it cannot do, at all, is tell you the <em>day</em> a book came out:
-          its search returns a year and nothing finer, and an edition’s publish date is a
-          free-text field that is almost always a bare year. Pinning a specific edition does
-          not help, because that record has no better date to give.
-          <br><br>
-          <b>Without a key, every date in this app stays year-only</b> and is drawn with the
-          month and day hatched out. That is not a loading state and it will not fill in
-          later — it is the finest answer the catalogue holds.
+          <strong>${active
+            ? 'Exact publication dates and forthcoming titles are switched on'
+            : 'Without a key, dates stay year-only and forthcoming titles are limited'}</strong>
+          ${active ? '' : `<a href="https://console.cloud.google.com/apis/library/books.googleapis.com"
+             target="_blank" rel="noopener">Create a key in Google Cloud ↗</a>, then paste it below.`}
         </div>
         <div class="field">
-          <label class="field__label" for="key-gb">API key <span class="faint">(optional)</span></label>
-          <div class="field__help">
-            <b>Anonymous Google Books access is not throttled, it is off.</b> An
-            unauthenticated volumes request now answers HTTP 429 carrying
-            <span class="num">"quota_limit_value":"0"</span> — a quota of zero, not a quota we
-            exceeded. Verified against the live API. So there is no shared key baked into this
-            app and no anonymous path to fall back to: without a key of your own, the whole
-            Google half stays switched off and nothing else changes.
-            <a href="https://console.cloud.google.com/apis/library/books.googleapis.com"
-               target="_blank" rel="noopener">Create one in Google Cloud ↗</a>
-            <br><br>
-            With a key, dates are sharpened <b>lazily, one book at a time, as you open it</b> —
-            never in bulk on startup, because the free tier is about a thousand requests a day
-            and the key is yours alone. Expect it to help on recent titles and to change
-            nothing on the backlist: Google answered
-            <span class="num">2024-03-05</span> for a 2024 novel and a bare
-            <span class="num">2012</span> for a 2012 reissue of The Hobbit.
-          </div>
+          <label class="field__label" for="key-gb">Google Books API key</label>
           <input id="key-gb" type="text" spellcheck="false" autocomplete="off"
                  placeholder="Paste your key" value="${stored ? esc(BT.config.key('googlebooks')) : ''}">
           <div class="field__state ${active ? 'field__state--ok' : ''}" id="key-gb-state">
@@ -1130,19 +1082,11 @@ BT.viewSettings = (function () {
             ${stored ? '<button class="btn btn--sm btn--ghost" id="key-gb-clear">Clear</button>' : ''}
           </p>
           <div class="field__help" style="margin-top:var(--bt-space-3)">
-            Stored in this browser only, and in your encrypted sync payload if you use one.
-            It is never included in an export and never written to a file in this app.
+            Stored in this browser only. Never included in an export.
           </div>
           ${active ? `<div class="field" style="margin-top:var(--bt-space-4)">
-            <label class="field__label">Sharpen dates in bulk</label>
-            <div class="field__help">
-              Opening a book already asks Google about that one book. This walks the shelf
-              instead, oldest-checked first, and stops after
-              <span class="num">${esc(String((BT.SWEEP.manualBudget && BT.SWEEP.manualBudget.googlebooks) || 40))}</span>
-              books so one click cannot spend your daily quota. Run it again to continue.
-              Books that already have a month or a day, ones you dated by hand, and ones
-              Google was recently asked about are skipped without costing a request.
-            </div>
+            <label class="field__label">Upgrade stored dates, ${esc(String((BT.SWEEP.manualBudget
+              && BT.SWEEP.manualBudget.googlebooks) || 40))} books at a time</label>
             <p class="actions" style="margin-top:var(--bt-space-2)">
               <button class="btn btn--sm" id="gb-dates-go">Upgrade publication dates</button>
             </p>
@@ -1153,10 +1097,6 @@ BT.viewSettings = (function () {
             <span class="num">${gb.used} / ${gb.cap}</span>
             <div class="gauge"><i class="${gb.used / gb.cap > 0.8 ? 'hot' : ''}"
               style="width:${Math.min(100, Math.round(gb.used / gb.cap * 100))}%"></i></div>
-            A self-imposed ceiling well under Google’s own daily quota, counted here so
-            enrichment can never be the reason your key gets throttled somewhere else. It
-            counts only what <em>this</em> browser asked for, so it is not a view of your real
-            remaining quota.
           </div>` : ''}
         </div>
       </section>`;

@@ -579,9 +579,12 @@ BT.viewScan = (function () {
          being read at all. */
       host.innerHTML = BT.ui.emptyState({
         title: mode === 'remove' ? 'Scan the books you are removing' : 'Scan the pile',
+        /* Both say what to DO. The removed halves explained the pinned/candidate
+           model and the catalogue's request rate — mechanics the reader cannot
+           act on, in the one place they are holding a book and waiting. */
         body: mode === 'remove'
-          ? 'Only a copy you pinned by scanning can be removed. Owning the book in some unspecified edition is not the same as holding this printing, so a work added by search is reported rather than deleted — you cannot remove what you never said you had.'
-          : 'Point the camera at the barcode on the back cover, or type the number under it. Rows appear here the instant a barcode reads and fill themselves in behind you — Open Library answers about one a second — so there is never anything to wait for.',
+          ? 'Scan a copy you previously scanned in. Only a printing you pinned by scanning can be removed here.'
+          : 'Point the camera at the barcode on the back cover, or type the number under it.',
       });
       return;
     }

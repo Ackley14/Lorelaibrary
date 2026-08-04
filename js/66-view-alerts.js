@@ -1,16 +1,19 @@
 /* ══════════════════════════════════════════════════════════════════════════
    #/alerts — Activity. What changed since you last looked.
 
-   Every label on this screen is written to be literally true, which is a
-   harder constraint for books than it was for films. Open Library has NO
-   forthcoming-title data: no announcement flag, no street date, no publisher
-   feed. So this screen never says "new release" or "coming soon". It says
-   "newly listed in this catalogue", because that is exactly what was observed —
-   a work id appeared in a query that did not contain it last time. That does
-   catch new books. It also catches reprints, translations and backlist titles a
-   volunteer has only just catalogued, and the sidebar says so in as many words.
-   Promising a release feed and delivering a cataloguing feed would be the one
-   failure this feature could not recover from.
+   Every LABEL on this screen is written to be literally true. Neither catalogue
+   announces anything, so nothing here says "new release" or "coming soon"; it
+   says "newly listed", because that is exactly what was observed — a title
+   appeared in a merged catalogue that did not contain it last time. That does
+   catch new books, and it also catches reprints and backlist titles somebody has
+   only just catalogued.
+
+   THE SCREEN NO LONGER EXPLAINS ITSELF. It used to carry a "How this works"
+   panel and a paragraph of caveats repeated in two layouts, on the theory that
+   the labels needed defending. If a label needs defending it is the wrong label,
+   so the labels were fixed and the prose is gone. What is left is: rows, an
+   empty state that says what to do, and two facts (how many authors are watched,
+   when the last check ran). The reasoning lives in 45-alerts.js and DECISIONS.md.
    ══════════════════════════════════════════════════════════════════════════ */
 
 BT.viewAlerts = (function () {
@@ -21,12 +24,12 @@ BT.viewAlerts = (function () {
     'release.moved':     'Publication date changed',
     'release.precision': 'Date firmed up',
     'author.newWork':    'Newly listed in this author’s catalogue',
-    /* The other half of a followed catalogue changing, and the one this feed
-       could not report before: a work we already held now carries a different
-       publication year. It was impossible rather than unimplemented — the old
-       follow baseline was a bag of work ids with no dates in it, so there was
-       nothing to compare a year against. 70-follows.js stores the years now. */
-    'author.dateChanged': 'Publication year changed in this catalogue',
+    /* The other half of a followed catalogue changing: a title we already held
+       now carries a different date. Both ends are DATES rather than years now
+       that Google Books is the primary source — see 45-alerts.js
+       pushDateChange — so the label says date, and a date that merely got finer
+       never reaches this feed at all. */
+    'author.dateChanged': 'Publication date changed in this catalogue',
     /* RETIRED, AND KEPT ANYWAY. Publisher following has been removed, but rows
        of this type are sitting in readers' databases right now and travel in
        every export. Dropping the label would render them as the bare string
@@ -96,58 +99,38 @@ BT.viewAlerts = (function () {
   }
 
   /* ── The empty state ───────────────────────────────────────────────────
-     This screen is empty for two completely different reasons and they need
-     different answers. Either nothing has changed yet — fine, wait — or there
-     is nothing being watched, in which case waiting will never help.
+     Empty for two completely different reasons, and they need different
+     answers. Either nothing has changed yet — fine, wait — or there is nothing
+     being watched, in which case waiting will never help. When the follow list
+     is empty the primary action is a link to Following, not another Check now.
 
-     The second case is the one that matters. The reported bug was "I couldn't
-     figure out how to follow an author or publisher", so an empty Activity
-     feed with no explanation of where its contents come from is the same dead
-     end a second time. When the follow list is empty the primary action here is
-     a link to Following, not another Check now. */
+     The body says what to DO and stops. The paragraph that used to sit here
+     describing how change detection works has moved to 45-alerts.js. */
   function emptyScreen(follows, lastSweep, showArchived) {
     const none = !follows.length;
     return BT.ui.emptyState({
       title: none ? 'Nothing is being watched yet' : 'No activity yet',
       body: none
-        ? 'This is where BookTrak tells you what changed while you were not looking: '
-          + 'a publication date that was recorded or corrected on a book you are tracking, '
-          + 'and works appearing — or changing year — in the catalogue of an author you '
-          + 'follow. That second half needs somebody to follow first: you can follow an '
-          + 'author from their name on any book’s detail pane, from a search result, or '
-          + 'from the Following page.'
-        : 'Nothing has changed since the last check. Publication dates that move, dates '
-          + 'that firm up from a year to a month, and works newly listed or re-dated by the '
-          + `${esc(String(follows.length))} ${follows.length === 1 ? 'author' : 'authors'} `
-          + 'you follow will appear here.',
+        ? 'Follow an author and their new and re-dated titles show up here.'
+        : `Nothing has changed since the last check across the ${
+            esc(BT.util.pluralize(follows.length, 'author'))} you follow.`,
       actions: (none
         ? '<a class="btn btn--primary" href="#/people">Follow an author</a> '
         : '') + '<button class="btn" id="sweepEmpty">Check now</button>'
         + `<p class="muted" style="font-size:var(--bt-fs-sm);line-height:1.6;margin-top:var(--bt-space-6);text-align:left">
-             ${honesty()}
              Last check: <b class="mono">${esc(BT.util.timeAgo(lastSweep))}</b>.
              ${showArchived ? '' : '<a href="#/alerts?archived=1">Show archived</a>'}
            </p>`,
     });
   }
 
+  /* Two facts and two links. Nothing here explains the feature. */
   function sidebar(follows, lastSweep, showArchived) {
     const n = follows.length;
     return `
-      <div class="hd">How this works</div>
+      <div class="hd">Watching</div>
       <p class="muted" style="font-size:var(--bt-fs-sm);line-height:1.6">
-        BookTrak compares each book against a snapshot taken the last time it looked, and
-        each followed author’s catalogue against the copy it stored last time. This feed is
-        a log of those comparisons — the same ones that fill the sections on
-        <a href="#/people">Following</a>, so the two can never tell you different things.
-        There is no server watching on your behalf, so changes surface the next time you
-        open the app.
-      </p>
-      <p class="muted" style="font-size:var(--bt-fs-sm);line-height:1.6;margin-top:var(--bt-space-4)">
-        ${honesty()}
-      </p>
-      <p class="muted" style="font-size:var(--bt-fs-sm);line-height:1.6;margin-top:var(--bt-space-4)">
-        Following <b class="mono">${n}</b> ${n === 1 ? 'author' : 'authors'} ·
+        <b class="mono">${n}</b> ${n === 1 ? 'author' : 'authors'} ·
         <a href="#/people">${n ? 'manage' : 'follow an author'}</a>
       </p>
       <p class="muted" style="font-size:var(--bt-fs-sm);line-height:1.6;margin-top:var(--bt-space-4)">
@@ -157,18 +140,6 @@ BT.viewAlerts = (function () {
         <a class="btn btn--sm" href="#/alerts${showArchived ? '' : '?archived=1'}">
           ${showArchived ? 'Hide archived' : 'Show archived'}</a>
       </p>`;
-  }
-
-  /* Stated once, reused in both layouts, so the two can never drift apart and
-     quietly leave one of them making a promise the data cannot keep. */
-  function honesty() {
-    return 'Open Library holds no forthcoming or announced titles and its dates are '
-      + 'usually year-only, so “newly listed” means a work appeared in a catalogue that '
-      + 'did not list it before — which includes reprints, translations and older books '
-      + 'somebody has only just catalogued. “Publication year changed” means the year the '
-      + 'catalogue records moved, which is usually a volunteer correcting a record or a '
-      + 'newer printing being added, not a publisher announcing anything. '
-      + 'Older items are filed as archived rather than shown.';
   }
 
   function evRow(a) {

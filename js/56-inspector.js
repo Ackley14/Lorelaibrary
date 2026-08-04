@@ -204,25 +204,52 @@ BT.inspector = (function () {
     return (currentUid === uid) ? merged : null;
   }
 
-  /* ── M2 SEAM ─────────────────────────────────────────────────────────────
-     A uid that is not in the library can only be resolved by asking Open
-     Library, and 20-openlibrary.js is not on the page yet. Feature-detected
-     rather than assumed: a bare `BT.openlibrary.lookupUid(...)` would be a
-     TypeError that takes out the whole pane, for a case whose honest answer
-     is only ever "that link is stale".
+  /* ── ADAPTER SEAM ────────────────────────────────────────────────────────
+     A uid that is not in the library has to be resolved by asking a catalogue,
+     and WHICH catalogue is written into the uid itself: `book:openlibrary:…`
+     and `book:isbn:…` are Open Library's, `book:googlebooks:…` is Google's.
+     Each adapter answers null for a uid that is not its own, so the two are
+     tried in turn rather than dispatched on a parsed prefix here — the grammar
+     then lives in one place per adapter instead of a third time in this file.
 
-     The contract the adapter has to meet is one function:
+     GOOGLE IS TRIED FIRST because the case that brought it here is a
+     FORTHCOMING TITLE: Open Library has no concept of one, so a book announced
+     for next spring exists only in Google's index and only under a Google uid.
+     Tapping such a row must open a pane, never add the book and never say "not
+     found". Asked second, Open Library would answer null for it anyway; the
+     order simply avoids a wasted request.
 
-       BT.openlibrary.lookupUid(uid) -> a normalized item stub, or null      */
+     Feature-detected rather than assumed: a bare call would be a TypeError that
+     takes out the whole pane, for a case whose honest answer is often only
+     "that link is stale". Google is additionally allowed to be switched off —
+     no key is an ordinary state — in which case it answers null and Open
+     Library handles everything it can.
+
+     The contract each adapter meets is one function:
+
+       lookupUid(uid) -> a normalized item stub, or null                     */
   async function fetchTransient(uid) {
-    const ol = BT.openlibrary;
-    if (!ol || typeof ol.lookupUid !== 'function') return null;
-    const stub = await ol.lookupUid(uid);
+    const stub = await lookupFrom(BT.googlebooks, uid) || await lookupFrom(BT.openlibrary, uid);
     if (!stub) return null;
     if (BT.normalize && typeof BT.normalize.withDefaults === 'function') {
       return BT.normalize.withDefaults(stub, 'want', 'link');
     }
     return stub;
+  }
+
+  /* One adapter, one uid. A THROW is swallowed rather than propagated, because
+     a stale Google link must not stop Open Library being asked — and the
+     reverse. show() still surfaces a genuine failure: when both answer null it
+     paints the "not found" state, which is the truthful thing to say once
+     every source that could know has been asked. */
+  async function lookupFrom(adapter, uid) {
+    if (!adapter || typeof adapter.lookupUid !== 'function') return null;
+    try {
+      return await adapter.lookupUid(uid);
+    } catch (e) {
+      console.warn('[inspector] lookup failed', e && e.message);
+      return null;
+    }
   }
 
   function shell(inner, item) {
@@ -284,7 +311,7 @@ BT.inspector = (function () {
       ${item._transient ? `
       <div class="blk"><button class="btn btn--primary" data-act="add">Add to library</button></div>` : `
       <div class="blk">
-        <div class="blk-h">Status <span class="why">want is a wishlist · have is on the shelf</span></div>
+        <div class="blk-h">Reading status</div>
         <div class="seg seg--wrap" role="group" aria-label="Reading status">
           ${STATUS_LADDER.map(s =>
             `<button type="button" data-status="${s}" aria-pressed="${statusOf(u) === s}">${esc(statusWord(s))}</button>`).join('')}
@@ -296,7 +323,7 @@ BT.inspector = (function () {
       ${progressBlock(item)}
 
       <div class="blk">
-        <div class="blk-h">Ownership <span class="why">not a reading status</span></div>
+        <div class="blk-h">Ownership</div>
         <div class="seg" role="group" aria-label="Ownership">
           ${PILES.map(([v, label]) =>
             `<button type="button" data-pile="${v}" aria-pressed="${(u.pile || 'keep') === v}">${label}</button>`).join('')}
@@ -629,7 +656,7 @@ BT.inspector = (function () {
   function genreBlock(item) {
     return `
       <div class="blk">
-        <div class="blk-h">Genre <span class="why">guessed from catalogue subjects</span></div>
+        <div class="blk-h">Genre</div>
         <div class="gpick" id="genreBody">${genreBody(item)}</div>
       </div>`;
   }
@@ -725,7 +752,7 @@ BT.inspector = (function () {
   function progressBlock(item) {
     return `
       <div class="blk">
-        <div class="blk-h">How far in <span class="why">pages, off your own copy</span></div>
+        <div class="blk-h">How far in</div>
         <div class="prgctl" id="prgBody">${progressBody(item)}</div>
       </div>`;
   }
@@ -823,11 +850,9 @@ BT.inspector = (function () {
       const pinnable = !item._transient;
       return `
         <div class="blk">
-          <div class="blk-h">Edition <span class="why">a work, not a copy</span></div>
+          <div class="blk-h">Edition — not chosen</div>
           <div class="muted" style="font-size:var(--bt-fs-mini);line-height:1.5">
-            Edition not specified. Printings of the same book disagree about
-            page count, cover, publisher and ISBN, so none of those is claimed
-            here until you say which one is on your shelf.
+            No page count, cover, publisher or ISBN is claimed until you pick a printing.
           </div>
           ${pinnable ? `
           <div style="margin-top:var(--bt-space-3);display:flex;gap:var(--bt-space-2);flex-wrap:wrap">
@@ -843,7 +868,7 @@ BT.inspector = (function () {
        work in general. */
     return `
       <div class="blk">
-        <div class="blk-h">Edition <span class="why">the copy you hold</span></div>
+        <div class="blk-h">Edition</div>
         <dl class="kv">
           <dt>ISBN</dt><dd class="mono">${isbn ? esc(isbn) : '<span class="faint">·&nbsp;·</span>'}</dd>
           <dt>Publisher</dt><dd>${publisher ? esc(publisher) : '<span class="faint">Not recorded</span>'}</dd>
@@ -876,25 +901,31 @@ BT.inspector = (function () {
     const src = rel.dateSource
       || (rel.sortKey < BT.util.SK_UNKNOWN ? 'openlibrary' : null);
     if (!src) return '<span class="faint">No date on record</span>';
-    if (src === 'googlebooks') {
-      return 'Google Books <span class="faint">· refined from Open Library’s year</span>';
-    }
+    /* THE VALUE UNDER A "Source" LABEL IS THE SOURCE. Nothing more.
+
+       This line used to read "Google Books · refined from Open Library's year",
+       which was true while Google was an enrichment path bolted onto Open
+       Library and is now simply FALSE: a forthcoming title comes from Google
+       and was never an Open Library year, because Open Library has no
+       forthcoming titles at all. A caption that has to be re-checked against
+       the architecture every time it changes is a caption that will be wrong
+       again — the label already asks the question, so the answer is enough. */
+    if (src === 'googlebooks') return 'Google Books';
 
     const gb = BT.googlebooks;
-    /* Only say "year only" when it actually IS year-or-worse. An Open Library
+    /* Only say anything extra when the date IS year-or-worse. An Open Library
        edition record occasionally does carry a real day — one of The Hobbit's
        twelve editions reads '15 julho 2019' — and captioning that as coarse
        would be wrong in the one place the app is being pedantic about honesty. */
     const coarse = !rel.precision || rel.precision === 'year'
       || rel.precision === 'unknown' || rel.precision === 'tba';
-    if (!coarse) return 'Open Library';
-    if (gb && gb.enabled && gb.enabled()) {
-      const stamp = (item.meta && item.meta.gbDate) || null;
-      return stamp && stamp.checkedAt
-        ? 'Open Library <span class="faint">· Google Books had nothing finer</span>'
-        : 'Open Library <span class="faint">· checking Google Books for a finer date</span>';
-    }
-    return 'Open Library <span class="faint">· year-granular; add a Google Books key in Settings for exact dates</span>';
+    if (!coarse || (gb && gb.enabled && gb.enabled())) return 'Open Library';
+    /* THE ONE EXCEPTION, and it survives the no-explainer rule because it is
+       ACTIONABLE and appears exactly where the reader is looking at the thing
+       it is about: a hatched day on a record whose year is all Open Library
+       will ever have. It names the setting rather than the architecture, and
+       it is silent the moment a key exists. */
+    return 'Open Library <span class="faint">· <a href="#/settings" style="text-decoration:underline">add a key</a> for exact dates</span>';
   }
 
   function driftHistory(rel) {

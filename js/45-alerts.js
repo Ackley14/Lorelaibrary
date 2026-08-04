@@ -18,17 +18,22 @@
       A→B→A revert produces two distinct alerts, because "the date moved back"
       really is news, while re-observing one transition dedupes.
 
-   WHAT IS HONEST TO SAY ABOUT A BOOK. Open Library has no concept of a
-   forthcoming or announced title: there is no "coming soon" flag, no street
-   date, no publisher feed. Its dates are year-granularity far more often than
-   not, and `first_publish_year` is a computed minimum over a work's editions
-   that one mis-catalogued reprint drags back decades — The Alloy of Law,
-   published 2011, reports 2001. So this file never claims a book is "coming
-   out". It says two smaller, true things: a date we hold changed, and a work
-   appeared in a catalogue we are watching that was not there last time. The
-   second one does catch new books, and it also catches reprints, translations
-   and backlist titles a volunteer has only just catalogued. Every string
-   emitted here is written so that reading it literally is never wrong.
+   WHAT IS HONEST TO SAY ABOUT A BOOK. Neither catalogue announces anything.
+   Open Library has no forthcoming-title concept at all — no "coming soon" flag,
+   no street date, no publisher feed — and its dates are year-granularity far
+   more often than not, with `first_publish_year` a computed minimum over a
+   work's editions that one mis-catalogued reprint drags back decades (The Alloy
+   of Law, published 2011, reports 2001). Google Books is far better on dates
+   and does carry forthcoming printings, but it is still a RECORD STORE: a
+   `publishedDate` of 2026-10-06 is what a volume record says today, not a
+   promise anybody made.
+
+   So this file never claims a book is "coming out". It says two smaller, true
+   things: a date we hold changed, and a title appeared in a catalogue we are
+   watching that was not there last time. The second one does catch new books,
+   and it also catches reprints, translations and backlist titles somebody has
+   only just catalogued. Every string emitted here is written so that reading it
+   literally is never wrong.
 
    ── THE FOLLOW HALF IS NO LONGER A POLLER ─────────────────────────────────
    This module used to fetch a followed author's catalogue itself, on its own
@@ -44,16 +49,21 @@
    by the refresher after every successful check — including the one at startup
    — so a change cannot be observed without also being reported.
 
-   WHAT THE FEED MAY SAY ABOUT A FOLLOW, now that it can say two things:
+   WHAT THE FEED MAY SAY ABOUT A FOLLOW:
 
-     author.newWork      a work id appeared in a catalogue that did not list it
-                         before. Literally that, and nothing about release.
-     author.dateChanged  a work we already held now carries a different year.
-                         This one was IMPOSSIBLE under the old arrangement, not
-                         merely absent: `knownWorkIds` is a bag of ids and holds
-                         no dates, so there was nothing to compare against. It
-                         is the half that makes this a news feed rather than a
-                         list of ids.
+     author.newWork      a title appeared in the merged catalogue that was not
+                         in it before. Literally that, and nothing about release.
+     author.dateChanged  a title we already held now carries a different date.
+
+   BOTH ARE KEYED ON THE MERGE KEY, not on an Open Library work OLID, because
+   the follow's catalogue is now the union of two sources and a Google-only
+   title has no OLID at all. See pushNewWork.
+
+   AND THE FLOOD GUARD IS 70-follows.js's, not this file's. Switching the app's
+   primary source changed what a "work" is keyed by, so the first check after
+   that change would have re-announced every book of every followed author at
+   once. refreshOne() treats it exactly like a first sighting — re-baseline,
+   emit nothing — which is why nothing here needed a special case.
 
    WHAT WAS DROPPED FROM MOVIETRAK, and why:
 
@@ -455,20 +465,26 @@ BT.alerts = (function () {
     return emitted;
   }
 
-  /* A work id appeared in a catalogue that did not list it before.
+  /* A title appeared in a catalogue that did not list it before.
 
-     The wording is the whole point and it is deliberately not "new release".
-     Open Library holds no forthcoming titles and no announcements; it
-     catalogues books that exist. "Newly listed" is exactly what was observed
-     and is never wrong when read literally, which "new from an author you
-     follow" would be for every reprint, translation and backlist title a
-     volunteer has only just typed in. */
+     THE SUBJECT KEY IS `w.key`, NOT A WORK OLID. A unioned row may have no Open
+     Library work at all — that is the whole point of Google being primary — so
+     the content-addressed id is built from the merge key (a folded title), which
+     is the identity the diff is actually computed over. Rebuilding it from
+     `workId` would mint the id `follow:…|author.newWork||` for every
+     Google-only title, collapsing all of them into one alert that fires once
+     and then never again.
+
+     The wording is deliberately not "new release". Neither catalogue announces
+     anything: they hold records, and a record can appear because the book is new
+     OR because somebody has only just typed in a 1978 paperback. "Newly listed"
+     is exactly what was observed and is never wrong when read literally. */
   async function pushNewWork(row, w) {
     const year = yearOf(w);
-    const id = alertId(`follow:${row.id}`, 'author.newWork', null, w.workId);
+    const id = alertId(`follow:${row.id}`, 'author.newWork', null, w.key || w.workId);
     if (await BT.repo.alertSeen(id)) return null;
 
-    /* A work carrying a year from well before now is a backlist title somebody
+    /* A title carrying a year from well before now is a backlist book somebody
        has just catalogued, not a release. Recorded honestly and archived on
        ingest rather than dropped, because "a 1978 novel of hers we did not know
        about" is a real thing a reader might want to find — just not at the top
@@ -478,72 +494,98 @@ BT.alerts = (function () {
 
     return BT.repo.pushFeedItem({
       alertId: id,
-      /* The work's own uid, so the row opens in the inspector even though the
-         book is not on the shelves — BT.inspector.show falls back to a
-         read-only transient fetch and offers to add it. */
-      uid: BT.normalize.uidOf('openlibrary', w.workId),
+      uid: followUid(w),
       kind: 'book',
       type: 'author.newWork',
       severity: backlist ? SEVERITY.low : SEVERITY.high,
       title: `${row.name}: ${w.title || 'Untitled work'}`,
-      body: year
-        ? `Newly listed in this catalogue — recorded ${year}`
-        : 'Newly listed in this catalogue — no publication date recorded',
-      from: null, to: w.workId,
-      payload: { followId: row.id, followType: 'author', workOlid: w.workId,
-                 coverId: w.coverId, year },
+      body: w.date
+        ? `Newly listed — ${w.date}`
+        : 'Newly listed — no publication date recorded',
+      from: null, to: w.key || w.workId,
+      payload: { followId: row.id, followType: 'author', workOlid: w.workId || '',
+                 volumeId: w.volumeId || '', coverId: w.coverId, year,
+                 dateSource: w.dateSource || '' },
       archivedFlag: backlist ? 1 : 0,
       lastAt: Date.now(),
     });
   }
 
-  /* A work we already held now carries a different year.
+  /* A title we already held now carries a different date.
 
-     THIS IS THE ROW THE OLD ARRANGEMENT COULD NOT PRODUCE, and it is worth
-     being precise about why: the follow baseline was `knownWorkIds`, a bag of
-     work OLIDs with no dates in it at all. There was nothing to compare a year
-     against, so a catalogue correction — the commonest real change in an Open
-     Library bibliography — was invisible by construction. The stored window in
-     70-follows.js carries the years, so the comparison is now possible.
+     THE TWO ENDS ARE DATE STRINGS, NOT YEARS, and that is the change Google
+     brought: they may be '2026' → '2026-10-06' (Open Library's bare year
+     resolved against Google, verified on Other Worlds Than These), or
+     '2026-10-06' → '2027-01-12' (a printing genuinely moving). 70-follows.js
+     already refuses the first of those as a "change" — a finer date inside the
+     window the coarse one described is us learning something, not the book
+     moving — so everything that reaches here has left its old window.
 
-     THE BODY NEVER SAYS "MOVED TO". Open Library's dates are YEARS, and the two
-     ends of this row are years: a volunteer re-catalogued the record, or a
-     newer printing was added and max(publish_year) rose with it. Both are
-     "the year we hold changed", and neither is a publisher announcing a date.
-     Anything stronger would be this file lying on the catalogue's behalf. */
+     THE BODY STILL NEVER SAYS "DELAYED" OR "MOVED TO". Neither catalogue is a
+     publisher and neither announces anything; what we observed is that the value
+     we hold is not the value it was. */
   async function pushDateChange(row, c) {
     const w = c.work || {};
     const id = alertId(`follow:${row.id}`, 'author.dateChanged',
                        String(c.from), String(c.to));
     if (await BT.repo.alertSeen(id)) return null;
 
-    const thisYear = new Date().getFullYear();
+    const today = BT.util.todaySortKey();
+    const to = keyOfDate(c.to);
     /* Judged on WHERE IT LANDS, not on how far it travelled. A record corrected
-       from 1978 to 1979 is housekeeping; one that now reads next year is the
+       from 1978 to 1979 is housekeeping; one that now reads next spring is the
        reason somebody follows an author at all. */
-    const ahead = c.to >= thisYear;
+    const ahead = to != null && to >= today;
     return BT.repo.pushFeedItem({
       alertId: id,
-      uid: BT.normalize.uidOf('openlibrary', w.workId),
+      uid: followUid(w),
       kind: 'book',
       type: 'author.dateChanged',
       severity: ahead ? SEVERITY.high : SEVERITY.low,
       title: `${row.name}: ${w.title || 'Untitled work'}`,
-      body: `The publication year recorded for this work changed — ${c.from} → ${c.to}`,
+      body: `The publication date recorded for this changed — ${c.from} → ${c.to}`,
       from: String(c.from), to: String(c.to),
-      payload: { followId: row.id, followType: 'author', workOlid: w.workId,
-                 coverId: w.coverId, year: c.to, fromYear: c.from },
+      payload: { followId: row.id, followType: 'author', workOlid: w.workId || '',
+                 volumeId: w.volumeId || '', coverId: w.coverId,
+                 year: yearOf(w), dateSource: w.dateSource || '' },
       archivedFlag: ahead ? 0 : 1,
       lastAt: Date.now(),
     });
   }
 
-  /* max(publish_year) where there is one — the newest printing anyone has
-     catalogued, and the only field in a search doc that can ever be ahead of
-     today. `firstYear` is the fallback rather than the preference: it is a
-     computed minimum over every edition and is frequently decades early (The
-     Alloy of Law, published 2011, reports 2001; verified). */
-  const yearOf = w => (w && (w.latestYear || w.firstYear)) || null;
+  /* WHICH uid opens this row's pane, in the order of what actually resolves.
+
+     BT.openlibrary.lookupUid understands `book:openlibrary:{OLID}` and
+     `book:isbn:{isbn13}` and nothing else, so a Google-only title falls back to
+     its ISBN — which a forthcoming record almost always carries, because that is
+     how preorders work. An empty uid is left empty rather than faked: 66-view-
+     alerts only opens the pane for a row that has one, so a row with nothing to
+     open simply does not, instead of opening a pane that says "Not found". */
+  function followUid(w) {
+    if (w && w.workId) return BT.normalize.uidOf('openlibrary', w.workId);
+    if (w && w.isbn13) return `book:isbn:${w.isbn13}`;
+    return '';
+  }
+
+  /* The year a unioned row's date carries, or null. Read off the parsed date
+     rather than a `latestYear` field, because the merged shape carries one date
+     string from whichever source won and no year fields at all. `firstYear` is
+     the fallback and never the preference — it is a computed minimum over every
+     edition and is frequently decades early (The Alloy of Law, published 2011,
+     reports 2001; verified). */
+  function yearOf(w) {
+    const sk = keyOfDate(w && w.date);
+    const p = sk != null ? BT.util.sortKeyToParts(sk) : null;
+    if (p && p.y) return p.y;
+    return (w && Number.isFinite(w.firstYear)) ? w.firstYear : null;
+  }
+
+  function keyOfDate(raw) {
+    if (!raw) return null;
+    const der = BT.util.parseOpenLibraryDate(String(raw));
+    const sk = BT.util.sortKeyOf(der.parts, der.precision);
+    return (sk != null && sk < BT.util.SK_UNKNOWN) ? sk : null;
+  }
 
   /* Refresh ONE follow and record what changed.
 

@@ -99,11 +99,16 @@ BT.boot = (function () {
 
     BT.router.on('/up', viewOr('viewUp', stub(
       ['Shelf', 'Coming up'], 'Coming up', 'M4',
-      'Books with a publication date still ahead of them, plotted on one timeline where precision becomes width: a known day is a pin, a known month is a month wide. Arrives in')));
+      'Books with a publication date still ahead of them, on one timeline. Arrives in')));
 
+    /* This stub no longer claims search "needs no key and no signup". The
+       Google Books pivot made that false, and a placeholder that misdescribes
+       the app is worse than a bare one — this string is only ever seen when
+       61-view-search.js fails to parse, which is exactly the moment the reader
+       should not also be misinformed. */
     BT.router.on('/search', viewOr('viewSearch', stub(
       ['Discover', 'Search'], 'Search', 'M2',
-      'Open Library needs no key and no signup, so search will work the moment this view exists — there is nothing for you to configure first. Arrives in')));
+      'Find a book by title or author. Arrives in')));
 
     /* Scanning is discovery through a different door. A barcode names ONE
        edition, so what it adds is scope `closed`; search adds the work itself
@@ -136,7 +141,7 @@ BT.boot = (function () {
 
     BT.router.on('/people', viewOr('viewPeople', stub(
       ['Discover', 'Following'], 'Following', 'M4',
-      'Authors and publishers you follow, and what has turned up in their catalogues that is not in your library yet. Arrives in')));
+      'Authors you follow, and what is coming from them that is not in your library yet. Arrives in')));
 
     /* Real as of M5, and the name was READ OFF THE FILE and not taken from the
        plan: `68-view-stats.js` opens `BT.viewStats = (function () {` and closes
@@ -305,6 +310,34 @@ BT.boot = (function () {
       .then(() => f.retirePublisherFollows())
       .then(n => { if (n) BT.tree.refresh(); })
       .catch(e => console.warn('[boot] could not retire publisher follows', e && e.message));
+  }
+
+  /* ── The dual author identity, backfilled ─────────────────────────────
+     Same shape and same rules as the migration above, and here for the same
+     reason: a module body cannot await, and a floating promise at parse time
+     would race BT.db.open().
+
+     Google Books is the primary catalogue now, and it has NO author ids — the
+     only handle it offers is the exact author-name string it prints. A follow
+     stored by the previous build has an Open Library OLID and nothing else, so
+     until this runs the PRIMARY source cannot be asked about it at all and the
+     roster stays quietly Open Library-only. This writes one field, `gbName`,
+     seeded from the display name; the follow's first check replaces the seed
+     with whatever Google's own volumes actually print.
+
+     NOTHING IS DELETED and no follow key changes. `knownWorkIds` and `works`
+     are left exactly as they are — 70-follows.js's first refresh under the new
+     schema needs to SEE them to know it is migrating rather than cold, which is
+     what stops the source switch re-announcing every book on the roster.
+
+     NOT AWAITED. Every screen reads a follow defensively, so the app is correct
+     whether this has finished, is still going, or never ran. */
+  function seedGoogleAuthorNames() {
+    const f = BT.follows;
+    if (!f || typeof f.seedGoogleNames !== 'function') return;
+    Promise.resolve()
+      .then(() => f.seedGoogleNames())
+      .catch(e => console.warn('[boot] could not seed Google author names', e && e.message));
   }
 
   /* file:// and any hosted copy are separate browser origins, so they hold
@@ -886,6 +919,12 @@ BT.boot = (function () {
     refreshFooter();
     noteOriginOnce();
     retirePublisherFollows();
+    /* Before scheduleSweeps, so the first background refresh of the session can
+       already ask Google about a roster that predates it. Both are unawaited, so
+       this is an ordering of KICKS rather than a guarantee — and it does not
+       need to be one: a follow the seed has not reached yet simply skips its
+       Google half for one pass and picks it up on the next. */
+    seedGoogleAuthorNames();
     scheduleSweeps();
     flushOnExit();
 

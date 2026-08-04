@@ -1,114 +1,86 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   #/people — Following: authors.
+   #/people — Following.
 
-   ── WHAT THIS SCREEN IS NOW, AND WHY IT CHANGED ───────────────────────────
-   It used to be a search box, a roster, and ONE shared strip of everything all
-   your follows had coming. It worked, and the user's report was that it
-   "behaves ... strangely". Every complaint traced to the same two facts:
+   ── THE SHAPE, AND WHAT IT REPLACED ───────────────────────────────────────
+   This screen used to print the roster TWICE: a compact list of who you follow
+   at the top, and then a full expanded section per author underneath it. Two
+   listings of one thing, each with its own last-checked line, each able to
+   disagree with the other. It is now ONE list.
 
-     1. The strip fetched its own copy of each catalogue, and the alerts sweep
-        fetched another. Two schedules, two baselines, and NEITHER wrote the
-        answer anywhere durable — so the roster underneath a screen that was
-        displaying an author's catalogue said "not checked yet · never checked".
-        The reader was reading their own roster, and it was telling them the
-        truth: nothing was cached.
-     2. Everything was pooled. One strip, one progress line, one blank state.
-        With six follows and two upcoming books there was no way to tell
-        "Stephen King has nothing scheduled" from "Stephen King was not
-        checked" from "Stephen King's row is below the fold".
+   Top to bottom:
 
-   Both are answered by the same change: 70-follows.js now stores ONE cached
-   catalogue on the follow row, and this page draws ONE SECTION PER AUTHOR from
-   it. The cache paints first, always, with zero requests. The refresher updates
-   it behind the paint, and each section repaints as its own answer lands.
+     the author lookup          find somebody to follow, or to look at
+     a release-window toggle    next week · this month · next month ·
+                                end of year · next year
+     the window's books         EVERY follow's books that land in it, pooled
+                                and sorted, because "what is coming in the next
+                                month" is a question about the calendar and not
+                                about any one author
+     one row per author         collapsed, carrying its own counts
 
-   ── EVERY SECTION GIVES A HARD ANSWER ─────────────────────────────────────
-   There is no ambiguous blank on this page. Each section opens with a verdict
-   line that is one of exactly four sentences:
+   The window strip answers "what is coming"; the rows answer "what about this
+   person". They read the same cache and cannot disagree.
 
-     · "2 works dated after today"                  — yes, and here they are
-     · "Nothing dated after today; 3 dated this year with no month recorded"
-                                                     — undecidable, and it says so
-     · "Nothing scheduled"                           — no, we looked
-     · "Not checked yet" / "Could not check"         — we did not look
+   ── EVERY ROW GIVES A HARD ANSWER ─────────────────────────────────────────
+   There is no ambiguous blank here. A collapsed row's counts are the answer,
+   and when they are zero the row says so in words:
 
-   The fourth is the one that matters most, because the other three are claims
-   about the catalogue and it is a claim about us. "We could not look" and
-   "there is nothing new" are different facts, and a screen that renders both as
-   an empty panel is a screen that lies during an outage.
+     · "2 upcoming (+1 new) · 12 recent"      yes, and here they are
+     · "Nothing scheduled"                    no — and BOTH catalogues said so
+     · "Google Books not checked"             one source is missing, so this is
+                                              not yet an answer about the books
+     · "Not checked yet" / "Could not check"  a claim about US, not about them
 
-   ── THE BANDS, AND WHY 'RECENT' IS SEPARATE ───────────────────────────────
-   OPEN LIBRARY HAS NO CONCEPT OF A FORTHCOMING BOOK. There are no street
-   dates, no announcements, no "coming soon" — it catalogues books that EXIST,
-   its dates are YEARS rather than dates, and those years are often wrong (The
-   Alloy of Law, published 2011, is recorded as 2001; verified). Measured, a
-   60-work page for each of six large-catalogue authors contained ZERO works
-   dated beyond the current year and between zero and six dated within it.
-
-   So a section is banded tightest-first and every band is labelled for exactly
-   what it is:
-
-     Dated after today     genuinely ahead of us. The window the record
-                           describes STARTS after today, so there is no reading
-                           of it under which the book is already out.
-     This year, no month   the window straddles today. A bare '2026' read in
-                           August could be last March or next November and the
-                           record does not say. Shown with the month and day
-                           HATCHED — the app's grammar for "this value cannot
-                           exist in the record" — and never counted as upcoming.
-     Recently published    already out, within the last couple of years. This is
-                           the band the user asked for ("then recent"), and it
-                           carries the word "published" in its heading precisely
-                           so it can never be misread as the first band. Its year
-                           range is printed rather than implied.
-
-   WIDENING THE FIRST BAND TO MAKE THE PAGE LOOK BUSIER IS THE ONE CHANGE THAT
-   MUST NOT HAPPEN. Letting last year's reprints into "dated after today" is not
-   a more generous version of this feature, it is the same screen with a false
-   heading on it. That is why 'recent' is a band of its own with its own words
-   instead of a loosened filter.
+   The third and fourth matter most, because the first two are claims about the
+   catalogues and these are claims about us. "We could not look" and "there is
+   nothing new" are different facts, and a screen that renders both as an empty
+   panel is a screen that lies during an outage. BT.follows.coverageOf(row) is
+   the one place that distinction is computed.
 
    ── A CARD TAP OPENS THE PANE AND ADDS NOTHING ────────────────────────────
    Reported bug, not a preference. This used to call BT.ui.addItem, so looking
    at what an author had out quietly filled the library with `want` entries the
    reader never asked for — on a screen whose entire purpose is BROWSING books
-   you do not own. 56-inspector's `_transient` mode shows the record with one
-   explicit "Add to library" button, which is what 61-view-search settled on
-   when the identical complaint came in about its result rows.
+   you do not own.
 
-   ── PUBLISHERS ARE GONE ───────────────────────────────────────────────────
-   "lets drop publisher support as i think it's a bit too shoehorned in". The
-   picker, the roster group, the polling and the approximate-match apparatus
-   have all been removed. Publisher survives as a FACET — the edition picker
-   filters across it and the detail pane shows it on the Edition block, which is
-   where it was always carrying its weight; 70-follows.js lists every surface.
-   56-inspector's publisher pill is gone from that file outright rather than
-   left to feature-detect a `togglePublisher` that no longer exists — a pill
-   suppressed by an absence comes back the moment the absence does.
+   ── NO EXPLAINER MICROCOPY ────────────────────────────────────────────────
+   Nothing on this screen explains how the app works. The reasoning that used to
+   sit under every band heading is in the code and in DECISIONS.md. What is left
+   is: empty states that say what to DO, real error messages, and counts. Where
+   a caveat is genuinely load-bearing — a date the record cannot support — it is
+   carried by the app's existing date grammar (a hatched field) rather than by a
+   sentence.
    ══════════════════════════════════════════════════════════════════════════ */
 
 BT.viewPeople = (function () {
   const esc = BT.util.escapeHtml;
 
-  /* How far back "recently published" reaches. The CURRENT year is never in
-     this band — a bare current year is undecidable and has a band of its own —
-     so this is the two complete years before it. Small on purpose: the point of
-     the band is "what has this author had out lately", and a five-year window
-     is a bibliography rather than news. The range is PRINTED in the heading, so
-     the reader never has to infer where the edge is. */
+  /* How far back "recent" reaches. Small on purpose: the point of the count is
+     "what has this author had out lately", and a five-year window is a
+     bibliography rather than news. */
   const RECENT_YEARS = 2;
-
-  /* A bound on Google Books REQUESTS, not on rows. Every row stays on screen
-     either way; this only decides how many undecidable years get resolved into
-     real dates. Unlike a display cap, reaching it hides nothing — the
-     twenty-fifth row still says "year only" out loud rather than pretending to
-     be precise. */
-  const SHARPEN_MAX = 24;
 
   /* Minimum characters before the author lookup fires. Two, matched to
      20-openlibrary.js's typeahead rule, which will not wildcard a single
      character (`b*` matches 170,000 authors — measured). */
   const MIN_Q = 2;
+
+  /* How many ranked lookup rows reach the screen. */
+  const SHOW_AUTHORS = 8;
+
+  /* The five windows, in the order the user asked for them. The ids are
+     BT.util.releaseWindow's, so #/people and #/up agree about where "this
+     month" ends and there is one calendar in the app rather than two. */
+  const WINDOWS = [
+    { id: 'week',   label: 'Next week' },
+    { id: 'month',  label: 'This month' },
+    { id: 'next',   label: 'Next month' },
+    { id: 'year',   label: 'End of year' },
+    { id: 'nextyr', label: 'Next year' },
+  ];
+  const WIN_KEY = 'bt.people.window';
+  const OPEN_KEY = 'bt.people.open.v1';
+  const RECENT_KEY = 'bt.people.recent.v1';
 
   let followSet = new Set();     // ids currently followed — drives every button
   let rosterRows = [];           // the follow rows this render drew
@@ -120,35 +92,26 @@ BT.viewPeople = (function () {
   let subscribed = false;        // the repo subscription is registered once, ever
   let pageAlive = () => false;   // is #/people still the live route?
   let tick = null;               // the "searching for Ns" ticker
-  let seenTimer = null;
+  let windowId = loadWindow();
+  let expanded = loadSet(OPEN_KEY);
+  let recentOpen = loadSet(RECENT_KEY);
+  const seenTimers = new Map();  // followId -> the pending mark-seen timer
 
   /* Author lookups already answered, keyed on the folded query. Module-scoped
      rather than per-render, and it is not a micro-optimisation: Open Library's
      author endpoint answers in 2.5 to 9 SECONDS (measured across a dozen
      queries), so the difference between reusing an answer and asking again is
-     the difference between a box that responds and one that appears broken.
-     BT.net caches the payload too, but only for BT.TTL.search and only after a
-     round trip through IndexedDB; this is in front of that. */
+     the difference between a box that responds and one that appears broken. */
   const authorCache = new Map();
   let searchSeq = 0;
-
-  /* Google Books' answer for a work whose year we could not place, and the set
-     of works we have already asked about. Two structures rather than one
-     because they answer different questions: `sharpMap` holds an improvement,
-     `sharpAsked` records that a request was spent — and a card distinguishes
-     "year only" from "year only, and Google has no finer date either", which a
-     reader who paid for a key deserves to be able to tell apart. */
-  const sharpMap = new Map();
-  const sharpAsked = new Set();
 
   /* The unseen-news count as it stood when the page was drawn.
 
      Captured rather than recomputed, for the same reason 66-view-alerts.js does
      not repaint after marking rows read: the badge is what tells the reader
-     WHICH sections have something new in them, and a badge that vanished the
-     instant the seen-marker was written would take that information away while
-     they were still reading it. It clears on the next visit, like an unread
-     count should. */
+     WHICH rows have something new in them, and a badge that vanished the instant
+     the seen-marker was written would take that information away while they
+     were still reading it. */
   let newsAtRender = new Map();
 
   /* Works that became yours WHILE this page was showing them.
@@ -156,11 +119,22 @@ BT.viewPeople = (function () {
      Deliberately not filtered back out. Adding a book from the detail pane ends
      in BT.router.resolve(), which re-renders this screen — and the re-render
      reads the shelves again, so without this set the card the reader just acted
-     on would VANISH from under the pane they acted on it in. A row that
-     disappears the instant you use it reads as a mistake rather than as success.
-     They stay where they are, marked "In your library", which is also the honest
-     label. */
+     on would VANISH from under the pane they acted on it in. */
   const addedHere = new Set();
+
+  function loadSet(key) {
+    try { return new Set(JSON.parse(localStorage.getItem(key)) || []); }
+    catch (_) { return new Set(); }
+  }
+  function saveSet(key, set) {
+    try { localStorage.setItem(key, JSON.stringify([...set])); } catch (_) {}
+  }
+  function loadWindow() {
+    try {
+      const v = localStorage.getItem(WIN_KEY);
+      return WINDOWS.some(w => w.id === v) ? v : 'month';
+    } catch (_) { return 'month'; }
+  }
 
   /* ── SEAM ──────────────────────────────────────────────────────────────
      Feature-detected rather than assumed, the same way 61-view-search guards
@@ -174,13 +148,12 @@ BT.viewPeople = (function () {
     if (!BT.openlibrary || typeof BT.openlibrary.searchAuthors !== 'function') out.push('20-openlibrary.js');
     /* Checked separately from the module that holds them, because an OLDER
        70-follows.js parses fine and answers toggleAuthor perfectly while having
-       neither a cache nor a refresher — at which point every section on this
-       page would render permanently empty with nothing to say why. A missing
-       capability must fail loudly; a page that silently stops answering is the
-       failure this whole change was made to remove. */
+       neither the union nor the coverage rule — at which point every row on this
+       page would render permanently empty with nothing to say why. */
     if (f && typeof f.cachedWorks !== 'function') out.push('70-follows.js (cachedWorks)');
     if (f && typeof f.refreshAll !== 'function') out.push('70-follows.js (refreshAll)');
-    if (f && typeof f.futureness !== 'function') out.push('70-follows.js (futureness)');
+    if (f && typeof f.coverageOf !== 'function') out.push('70-follows.js (coverageOf)');
+    if (f && typeof f.inWindow !== 'function') out.push('70-follows.js (inWindow)');
     return out;
   }
 
@@ -189,27 +162,37 @@ BT.viewPeople = (function () {
     if (!view) return;
     pageAlive = alive || (() => true);
 
-    BT.ui.crumb(['Discover', 'Following']);
-
     if (inflight) { inflight.abort(); inflight = null; }
     clearInterval(tick); tick = null;
-    clearTimeout(seenTimer); seenTimer = null;
+    for (const t of seenTimers.values()) clearTimeout(t);
+    seenTimers.clear();
     subscribeOnce();
 
     const gap = missingDeps();
     if (gap.length) {
+      BT.ui.crumb(['Discover', 'Following']);
       BT.ui.paneActions('');
       view.innerHTML = BT.ui.errorBox('Following is not wired up on this page',
         `Missing ${gap.join(', ')}. Everything already on your shelves still works.`);
       return;
     }
 
-    /* ONE read of the library, used to mark the sections' rows as owned.
-       Reading it inside a section renderer instead was the obvious shape, and
-       is a full store scan per author. */
+    /* "See works" is a screen of its own on the same route, so it can be linked
+       and reloaded — and so it works for an author NOBODY FOLLOWS, which is the
+       whole point of the control. */
+    if (q && q.works) { await renderWorks(view, q); return; }
+
+    BT.ui.crumb(['Discover', 'Following']);
+
+    if (q && q.w && WINDOWS.some(w => w.id === q.w)) windowId = q.w;
+
+    /* ONE read of the library, used to mark rows as owned. Reading it inside a
+       row renderer instead was the obvious shape, and is a full store scan per
+       author. */
     const items = await BT.repo.allItems();
     if (!pageAlive()) return;
     ownedWorks = new Set(items.map(it => (it.ids && it.ids.olWork) || '').filter(Boolean));
+    dropBands();
 
     const follows = await BT.follows.all();
     if (!pageAlive()) return;
@@ -231,52 +214,33 @@ BT.viewPeople = (function () {
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
           </svg>
-          <input id="fq" type="search" placeholder="Find an author to follow…"
+          <input id="fq" type="search" placeholder="Find an author…"
                  spellcheck="false" autocomplete="off" autocapitalize="none" autocorrect="off"
-                 value="${esc(term)}" aria-label="Find an author to follow">
-        </div>
-        <!-- One <span>, for the reason 75-view-scan.js and 61-view-search.js both
-             give: .shint is a flex container, so prose written straight into it
-             breaks only at element boundaries, and a <b> could end up alone on a
-             line with the full stop floating after it. -->
-        <div class="shint">
-          <span>Authors are matched on their Open Library id, never on their name — a
-          name-scoped search for one author genuinely returns another author’s books.
-          Partial names are matched as you type; Open Library’s author index can take
-          several seconds to answer.</span>
+                 value="${esc(term)}" aria-label="Find an author">
         </div>
       </div>
 
       <div id="fres"></div>
-
-      <div id="froster">${roster(rosterRows)}</div>
-
-      <div id="fsections">${rosterRows.map(sectionHtml).join('')}</div>`;
+      ${keyPrompt()}
+      ${follows.length ? windowStrip() : ''}
+      <div id="froster">${roster(rosterRows)}</div>`;
 
     const input = document.getElementById('fq');
     /* 320ms. Shorter than the 350 this box used to run at, and the reason is
        that the debounce was never the slow part: the ENDPOINT is (2.5–9s
        measured), so a longer wait only delays the start of a request the reader
        is already waiting on. What makes the shorter wait affordable is that a
-       superseded lookup is now dropped by sequence number rather than by
-       blanking the panel — see find(). */
+       superseded lookup is dropped by sequence number rather than by blanking
+       the panel — see find(). */
     const wait = matchMedia('(pointer: coarse)').matches ? 400 : 320;
     const run = BT.util.debounce(() => find(input.value.trim()), wait);
     input.addEventListener('input', () => {
       /* TWO handlers on one event, and the un-debounced one is the fix for
-         "it feels unresponsive".
-
-         A debounce is invisible from the outside: for the third of a second
-         before it fires, the panel is still describing the PREVIOUS query, so
-         the box reads "sanderso" over a heading that says "Matches for brandon
-         sanderson" and a list of Brandon Sandersons. Everything on screen is
-         then stale and nothing says so, which is exactly the state that teaches
-         someone to clear the box and type it again.
-
-         This runs on the keystroke itself and does one cheap thing: it repaints
-         the state line, and swaps in the best cached answer for a prefix of
-         what is now typed. No request, no debounce, no DOM beyond one line and
-         a list we already hold. */
+         "it feels unresponsive". A debounce is invisible from the outside: for
+         the third of a second before it fires, the panel is still describing the
+         PREVIOUS query. This runs on the keystroke itself and does one cheap
+         thing — it repaints the state line and swaps in the best cached answer
+         for a prefix of what is now typed. */
       typedAhead(input.value.trim());
       run();
     });
@@ -290,9 +254,7 @@ BT.viewPeople = (function () {
 
     /* Assignment, never addEventListener. #view OUTLIVES every route change —
        only its contents are replaced — so a listener bound here would stay alive
-       on other screens and stack up one more copy per re-render. Every selector
-       below is unique to this page, so a stale assignment is inert until the
-       next view overwrites it. */
+       on other screens and stack up one more copy per re-render. */
     view.onclick = onClick;
     view.ontouchstart = e => {
       const t = e.touches[0];
@@ -312,23 +274,14 @@ BT.viewPeople = (function () {
 
     /* THE CACHE IS ALREADY ON SCREEN. This asks for what is stale, and the
        per-follow cooldown in 70-follows means a roster refreshed within the last
-       few hours costs ZERO requests — the sections above are simply already
-       right. Not awaited: the page is drawn and the reader can use it. */
+       few hours costs ZERO requests on either source. Not awaited: the page is
+       drawn and the reader can use it. */
     refresh({ reason: 'page' });
 
-    /* Marked seen after a beat, not on arrival. Marking instantly would clear
-       the badges before the eye reaches them; marking on the way out means the
-       sidebar still claims news while the reader is looking at all of it. The
-       badges themselves stay on screen for this visit — `newsAtRender` is a
-       snapshot — so the information does not vanish as it is being read. */
-    seenTimer = setTimeout(async () => {
-      if (!pageAlive() || !location.hash.startsWith('#/people')) return;
-      let any = false;
-      for (const f of follows) {
-        if (await BT.follows.markNewsSeen(f.id)) any = true;
-      }
-      if (any && BT.tree && BT.tree.refresh) BT.tree.refresh();
-    }, 2500);
+    /* Any row that is already expanded is being READ, so its badge is due to
+       clear. Rows that are collapsed keep theirs — that is what the badge is
+       for. See scheduleSeen(). */
+    for (const f of follows) if (expanded.has(f.id)) scheduleSeen(f.id);
   }
 
   /* `|| ''` because these rows survive an export and an import: a row that
@@ -340,66 +293,122 @@ BT.viewPeople = (function () {
       String(a.name || '').localeCompare(String(b.name || '')));
   }
 
-  /* ══ FINDING SOMEONE TO FOLLOW ═════════════════════════════════════════
+  /* ══ THE GOOGLE KEY, SAID ONCE ═════════════════════════════════════════
+     Google Books is the primary source, and without a key there is no Google
+     half at all — anonymous access answers HTTP 429 with a quota of ZERO. The
+     app still works: Open Library answers, the rows still give hard answers, and
+     the counts are honest about what they rest on.
+
+     ONE prompt, at the top, with somewhere to go. Not a sentence repeated under
+     every author, and not a nag: it disappears the moment a key exists. */
+  function keyPrompt() {
+    const on = !!(BT.googlebooks && typeof BT.googlebooks.enabled === 'function'
+                  && BT.googlebooks.enabled());
+    if (on) return '';
+    /* The STATE and the ACTION, and not one word about why the state matters.
+       This carried a trailing clause explaining that Open Library records years
+       rather than dates — which is true, is the reason the prompt exists, and is
+       still the app lecturing. The reader does not need to be taught what a
+       catalogue holds; they need to know a source is off and where the switch
+       is. The reason is in DECISIONS.md. */
+    return `<div class="fwarn fwarn--act">
+      Google Books is switched off. These lists are Open Library only.
+      <a class="btn btn--sm" href="#/settings">Add a Google Books key</a>
+    </div>`;
+  }
+
+  /* ══ THE RELEASE WINDOW ════════════════════════════════════════════════
+     One question about the calendar, asked across every follow at once.
+
+     THE STRIP IS ABOVE THE ROSTER because it is the more common question. The
+     per-author rows answer "what about this person"; this answers "what is
+     coming", which is what somebody opens this screen for. */
+  function windowStrip() {
+    const buttons = WINDOWS.map(w => `<button type="button" data-win="${w.id}"
+      aria-pressed="${w.id === windowId ? 'true' : 'false'}">${esc(w.label)}</button>`).join('');
+    return `<div class="fwin">
+      <div class="seg seg--wrap" role="group" aria-label="Release window">${buttons}</div>
+    </div>
+    <div id="fwinbody">${windowBody()}</div>`;
+  }
+
+  /* TWO GROUPS, because a record can be too vague to answer the question and
+     still be relevant to it. BT.follows.windowFit says which:
+
+       'in'        the record's own window fits inside the asked-for one, so it
+                   places the book there itself
+       'possible'  the two overlap but the record is wider than the question — a
+                   bare '2026' asked about next week
+
+     Measured: with a plain overlap test, Open Library's bare-'2026' record for
+     Isles of the Emberdark appeared under FOUR of the five windows, as though
+     four different things were happening. Splitting them keeps every row on
+     screen and stops the vague one impersonating a confirmed date. */
+  function windowBody() {
+    const win = WINDOWS.find(w => w.id === windowId) || WINDOWS[1];
+    const range = BT.util.releaseWindow(win.id);
+    const firm = [];
+    const loose = [];
+    for (const f of rosterRows) {
+      for (const r of worksOf(f)) {
+        const fit = BT.follows.windowFit(r.release, range.from, range.to);
+        if (fit === 'in') firm.push(r);
+        else if (fit === 'possible') loose.push(r);
+      }
+    }
+    /* SOONEST FIRST, then by precision. A window is a list of what is coming, so
+       it reads forwards; and where two land on the same key the one whose record
+       actually states a day goes above the one whose bare year merely overlaps. */
+    const rank = p => BT.normalize.precisionRank(p);
+    const order = (a, b) => (a.release.sortKey - b.release.sortKey)
+      || (rank(b.release.precision) - rank(a.release.precision))
+      || String(a.w.title).localeCompare(String(b.w.title));
+    firm.sort(order);
+    loose.sort(order);
+
+    const span = `${BT.util.skToISO(range.from)} → ${BT.util.skToISO(range.to)}`;
+    if (!firm.length && !loose.length) {
+      return `<div class="fverdict is-no">Nothing from the ${
+        esc(BT.util.pluralize(rosterRows.length, 'author'))} you follow lands in ${
+        esc(win.label.toLowerCase())}.</div>`;
+    }
+    const out = [];
+    out.push(BT.ui.groupHead(win.label, firm.length)
+      + `<div class="fbandnote"><span class="mono">${esc(span)}</span></div>`);
+    out.push(firm.length
+      ? `<div class="grid">${firm.map(r => card(r, { byline: true })).join('')}</div>`
+      : `<div class="fverdict is-no">Nothing is dated inside ${esc(win.label.toLowerCase())}.</div>`);
+    if (loose.length) {
+      out.push(BT.ui.groupHead('Could fall here', loose.length)
+        + `<div class="grid">${loose.map(r => card(r, { byline: true })).join('')}</div>`);
+    }
+    return out.join('');
+  }
+
+  /* ══ FINDING SOMEONE ═══════════════════════════════════════════════════
      ── THE REPORTED BUG, AND THE FOUR THINGS THAT CAUSED IT ───────────────
      "it feels unresponsive. i often have a hard time finding authors needing to
-     retype their name several times for it to come up". All four are fixed
-     here or in the endpoint adapter, and each was measured rather than guessed:
+     retype their name several times for it to come up". Each was measured:
 
      1. A HALF-TYPED NAME MATCHED NOTHING AT ALL. `q=sanderso` answers HTTP 200
-        with numFound 0; `q=sanderso*` answers with 1090. Open Library's author
-        index matches whole tokens, so every intermediate state of typing a name
-        was a confident denial. That is the retyping, exactly: the reader is
-        told there is no such author, assumes a spelling mistake, clears the box
-        and types it again. Fixed in 20-openlibrary.js — see typeaheadQuery.
-
-     2. THE PANEL WAS BLANKED ON EVERY KEYSTROKE. The old find() wrote
-        "Looking up authors…" over whatever was there before asking. With an
-        endpoint that takes seconds, that is a box which is empty far more of
-        the time than it is full. Now the previous answer STAYS, labelled with
-        the query it belongs to, and only the state line changes.
-
-     3. THE LOOKUP QUEUED BEHIND THE ROSTER. Both share one 1-request/second
-        bucket in 05-net. The old page polled every follow on entry, so typing
-        into the box while that walk was going meant waiting for it to finish
-        first — on a roster of eight, tens of seconds, with nothing on screen
-        saying so. BT.follows.hold() now outranks the refresher for the duration
-        of a lookup.
-
-     4. NOTHING SAID IT WAS STILL WORKING. A dead-looking box after four seconds
-        is indistinguishable from a broken one, and the reader's only available
-        move is to type again — which cancelled the request that was about to
-        answer. The state line counts the seconds out loud. */
+        with numFound 0; `q=sanderso*` answers with 1090. Fixed in
+        20-openlibrary.js — see typeaheadQuery.
+     2. THE PANEL WAS BLANKED ON EVERY KEYSTROKE. Now the previous answer STAYS,
+        labelled with the query it belongs to.
+     3. THE LOOKUP QUEUED BEHIND THE ROSTER. BT.follows.hold() now outranks the
+        refresher for the duration of a lookup.
+     4. NOTHING SAID IT WAS STILL WORKING. The state line counts the seconds. */
 
   const fold = s => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 
   /* The best answer we already hold for something related to what is typed now.
 
-     This is what makes the box feel immediate rather than merely honest: having
-     asked about "brandon", every one of "brandon s", "brandon sa", "brandon
-     san" paints a plausible list in the same frame it is typed, and the network
-     answer replaces it when it lands.
-
-     TWO RELATIONSHIPS, AND THE SECOND ONE IS A BUG FIX RATHER THAN A BONUS.
-
-       widening   a cached key that is a PREFIX of what is typed. Its results
-                  are a superset of the answer being asked for, so showing them
-                  under a longer query is safe. Longest wins — the closest
-                  superset is the most useful one.
+     TWO RELATIONSHIPS, AND THE SECOND IS A BUG FIX RATHER THAN A BONUS.
+       widening   a cached key that is a PREFIX of what is typed. Its results are
+                  a superset, so showing them under a longer query is safe.
        narrowing  a cached key that what is typed is a prefix OF. This is
                   BACKSPACE, and without it deleting one character blanks the
-                  panel: after asking about "brandon sanderson", the moment the
-                  reader takes off the last letter there is no cached key that
-                  is a prefix of "brandon sanderso", so the list vanishes and
-                  the box goes empty for a third of a second and then several
-                  seconds more. Correcting a typo is the single most likely
-                  thing somebody does after a bad result, and it was the worst
-                  moment on the screen to show them nothing.
-
-     Widening is preferred when both exist, because a superset can only be too
-     broad while a subset can be missing the row they are reaching for. Either
-     way the state line names the query the rows actually belong to, so nothing
-     on screen claims to be an answer to a question that was not asked. */
+                  panel — which is exactly what somebody does after a bad result. */
   function bestCached(q) {
     const key = fold(q);
     let wider = null;
@@ -408,7 +417,6 @@ BT.viewPeople = (function () {
       if (key.startsWith(k)) {
         if (!wider || k.length > wider.key.length) wider = { key: k, rows };
       } else if (k.startsWith(key)) {
-        /* Shortest, i.e. the least-narrowed subset — it holds the most rows. */
         if (!narrower || k.length < narrower.key.length) narrower = { key: k, rows };
       }
     }
@@ -427,11 +435,6 @@ BT.viewPeople = (function () {
     if (exact) { paintResults(host, q, exact, { forQuery: q, searching: false }); return; }
 
     const near = bestCached(q);
-    /* `searching` is true here even though nothing has been sent yet, and that
-       is the honest word rather than a white lie: from the reader's point of
-       view a lookup for what they have typed is under way, and it is — the
-       debounce is part of it. Saying "waiting to search" instead would be
-       precise about our implementation and useless about their question. */
     paintResults(host, q, near ? near.rows : null,
       { forQuery: near ? near.key : '', searching: true, startedAt: Date.now() });
   }
@@ -452,8 +455,6 @@ BT.viewPeople = (function () {
     const key = fold(q);
     const exact = authorCache.get(key);
     if (exact) {
-      /* Answered from memory, zero requests and zero latency. Retyping the same
-         name — which is what the reader learned to do — is now instant. */
       if (inflight) { inflight.abort(); inflight = null; }
       searchSeq++;
       paintResults(host, q, exact, { forQuery: q, searching: false });
@@ -464,9 +465,9 @@ BT.viewPeople = (function () {
     const startedAt = Date.now();
     paintResults(host, q, near ? near.rows : null,
       { forQuery: near ? near.key : '', searching: true, startedAt });
-    /* The seconds are counted on screen because they are long enough to be
-       worth counting. Only the state line is rewritten — repainting the rows on
-       a timer would re-create every avatar once a second. */
+    /* The seconds are counted on screen because they are long enough to be worth
+       counting. Only the state line is rewritten — repainting the rows on a timer
+       would re-create every avatar once a second. */
     tick = setInterval(() => {
       const el = document.getElementById('fstate');
       if (!el) { clearInterval(tick); tick = null; return; }
@@ -480,15 +481,10 @@ BT.viewPeople = (function () {
 
     let rows;
     /* Interactive work outranks the roster walk for as long as this takes.
-       Released in `finally` without exception: a hold that leaks would slow
-       every later refresh by HOLD_MAX_MS.
-
-       Feature-detected rather than called bare. This pair is the newest thing
-       70-follows.js exports, so it is the likeliest to be missing from a build
-       where that file is a version behind — and a TypeError here lands inside a
-       debounce callback, where it presents as a search box that does nothing at
-       all and one console line from three keystrokes ago. Without the hold the
-       lookup merely queues behind the roster; with a throw there is no lookup. */
+       Released in `finally` without exception: a hold that leaks would slow every
+       later refresh by HOLD_MAX_MS. Feature-detected rather than called bare,
+       because a TypeError here lands inside a debounce callback where it presents
+       as a search box that does nothing at all. */
     const holdable = typeof BT.follows.hold === 'function'
                   && typeof BT.follows.release === 'function';
     if (holdable) BT.follows.hold();
@@ -511,18 +507,13 @@ BT.viewPeople = (function () {
 
     /* Superseded by a later keystroke. Dropped on the SEQUENCE rather than by
        aborting alone, because an abort races: a response already in flight can
-       resolve after a newer request was issued, and rendering it would put
-       results for a query three keystrokes ago under the current text. */
+       resolve after a newer request was issued. */
     if (seq !== searchSeq) return;
     clearInterval(tick); tick = null;
 
-    /* The answer is worth keeping even if the screen has moved on — the reader
-       who comes back to #/people and retypes the name gets it instantly. The
-       PAINT is not: `host` was captured before an await that can last nine
-       seconds, and after a route change it is a detached node that render()
-       has already replaced. Writing into it is invisible rather than harmful,
-       which is exactly why it would never be noticed. */
     authorCache.set(key, rows);
+    /* `host` was captured before an await that can last nine seconds, and after
+       a route change it is a detached node render() has already replaced. */
     if (document.getElementById('fres') !== host) return;
     paintResults(host, q, rows, { forQuery: q, searching: false, took: Date.now() - startedAt });
   }
@@ -536,22 +527,12 @@ BT.viewPeople = (function () {
 
   /* ── RE-RANKING, BECAUSE OPEN LIBRARY'S ORDER IS UNUSABLE ──────────────
      Measured on the live endpoint: `q=brandon` returns Lee E. Brandon first,
-     Brandon, Ruth. second, and Brandon Sanderson — 190 works — sixth. That is
-     the same broken relevance the book search has (point 3 in
-     20-openlibrary.js's header), and the same answer applies: the adapter
-     returns Open Library's order untouched and the view ranks.
+     Brandon, Ruth. second, and Brandon Sanderson — 190 works — sixth.
 
      The scoring is about NAMES rather than titles, which is why
      BT.util.rankByRelevance is not reused: that function scores a query against
-     a title and drops rows below a coverage threshold, and dropping an author
-     the reader can see in the list is worse than ordering them badly.
-
-     The work count is a genuine tiebreak rather than a popularity contest. Given
-     only "brandon", every Brandon in the index is an equally good match on the
-     text and the only remaining evidence about which one was meant is how much
-     of them Open Library holds. It is logarithmic and capped so it can never
-     outweigh an actual name match — Gwendolyn Kiste (32 works) still beats a
-     600-work author whose name does not contain "kiste". */
+     a title and DROPS rows below a coverage threshold, and dropping an author
+     the reader can see in the list is worse than ordering them badly. */
   function rankAuthors(q, rows) {
     const n = fold(q);
     const toks = n.split(' ').filter(Boolean);
@@ -568,16 +549,14 @@ BT.viewPeople = (function () {
       /* A surname is what people type when they type one word. */
       if (words.length && toks.length
           && words[words.length - 1].startsWith(toks[toks.length - 1])) s += 10;
+      /* Logarithmic and capped so it can never outweigh an actual name match —
+         Gwendolyn Kiste (32 works) still beats a 600-work author whose name does
+         not contain "kiste". */
       s += Math.min(12, Math.log10((a.workCount || 0) + 1) * 4);
       return { a, s };
     }).sort((x, y) => y.s - x.s || String(x.a.name).localeCompare(String(y.a.name)))
       .map(r => r.a);
   }
-
-  /* How many ranked rows reach the screen. A disclosed bound, not a silent one:
-     the count in the heading is the number SHOWN and the line beneath says how
-     many were read, so a reader can always see whether the answer was narrowed. */
-  const SHOW_AUTHORS = 8;
 
   function paintResults(host, q, rows, state) {
     const line = `<div class="fstate" id="fstate">${stateLine(state, q)}</div>`;
@@ -590,13 +569,12 @@ BT.viewPeople = (function () {
       + (shown.length
           ? shown.map(authorRow).join('')
             + (ranked.length > shown.length
-                ? `<div class="fbandnote">Best ${shown.length} of ${ranked.length} Open Library
-                   returned, ranked against what you typed. Keep typing to narrow them.</div>`
+                ? `<div class="fbandnote">Showing ${shown.length} of ${ranked.length}.</div>`
                 : '')
           : `<div class="miss muted">No author in Open Library matches “${esc(q)}”.</div>`);
   }
 
-  /* The one line that must never be silent. Four states, and the reader can act
+  /* The one line that must never be silent. Three states, and the reader can act
      differently in each. */
   function stateLine(state, q) {
     if (state.error) {
@@ -605,15 +583,14 @@ BT.viewPeople = (function () {
     }
     if (state.searching) {
       const secs = Math.max(0, Math.round((Date.now() - state.startedAt) / 1000));
-      return `<span class="fdot"></span>Searching Open Library for “${esc(q)}”${
+      return `<span class="fdot"></span>Searching for “${esc(q)}”${
         secs >= 2 ? ` · <span class="mono">${secs}s</span>` : ''}${
         state.forQuery && state.forQuery !== fold(q)
-          ? ` <span class="faint">— showing matches for “${esc(state.forQuery)}” meanwhile</span>`
+          ? ` <span class="faint">— showing “${esc(state.forQuery)}” meanwhile</span>`
           : ''}`;
     }
     return `Matches for “${esc(q)}”${
-      state.took != null ? ` <span class="faint">· Open Library answered in ${
-        (state.took / 1000).toFixed(1)}s</span>` : ''}`;
+      state.took != null ? ` <span class="faint">· ${(state.took / 1000).toFixed(1)}s</span>` : ''}`;
   }
 
   function authorRow(a) {
@@ -621,8 +598,7 @@ BT.viewPeople = (function () {
     const on = followSet.has(id);
     /* Escaped as it is collected, not at the join. `top_work` is a catalogue
        title contributed by volunteers and has carried an ampersand and a stray
-       angle bracket in the wild; assembling this list unescaped and trusting the
-       join site to remember is how one of those ends up parsed as markup. */
+       angle bracket in the wild. */
     const bits = [];
     if (a.workCount != null) bits.push(esc(BT.util.pluralize(a.workCount, 'work')));
     if (a.topWork) bits.push(esc(BT.util.truncate(a.topWork, 44)));
@@ -635,14 +611,14 @@ BT.viewPeople = (function () {
           ${bits.join(' · ')} <span class="mono faint">${esc(a.olid)}</span>
         </div>
       </div>
+      <a class="btn btn--sm btn--ghost" href="${worksHref(a.olid, a.name)}">See works</a>
       ${followBtn(id, on, a.name, a.olid)}
     </div>`;
   }
 
-  /* One button, both states, because a Follow that becomes a Following marker
-     in place is the only version that does not move the row under a thumb — the
-     same reason 61-view-search swaps its Add button rather than repainting the
-     list. aria-pressed carries the state for a screen reader. */
+  /* One button, both states, because a Follow that becomes a Following marker in
+     place is the only version that does not move the row under a thumb.
+     aria-pressed carries the state for a screen reader. */
   function followBtn(id, on, name, key) {
     return `<button class="add${on ? ' is-in' : ''}" type="button"
       data-follow="${esc(id)}" data-fkey="${esc(key)}"
@@ -650,90 +626,217 @@ BT.viewPeople = (function () {
       >${on ? '✓ Following' : 'Follow'}</button>`;
   }
 
-  /* ══ THE ROSTER ════════════════════════════════════════════════════════
-     The compact index: who you follow, whether they have news, and when each
-     was last looked at. The sections below carry the books; this carries the
-     answer to "is BookTrak actually watching this person", which is the
-     question the OLD roster got wrong — it read "not checked yet · never
-     checked" underneath a screen that was showing the author's catalogue,
-     because the page and the roster were reading two different stores. */
+  const worksHref = (olid, name, gbName) =>
+    `#/people?works=1&olid=${encodeURIComponent(olid || '')}`
+    + `&name=${encodeURIComponent(name || '')}`
+    + (gbName && gbName !== name ? `&gb=${encodeURIComponent(gbName)}` : '');
+
+  /* ══ THE ROSTER — ONE ROW PER AUTHOR ═══════════════════════════════════ */
 
   function roster(follows) {
     if (!follows.length) {
       return BT.ui.emptyState({
         title: 'You are not following anyone yet',
-        body: 'Follow an author and BookTrak keeps a copy of their Open Library catalogue, '
-          + 'shows you what is dated ahead, and tells you when something new is listed or a '
-          + 'publication year changes. You can also follow from the author’s name on any '
-          + 'search result or book pane, so you never have to come here first.',
+        body: 'Search for an author above, or follow one from any search result or book pane.',
+        actions: '<a class="btn btn--primary" href="#/search">Search for a book</a>',
       });
     }
-    return BT.ui.groupHead('Following', follows.length) + follows.map(rosterRow).join('');
+    return BT.ui.groupHead('Following', follows.length)
+      + follows.map(rowHtml).join('');
   }
 
-  function rosterRow(f) {
-    const news = newsAtRender.get(f.id) || 0;
-    return `<div class="miss" data-rrow="${esc(f.id)}">
-      <span class="chipart fav"></span>
-      <div style="min-width:0;flex:1">
-        <div class="fname">${esc(f.name)}${
-          news ? ` <span class="fnews">${news} new</span>` : ''}</div>
-        <div class="muted" style="font-size:var(--bt-fs-mini)">${rosterSub(f)}</div>
+  function rowHtml(row) {
+    const open = expanded.has(row.id);
+    return `<section class="frow${open ? ' is-open' : ''}" data-fsec="${esc(row.id)}">
+      ${rowHead(row)}
+      ${open ? `<div class="frow-body">${rowBody(row)}</div>` : ''}
+    </section>`;
+  }
+
+  function rowHead(row) {
+    const open = expanded.has(row.id);
+    const busy = pendingIds.has(row.id);
+    return `<div class="frow-h">
+      <button class="frow-toggle" type="button" data-ftoggle="${esc(row.id)}"
+              aria-expanded="${open ? 'true' : 'false'}">
+        <span class="tri"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M2 4l4 4 4-4z"/></svg></span>
+        <span class="chipart fav"></span>
+        <span class="frow-main">
+          <span class="frow-name">${esc(row.name)}</span>
+          <span class="frow-counts">${counts(row)}</span>
+        </span>
+      </button>
+      <div class="frow-acts">
+        <button class="btn btn--sm btn--ghost" type="button" data-frefresh="${esc(row.id)}"${
+          busy ? ' disabled' : ''}>${busy ? 'Checking…' : 'Refresh'}</button>
+        <a class="btn btn--sm btn--ghost" href="${
+          worksHref(row.olid || row.sourceId, row.name, row.gbName)}">See works</a>
+        <button class="btn btn--sm btn--ghost" type="button" data-unfollow="${esc(row.id)}">Unfollow</button>
       </div>
-      <button class="btn btn--sm btn--ghost" type="button" data-unfollow="${esc(f.id)}">Unfollow</button>
+      <div class="frow-sub">${rowSub(row)}</div>
     </div>`;
   }
 
-  /* THE SENTENCE THE OLD ROSTER COULD NOT WRITE. It said "not checked yet ·
-     never checked" for every follow, for ever, because nothing on the page
-     wrote `lastCheckedAt` — the strip was deliberately read-only and the sweep
-     touched three follows every four hours. Now there is one writer and this
-     reads its output, so the row and the section under it cannot disagree. */
-  function rosterSub(f) {
-    const held = ((f.works || []).length);
+  /* ── THE HARD ANSWER, ON THE COLLAPSED ROW ─────────────────────────────
+     "N upcoming (+X new) · M recent", or a sentence saying why there is no
+     number. This is the line the whole screen exists to print, so every branch
+     of it is a different, checkable claim. */
+  function counts(row) {
+    const busy = pendingIds.has(row.id);
+    const held = (row.works || []).length;
+    const news = newsAtRender.get(row.id) || 0;
+    const cov = BT.follows.coverageOf(row);
+
+    if (!held && !row.lastCheckedAt) {
+      return busy
+        ? '<span class="fdot"></span><span class="fq-wait">Checking…</span>'
+        : '<span class="fq-wait">Not checked yet</span>';
+    }
+
+    const b = bandsOf(row);
     const bits = [];
-    if (f.lastError) bits.push(`<span class="fbad">could not check</span>`);
-    else if (!f.lastCheckedAt) bits.push('not checked yet');
-    else bits.push(`${esc(BT.util.pluralize(held, 'work'))} cached`);
-    bits.push(f.lastCheckedAt ? `checked ${esc(BT.util.timeAgo(f.lastCheckedAt))}` : 'never checked');
-    bits.push(`<span class="mono faint">${esc(f.sourceId)}</span>`);
+    const up = b.future.length + b.maybe.length;
+    if (up) {
+      bits.push(`<b class="fq-yes">${esc(BT.util.pluralize(up, 'upcoming', 'upcoming'))}</b>`);
+    }
+    if (news) bits.push(`<span class="fnews">+${news} new</span>`);
+    if (b.recent.length) bits.push(`${b.recent.length} recent`);
+
+    if (!up) {
+      /* NOTHING SCHEDULED IS ONLY SAID WHEN BOTH SOURCES ANSWERED. Otherwise
+         this is a claim about us, and the row says which half is missing. */
+      if (!cov.complete && cov.missing.length) {
+        bits.unshift(`<span class="fq-wait">${esc(cov.missing.join(' and '))} did not answer</span>`);
+      } else {
+        bits.unshift('<span class="fq-no">Nothing scheduled</span>');
+      }
+    }
+    return bits.join('<span class="fq-sep">·</span>');
+  }
+
+  /* WHAT WAS READ, AND WHEN, and which catalogues answered. `numFound` is Open
+     Library's count for the whole catalogue and `works.length` is the merged
+     list we hold, so printing both is the disclosed bound. */
+  function rowSub(row) {
+    const held = (row.works || []).length;
+    const cov = BT.follows.coverageOf(row);
+    const bits = [];
+    if (held) bits.push(`${held} in the list`);
+    bits.push(row.lastCheckedAt
+      ? `checked ${esc(BT.util.timeAgo(row.lastCheckedAt))}`
+      : 'never checked');
+    const src = [];
+    if (cov.olApplicable) src.push(`OL${cov.openlibrary ? '' : ' ✗'}`);
+    if (!cov.gbOff) src.push(`Google${cov.googlebooks ? '' : ' ✗'}`);
+    if (src.length) bits.push(`<span class="mono faint">${esc(src.join(' + '))}</span>`);
+    if (row.olid || row.sourceId) {
+      bits.push(`<span class="mono faint">${esc(row.olid || row.sourceId)}</span>`);
+    }
     return bits.join(' · ');
   }
 
-  /* ══ ONE SECTION PER AUTHOR ════════════════════════════════════════════ */
+  /* ── THE EXPANDED BODY ─────────────────────────────────────────────────
+     Upcoming, then recent behind its own count, then what changed. */
+  function rowBody(row) {
+    const held = (row.works || []).length;
+    const busy = pendingIds.has(row.id);
 
-  /* Sort the stored catalogue into the three bands, and count what fell out of
-     all of them.
+    if (!held && !row.lastCheckedAt) {
+      if (busy) return BT.ui.skeletonGrid(4);
+      return `<div class="fbandnote">${row.lastError
+        ? esc(row.lastError)
+        : 'Press Refresh to fill this in.'}</div>`;
+    }
 
-     THE COUNTS ARE NOT DECORATION. A section showing two cards looks broken; the
-     same section saying it read sixty catalogued works to find them does not. It
-     is the difference between "this feature is not working" and "the catalogue
-     has nothing", and it is the only thing standing between an honest narrow
-     filter and a reader who widens it until the screen looks busy.
+    const b = bandsOf(row);
+    const out = [];
+
+    /* The failure notice sits ABOVE the list rather than replacing it. The cache
+       below is still the truth as of the last successful check, and blanking a
+       correct list because a later request failed would throw away the answer to
+       keep the error. */
+    if (row.lastError) {
+      out.push(`<div class="fwarn">${esc(row.lastError)}</div>`);
+    }
+
+    const up = b.future.concat(b.maybe);
+    if (up.length) {
+      out.push(`<div class="grid">${up.map(r => card(r)).join('')}</div>`);
+    } else {
+      const cov = BT.follows.coverageOf(row);
+      out.push(`<div class="fverdict ${cov.complete ? 'is-no' : 'is-wait'}">${
+        cov.complete
+          ? `Nothing scheduled for ${esc(row.name)}.`
+          : `Not a complete answer — ${esc(cov.missing.join(' and ') || 'no catalogue')} did not answer.`
+      }</div>`);
+    }
+
+    if (b.recent.length) {
+      const open = recentOpen.has(row.id);
+      out.push(`<button class="fmore" type="button" data-frecent="${esc(row.id)}"
+          aria-expanded="${open ? 'true' : 'false'}">
+        <span class="tri"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M2 4l4 4 4-4z"/></svg></span>
+        Recent <span class="fq-sep">·</span> ${b.recent.length}</button>`);
+      if (open) out.push(`<div class="grid">${b.recent.map(r => card(r)).join('')}</div>`);
+    }
+
+    out.push(newsHtml(row));
+    return out.join('');
+  }
+
+  /* ══ BANDS ═════════════════════════════════════════════════════════════
+     Sort the stored catalogue into upcoming / undecidable / recent, and count
+     what fell out of all of them.
 
      OWNERSHIP IS TESTED FIRST, so a book already on the shelves is not counted
-     as something we looked at and rejected on a date — it was never a candidate.
-     Books already in the library are therefore EXCLUDED from the bands and
-     counted out loud in the footnote, which is the honest form of "excluded":
-     nothing disappears without a number appearing in its place. */
+     as something we looked at and rejected on a date — it was never a candidate. */
+  /* MEMOIZED, and this is not a micro-optimisation — it is the difference
+     between a roster walk repainting smoothly and one that stutters.
+
+     bandsOf is read three times per row per paint (the collapsed counts, the
+     expanded body, and the pooled window strip), and the window strip repaints
+     on EVERY `follows:updated`. On a roster of twenty that is 20 × 20 × 3 = 1200
+     passes over a hundred works each, every one of them re-parsing a date string
+     through BT.normalize.buildRelease, during the exact seconds the refresher is
+     also doing network work.
+
+     Keyed on `worksAt` as well as the id, so a row whose catalogue was just
+     rewritten recomputes and a row that merely repainted does not. `ownedWorks`
+     and `addedHere` also feed the answer, so the whole cache is dropped whenever
+     either moves — a stale band would leave a book the reader just added still
+     sitting in the upcoming list. */
+  const bandCache = new Map();
+  function dropBands(id) {
+    if (id) bandCache.delete(id); else bandCache.clear();
+  }
+
   function bandsOf(row) {
+    const ck = row.id + '@' + (row.worksAt || 0);
+    const hit = bandCache.get(row.id);
+    if (hit && hit.ck === ck) return hit.b;
+    const b = computeBands(row);
+    bandCache.set(row.id, { ck, b });
+    return b;
+  }
+
+  function computeBands(row) {
     const works = BT.follows.cachedWorks(row);
     const thisYear = new Date().getFullYear();
     const out = { future: [], maybe: [], recent: [],
-                  owned: 0, older: 0, undated: 0, scanned: works.length };
+                  owned: 0, older: 0, undated: 0, read: works.length };
 
     for (const w of works) {
-      const mine = ownedWorks.has(w.workId);
-      const kept = addedHere.has(w.workId);
+      const mine = w.workId && ownedWorks.has(w.workId);
+      const kept = w.workId && addedHere.has(w.workId);
       if (mine && !kept) { out.owned++; continue; }
 
-      const release = sharpMap.get(w.workId) || BT.follows.releaseOfWork(w);
+      const release = BT.follows.releaseOfWork(w);
       const verdict = BT.follows.futureness(release);
-      const r = { w, release, verdict, via: row, owned: kept, sharp: sharpAsked.has(w.workId) };
+      const r = { w, release, verdict, via: row, owned: !!kept };
 
       if (verdict === 'future') { out.future.push(r); continue; }
       if (verdict === 'maybe') { out.maybe.push(r); continue; }
-      /* 'unknown' is a work with no year at all. It is not a forthcoming book;
+      /* 'unknown' is a work with no date at all. It is not a forthcoming book;
          it is an unfinished catalogue record, and there are a great many of
          them. Letting undated records through "in case" is the softest possible
          way to reintroduce the backlist strip this page was narrowed away from. */
@@ -745,161 +848,31 @@ BT.viewPeople = (function () {
 
     const byTitle = (a, b) => String(a.w.title).localeCompare(String(b.w.title));
     /* SOONEST FIRST — this band is a list of what is coming, so it reads
-       forwards. That is the opposite of the newest-first order the old backlist
-       strip used, and the reversal is the point rather than a detail. */
+       forwards. */
     out.future.sort((a, b) => (a.release.sortKey - b.release.sortKey) || byTitle(a, b));
-    /* Every key in this band is identical (January 1st of this year, for all of
-       them, because 01-util.js anchors a bare year to the start of its window),
-       so title is the ONLY stable order available — and an unstable sort would
-       let the cards shuffle on every repaint. */
+    /* Every key in this band is January 1st of this year (01-util.js anchors a
+       bare year to the start of its window), so title is the ONLY stable order
+       available — and an unstable sort would let the cards shuffle on repaint. */
     out.maybe.sort(byTitle);
-    out.recent.sort((a, b) => (yearOf(b.w) || 0) - (yearOf(a.w) || 0) || byTitle(a, b));
+    out.recent.sort((a, b) => (b.release.sortKey - a.release.sortKey) || byTitle(a, b));
     return out;
   }
 
-  const yearOf = w => (w && (w.latestYear || w.firstYear)) || null;
-
-  function sectionHtml(row) {
-    return `<section class="fsec" data-fsec="${esc(row.id)}">
-      ${sectionHead(row)}
-      <div class="fsec-body">${sectionBody(row)}</div>
-    </section>`;
-  }
-
-  function sectionHead(row) {
-    const news = newsAtRender.get(row.id) || 0;
-    const busy = pendingIds.has(row.id);
-    return `<div class="fsec-h">
-      <span class="chipart fav"></span>
-      <div style="min-width:0;flex:1">
-        <div class="fsec-name">${esc(row.name)}${
-          news ? ` <span class="fnews">${news} new</span>` : ''}</div>
-        <div class="fsec-sub">${sectionSub(row)}</div>
-      </div>
-      <button class="btn btn--sm btn--ghost" type="button" data-frefresh="${esc(row.id)}"${
-        busy ? ' disabled' : ''}>${busy ? 'Checking…' : 'Refresh'}</button>
-    </div>`;
-  }
-
-  /* WHAT WAS READ, AND WHEN. `numFound` is Open Library's count for the whole
-     catalogue and `works.length` is the page we hold, so printing both is the
-     disclosed bound: a reader can see that sixty of a hundred and ninety works
-     were read, newest first, and never has to wonder whether the section is a
-     sample presented as a complete answer. */
-  function sectionSub(row) {
-    const held = (row.works || []).length;
-    const bits = [];
-    if (held) {
-      bits.push(row.numFound > held
-        ? `newest ${held} of ${esc(BT.util.pluralize(row.numFound, 'catalogued work'))}`
-        : esc(BT.util.pluralize(held, 'catalogued work')));
-    }
-    if (row.lastCheckedAt) bits.push(`checked ${esc(BT.util.timeAgo(row.lastCheckedAt))}`);
-    else bits.push('never checked');
-    bits.push(`<span class="mono faint">${esc(row.sourceId)}</span>`);
-    return bits.join(' · ');
-  }
-
-  /* ── THE HARD ANSWER ───────────────────────────────────────────────────
-     Four states, four sentences, and never a blank. See the file header. */
-  function sectionBody(row) {
-    const held = (row.works || []).length;
-    const busy = pendingIds.has(row.id);
-
-    /* We have never successfully looked. This is the state a newly-followed
-       author is in for the few seconds before their first answer lands, and it
-       must say which of the two it is — checking, or not checked and idle. */
-    if (!held && !row.lastCheckedAt) {
-      if (busy) {
-        return `<div class="fverdict is-wait"><span class="fdot"></span>Checking ${
-          esc(row.name)}’s catalogue…</div>${BT.ui.skeletonGrid(4)}`;
-      }
-      return `<div class="fverdict is-wait">Not checked yet.</div>
-        <div class="fbandnote">${row.lastError
-          ? `The last attempt failed: ${esc(row.lastError)} This is not a statement about
-             whether anything new exists — only that we could not look.`
-          : 'Press Refresh, and this section fills in.'}</div>`;
-    }
-
+  /* Every candidate row for one follow, banded and flattened — what the window
+     strip pools. Owned books are excluded here for the same reason they are
+     excluded from a row: they are not something to look forward to. */
+  function worksOf(row) {
     const b = bandsOf(row);
-    const out = [];
-
-    /* The failure notice sits ABOVE the bands rather than replacing them. The
-       cache below it is still the truth as of the last successful check, and
-       blanking a correct list because a later request failed would be throwing
-       away the answer to keep the error. */
-    if (row.lastError) {
-      out.push(`<div class="fwarn">Could not check ${esc(row.name)} ${
-        esc(BT.util.timeAgo(row.lastTriedAt))} — ${esc(row.lastError)}
-        Everything below is what we last read, on ${
-        esc(BT.util.timeAgo(row.lastCheckedAt))}.</div>`);
-    } else if (busy) {
-      out.push(`<div class="fverdict is-wait"><span class="fdot"></span>Checking for changes…</div>`);
-    }
-
-    out.push(verdictLine(row, b));
-
-    if (b.future.length) {
-      out.push(BT.ui.groupHead('Dated after today', b.future.length)
-        + `<div class="grid">${b.future.map(card).join('')}</div>`);
-    }
-    if (b.maybe.length) {
-      out.push(BT.ui.groupHead(`${new Date().getFullYear()} — no month recorded`, b.maybe.length)
-        + `<div class="fbandnote">Open Library records a year and no month for these, so the
-           record genuinely does not say whether they are behind us or ahead of us.
-           <b>Not counted as upcoming.</b>${gbNote()}</div>`
-        + `<div class="grid">${b.maybe.map(card).join('')}</div>`);
-    }
-    if (b.recent.length) {
-      const thisYear = new Date().getFullYear();
-      out.push(BT.ui.groupHead(
-          `Recently published · ${thisYear - RECENT_YEARS}–${thisYear - 1}`, b.recent.length)
-        + `<div class="fbandnote">Already out. Listed because they are recent, not because
-           they are coming.</div>`
-        + `<div class="grid">${b.recent.map(card).join('')}</div>`);
-    }
-
-    out.push(footnote(row, b));
-    out.push(newsHtml(row));
-    return out.join('');
+    return b.future.concat(b.maybe);
   }
 
-  /* One sentence, and it is the thing the user asked for: "a hard confirmation
-     that there is or isn't anything scheduled for an author". */
-  function verdictLine(row, b) {
-    if (b.future.length) {
-      return `<div class="fverdict is-yes">${
-        esc(BT.util.pluralize(b.future.length, 'work'))} dated after today.</div>`;
-    }
-    if (b.maybe.length) {
-      return `<div class="fverdict is-maybe">Nothing is dated after today for ${esc(row.name)} — but ${
-        esc(BT.util.pluralize(b.maybe.length, 'work'))} carr${b.maybe.length === 1 ? 'ies' : 'y'
-        } this year with no month recorded, so ${b.maybe.length === 1 ? 'it' : 'they'
-        } could still be ahead.</div>`;
-    }
-    return `<div class="fverdict is-no">Nothing is scheduled for ${esc(row.name)}.</div>`;
-  }
-
-  /* Everything the bands did NOT show, counted. This is what makes a short
-     section legible instead of suspicious, and it is also where "already in your
-     library" is disclosed rather than silently filtered. */
-  function footnote(row, b) {
-    const bits = [];
-    bits.push(`Read ${esc(BT.util.pluralize(b.scanned, 'catalogued work'))}`);
-    if (b.owned) bits.push(`${b.owned} already on your shelves`);
-    if (b.older) bits.push(`${b.older} published earlier`);
-    if (b.undated) bits.push(`${b.undated} with no year recorded`);
-    return `<div class="fbandnote fbandnote--foot">${bits.join(' · ')}. Open Library has no
-      forthcoming-title concept — it catalogues books that already exist and records years
-      rather than dates — so a short or empty section here is an answer rather than a
-      failure.</div>`;
-  }
+  const yearOf = w => {
+    const p = BT.util.sortKeyToParts(BT.follows.releaseOfWork(w).sortKey);
+    return (p && p.y) || (Number.isFinite(w && w.firstYear) ? w.firstYear : null);
+  };
 
   /* ── THE NEWS FEED, PER AUTHOR ─────────────────────────────────────────
-     What changed in this catalogue, most recent first. This is the half the old
-     arrangement could not have: the previous baseline was a bag of work ids with
-     no dates in it, so "the year recorded for this book changed" was invisible
-     by construction rather than merely unimplemented. */
+     What changed in this catalogue, most recent first. */
   function newsHtml(row) {
     const news = (row.news || []).slice().sort((a, b) => b.at - a.at).slice(0, 8);
     if (!news.length) return '';
@@ -909,26 +882,10 @@ BT.viewPeople = (function () {
           <span class="fnk">${n.kind === 'moved' ? '↔' : '▸'}</span>
           <span class="fnt">${esc(n.title || 'Untitled work')}</span>
           <span class="fnw">${n.kind === 'moved'
-            ? `year changed ${esc(String(n.from))} → ${esc(String(n.to))}`
+            ? `${esc(String(n.from))} → ${esc(String(n.to))}`
             : `newly listed${n.to ? ` · ${esc(String(n.to))}` : ''}`}</span>
           <span class="faint">${esc(BT.util.timeAgo(n.at))}</span>
         </div>`).join('');
-  }
-
-  /* Whether the year-only rows on this page can be resolved at all, said where
-     the reader is standing when the question occurs to them.
-
-     Not a nag and not a banner: a key is optional, the page works without one,
-     and every row it would sharpen is already on screen and honestly labelled.
-     What the note buys is that "2026, we cannot tell" stops looking like a
-     defect in BookTrak and starts looking like what it is — the limit of a
-     catalogue that stores years, with a named way out. */
-  function gbNote() {
-    const on = !!(BT.googlebooks && typeof BT.googlebooks.enabled === 'function'
-                  && BT.googlebooks.enabled());
-    if (on) return ' Google Books is sharpening these into real dates where it can.';
-    return ' A <a href="#/settings">Google Books key</a> would sharpen most of these'
-      + ' into real dates.';
   }
 
   /* THE DATE IS RENDERED IN THE APP'S OWN GRAMMAR, not paraphrased into a
@@ -937,53 +894,200 @@ BT.viewPeople = (function () {
 
          2026-▨▨-▨▨      the year is stored; the month and day do not exist
 
-     which is the honest picture and needs no adjective. Hand-rolling it here —
-     instead of using the one component that owns it — is how a month-precision
-     book eventually renders a day. */
-  function card(r) {
+     which is the honest picture and needs no adjective. That is why the "may
+     already be out" caption is gone: the hatch already says it, and the sentence
+     was one more piece of the app explaining itself. */
+  function card(r, opts) {
+    opts = opts || {};
     const w = r.w;
-    const uid = 'book:openlibrary:' + w.workId;
+    const uid = uidOf(w);
     const maybe = r.verdict === 'maybe';
 
     /* A countdown ONLY for a real day. `relativeDays` against a bare year would
-       count down to January 1st — a date the record never stated and which, for
-       every row in the year-only band, is already months behind us. */
+       count down to January 1st — a date the record never stated. */
     const soon = (!maybe && r.verdict === 'future' && r.release.precision === 'day')
       ? BT.util.relativeDays(BT.util.daysUntil(r.release.sortKey))
       : '';
 
-    return `<div class="card${r.owned ? ' is-mine' : ''}${maybe ? ' is-approx' : ''}" data-uid="${esc(uid)}">
-      ${/* The shape BT.ui.poster reads, and no more: a cover id is all a stored
-            work carries. `ids` is present-but-empty on purpose, so posterUrl's
-            ISBN and edition-OLID fallbacks find nothing and fall through to the
-            generated block instead of firing a request that cannot succeed. */''}
-      ${BT.ui.poster({ title: w.title, images: { coverId: w.coverId }, ids: {} })}
+    /* A reissue: this printing is ahead of us and the work is not new. Stated as
+       a fact ("first published 2024"), never as a caveat about the app. */
+    const first = Number.isFinite(w.firstYear) ? w.firstYear : null;
+    const here = BT.util.sortKeyToParts(r.release.sortKey);
+    const reissue = first && here && here.y > first;
+
+    return `<div class="card${r.owned ? ' is-mine' : ''}${maybe ? ' is-approx' : ''}"${
+      uid ? ` data-uid="${esc(uid)}"` : ' data-noopen="1"'}>
+      ${BT.ui.poster(posterFor(w))}
       <div class="ct">${esc(w.title)}</div>
+      ${opts.byline ? `<div class="cby">${esc(r.via.name)}</div>` : ''}
       <div class="cs">
         ${BT.ui.dateField(r.release)}
         ${soon ? `<span class="csoon">${esc(soon)}</span>` : ''}
         ${r.owned ? '<span class="cmine">✓ In your library</span>' : ''}
       </div>
-      ${/* The hatch says the month is missing; this says what that MEANS for the
-            promise the band heading just made. Two different jobs. `sharp` marks
-            the ones Google looked at and could not improve, so a reader with a
-            key can tell "not checked" from "checked, and the catalogue simply
-            does not say". */''}
-      ${maybe ? `<div class="capprox">${esc(vagueLabel(r.release))} — may already be out${
-        r.sharp ? '; Google Books has no finer date either' : ''}</div>` : ''}
+      ${reissue ? `<div class="cfirst">first published ${first}</div>` : ''}
     </div>`;
   }
 
-  /* WHICH grain is missing, read off the release rather than assumed to be the
-     year. Almost every 'maybe' is a bare year, but not all: a Google Books date
-     of '2026-08' lands in the CURRENT month, which still straddles today and is
-     still undecidable — and calling that "year only" when the card beside it
-     plainly shows a month would read as a bug in BookTrak rather than as a gap
-     in the record. */
-  function vagueLabel(release) {
-    const p = (release && release.precision) || 'unknown';
-    if (p === 'month' || p === 'quarter') return 'No day recorded';
-    return 'Year only';
+  /* The shape BT.ui.poster reads. An Open Library cover id when there is one;
+     otherwise Google's thumbnail, which is the only cover a forthcoming title
+     Open Library has never catalogued will ever have. `ids` is present-but-empty
+     when neither exists, so posterUrl's ISBN and edition-OLID fallbacks find
+     nothing and fall through to the generated block instead of firing a request
+     that cannot succeed. */
+  /* THE COVER SHOULD BE THE PRINTING THE DATE CAME FROM, and where the two
+     sources disagree that means Google's.
+
+     Measured: Open Library's `cover_i` for Brandon Sanderson's Wind and Truth is
+     the SPANISH edition, `Viento y Verdad` — its work record simply points at
+     whichever edition somebody uploaded art for, with no language preference at
+     all. So a card whose date came from Google's English 2026-10-27 printing was
+     showing a Spanish cover, which reads as the app having found the wrong book.
+
+     `coverUrl` is posterUrl's absolute-URL branch, which exists precisely for a
+     Google Books thumbnail — it is not a URL this app can rebuild from an id,
+     because it carries an opaque token. */
+  function posterFor(w) {
+    const preferThumb = w.thumb && w.dateSource === 'googlebooks';
+    if (preferThumb) return { title: w.title, images: { coverUrl: w.thumb }, ids: {} };
+    if (w.coverId) return { title: w.title, images: { coverId: w.coverId }, ids: {} };
+    if (w.thumb) return { title: w.title, images: { coverUrl: w.thumb }, ids: {} };
+    return { title: w.title, images: {}, ids: w.isbn13 ? { isbn13: w.isbn13 } : {} };
+  }
+
+  /* WHICH uid opens this book's pane, in the order of what actually resolves.
+
+     OPEN LIBRARY'S WORK ID FIRST, ALWAYS, even on a row Google supplied the date
+     for. That is the app's whole dedupe contract: a book already on the shelves
+     is keyed `book:openlibrary:{OLID}`, so opening a Google uid for a work the
+     reader already owns would show them a stranger's copy of their own book and
+     offer to add it a second time. Google's id is used only where Open Library
+     genuinely has no record — which is exactly what a forthcoming title is.
+
+     56-inspector dispatches `book:googlebooks:…` to BT.googlebooks.lookupUid and
+     the other two to BT.openlibrary.lookupUid, so all three resolve. The Google
+     branch is FEATURE-DETECTED anyway: without a key that lookup cannot run, and
+     minting a uid nothing can open would give the reader a pane that says "Not
+     found" where an ISBN would have worked. */
+  function uidOf(w) {
+    if (w.workId) return 'book:openlibrary:' + w.workId;
+    const gb = BT.googlebooks;
+    const gbOpens = !!(gb && typeof gb.lookupUid === 'function'
+                       && typeof gb.enabled === 'function' && gb.enabled());
+    if (w.volumeId && gbOpens) return 'book:googlebooks:' + w.volumeId;
+    if (w.isbn13) return 'book:isbn:' + w.isbn13;
+    if (w.volumeId && gb && typeof gb.lookupUid === 'function') {
+      return 'book:googlebooks:' + w.volumeId;
+    }
+    return '';
+  }
+
+  /* ══ SEE WORKS ═════════════════════════════════════════════════════════
+     One author's whole catalogue, for somebody you follow OR somebody you do
+     not. Paged, and a click opens the pane without adding anything. */
+  let worksState = null;
+
+  async function renderWorks(view, q) {
+    const identity = {
+      olid: String(q.olid || ''),
+      name: String(q.name || ''),
+      gbName: String(q.gb || q.name || ''),
+    };
+    BT.ui.crumb(['Discover', 'Following', identity.name || 'Works']);
+    BT.ui.paneActions('<a class="btn btn--sm btn--ghost" href="#/people">Back to Following</a>');
+
+    const followId = identity.olid
+      ? BT.follows.authorId(identity.olid)
+      : (BT.follows.googleAuthorId ? BT.follows.googleAuthorId(identity.gbName) : '');
+    const following = followId ? await BT.follows.isFollowing(followId) : false;
+    if (!pageAlive()) return;
+
+    worksState = { identity, page: 0, rows: [], more: false, errors: [], loading: true };
+
+    view.innerHTML = `
+      <div class="fworks-h">
+        <span class="chipart fav"></span>
+        <div style="min-width:0;flex:1">
+          <div class="fsec-name">${esc(identity.name || identity.gbName)}</div>
+          <div class="fsec-sub" id="fwsub">Loading…</div>
+        </div>
+        ${followBtn(followId, following, identity.name, identity.olid)}
+      </div>
+      <div id="fwbody">${BT.ui.skeletonGrid(8)}</div>`;
+
+    view.onclick = onWorksClick;
+    await loadWorksPage();
+  }
+
+  async function loadWorksPage() {
+    const st = worksState;
+    if (!st) return;
+    st.loading = true;
+    try {
+      const res = await BT.follows.browseAuthor(st.identity, { page: st.page });
+      if (!pageAlive() || worksState !== st) return;
+      /* Merged across pages rather than replaced, because page 1 carries the
+         Open Library half and page 2 onwards is Google only. */
+      const byKey = new Map(st.rows.map(w => [w.key, w]));
+      for (const w of res.works) if (!byKey.has(w.key)) byKey.set(w.key, w);
+      st.rows = [...byKey.values()];
+      st.more = res.more;
+      st.errors = res.errors || [];
+    } catch (e) {
+      if (e && (e.kind === 'abort' || e.name === 'AbortError')) return;
+      st.errors = [(e && e.message) || String(e)];
+    } finally {
+      st.loading = false;
+    }
+    paintWorks();
+  }
+
+  function paintWorks() {
+    const st = worksState;
+    const body = document.getElementById('fwbody');
+    const sub = document.getElementById('fwsub');
+    if (!st || !body) return;
+
+    const rows = st.rows.map(w => {
+      const release = BT.follows.releaseOfWork(w);
+      return { w, release, verdict: BT.follows.futureness(release), via: st.identity, owned: false };
+    });
+    /* Newest first: this is a bibliography, and the thing somebody wants from
+       one is what has happened lately. */
+    rows.sort((a, b) => (b.release.sortKey - a.release.sortKey)
+      || String(a.w.title).localeCompare(String(b.w.title)));
+
+    if (sub) {
+      sub.innerHTML = `${rows.length} ${rows.length === 1 ? 'title' : 'titles'}`
+        + (st.identity.olid ? ` · <span class="mono faint">${esc(st.identity.olid)}</span>` : '');
+    }
+
+    body.innerHTML = (st.errors.length
+        ? `<div class="fwarn">${esc(st.errors.join(' · '))}</div>` : '')
+      + (rows.length
+          ? `<div class="grid">${rows.map(r => card(r)).join('')}</div>`
+          : `<div class="fverdict is-no">No English-language titles found for ${
+              esc(st.identity.name || st.identity.gbName)}.</div>`)
+      + (st.more
+          ? `<div class="fmorewrap"><button class="btn" type="button" id="fwmore"${
+              st.loading ? ' disabled' : ''}>${st.loading ? 'Loading…' : 'Show more'}</button></div>`
+          : '');
+  }
+
+  async function onWorksClick(e) {
+    const more = e.target.closest('#fwmore');
+    if (more) {
+      if (suppressTap()) return;
+      more.disabled = true;
+      more.textContent = 'Loading…';
+      worksState.page++;
+      await loadWorksPage();
+      return;
+    }
+    const fb = e.target.closest('[data-follow]');
+    if (fb) { if (suppressTap()) return; await onToggle(fb); return; }
+    const c = e.target.closest('[data-uid],[data-noopen]');
+    if (c) { if (suppressTap()) return; onOpen(c.dataset.uid); }
   }
 
   /* ══ REFRESHING ════════════════════════════════════════════════════════
@@ -991,10 +1095,6 @@ BT.viewPeople = (function () {
      serialized refresher in 70-follows.js. There is no fetch in this file, which
      is the property that stopped the page and the alerts feed disagreeing. */
 
-  /* Which follows this page believes are queued or in flight, so a section can
-     say "Checking…" on its own header rather than everything sharing one
-     progress line. Kept locally because it is a fact about what this page asked
-     for; the refresher's own progress arrives on 'follows:progress'. */
   const pendingIds = new Set();
 
   async function refresh(opts) {
@@ -1015,15 +1115,9 @@ BT.viewPeople = (function () {
   }
 
   /* THE GLOBAL PROGRESS IS ON THE BUTTON, and it carries a fraction rather than
-     a spinner. A roster walk is one request a second, so a reader with twenty
-     follows is looking at twenty seconds of work — and "Checking…" for twenty
-     seconds is indistinguishable from stuck. "Checking 4/20…" is the same
-     information the old shared strip printed as a sentence, in the one place
-     that is on screen whichever section you have scrolled to.
-
-     The per-section headers say which ONE is being checked; this says how much
-     is left. Two different questions, and the second is the one that stops
-     somebody pressing the button again. */
+     a spinner. A roster walk is several requests per author, so a reader with
+     twenty follows is looking at a minute of work — and "Checking…" for a minute
+     is indistinguishable from stuck. */
   function setRefreshAllBusy(busy) {
     const b = document.getElementById('frefreshall');
     if (!b) return;
@@ -1041,8 +1135,8 @@ BT.viewPeople = (function () {
       if (!row) continue;
       const sec = sectionEl(id);
       if (!sec) continue;
-      const head = sec.querySelector('.fsec-h');
-      if (head) head.outerHTML = sectionHead(row);
+      const head = sec.querySelector('.frow-h');
+      if (head) head.outerHTML = rowHead(row);
     }
   }
 
@@ -1050,29 +1144,31 @@ BT.viewPeople = (function () {
      follow id is `author:openlibrary:OL1394865A`, and colons are combinators in
      CSS. Building that into a selector needs CSS.escape and gets it wrong
      silently — a selector that matches nothing throws no error, it just leaves
-     the section showing the wrong thing for ever. */
+     the row showing the wrong thing for ever. */
   function sectionEl(id) {
-    for (const el of document.querySelectorAll('#fsections [data-fsec]')) {
+    for (const el of document.querySelectorAll('#froster [data-fsec]')) {
       if (el.dataset.fsec === id) return el;
     }
     return null;
   }
 
-  async function repaintSection(id) {
+  async function repaintRow(id) {
+    dropBands(id);
     const row = await BT.follows.get(id);
     const sec = sectionEl(id);
     if (!sec) return;
     if (!row) { sec.remove(); return; }
-    sec.innerHTML = sectionHead(row) + `<div class="fsec-body">${sectionBody(row)}</div>`;
-    repaintRosterRow(row);
+    /* Keep the roster's copy of this row current, so the window strip — which
+       pools across rosterRows — repaints from the same data the row does. */
+    const at = rosterRows.findIndex(f => f.id === id);
+    if (at >= 0) rosterRows[at] = row;
+    sec.outerHTML = rowHtml(row);
+    repaintWindow();
   }
 
-  function repaintRosterRow(row) {
-    for (const el of document.querySelectorAll('#froster [data-rrow]')) {
-      if (el.dataset.rrow !== row.id) continue;
-      const sub = el.querySelector('.muted');
-      if (sub) sub.innerHTML = rosterSub(row);
-    }
+  function repaintWindow() {
+    const host = document.getElementById('fwinbody');
+    if (host) host.innerHTML = windowBody();
   }
 
   /* ══ CLICKS ════════════════════════════════════════════════════════════
@@ -1081,6 +1177,15 @@ BT.viewPeople = (function () {
      away what is typed in the box and the results under it, so following three
      authors from one search would mean typing the search three times. */
   async function onClick(e) {
+    const win = e.target.closest('[data-win]');
+    if (win) { if (suppressTap()) return; setWindow(win.dataset.win); return; }
+
+    const tg = e.target.closest('[data-ftoggle]');
+    if (tg) { if (suppressTap()) return; await toggleRow(tg.dataset.ftoggle); return; }
+
+    const rc = e.target.closest('[data-frecent]');
+    if (rc) { if (suppressTap()) return; await toggleRecent(rc.dataset.frecent); return; }
+
     const fb = e.target.closest('[data-follow]');
     if (fb) { if (suppressTap()) return; await onToggle(fb); return; }
 
@@ -1094,27 +1199,75 @@ BT.viewPeople = (function () {
       return;
     }
 
-    const card = e.target.closest('[data-uid]');
-    if (card) { if (suppressTap()) return; onOpen(card.dataset.uid); return; }
+    const card = e.target.closest('[data-uid],[data-noopen]');
+    if (card) { if (suppressTap()) return; onOpen(card.dataset.uid); }
   }
 
   /* A tap that followed finger movement is a scroll, not a tap. Browsers fire
      click after a short drag, so on a phone a flick down this page would
      otherwise land on whatever was under the thumb when it lifted — and the
-     follow branches above WRITE. Lifted from 61-view-search, where the same
-     gesture was silently adding whichever result the scroll ended on. */
+     follow branches above WRITE. */
   function suppressTap() {
     if (!moved) return false;
     moved = false;
     return true;
   }
 
-  /* ── FOLLOWING SOMEBODY STARTS THEIR SECTION IMMEDIATELY ───────────────
-     "when you add an author their section automatically begins to populate."
-     The section is inserted in the same frame the button is pressed, in the
-     "Checking…" state, and the follow jumps to the FRONT of the refresher queue
-     — so a reader who has just followed someone is not behind a roster walk of
-     thirty other authors on a one-request-a-second budget. */
+  function setWindow(id) {
+    if (!WINDOWS.some(w => w.id === id)) return;
+    windowId = id;
+    try { localStorage.setItem(WIN_KEY, id); } catch (_) {}
+    for (const b of document.querySelectorAll('[data-win]')) {
+      b.setAttribute('aria-pressed', b.dataset.win === id ? 'true' : 'false');
+    }
+    repaintWindow();
+  }
+
+  /* EXPANSION IS PERSISTED, and expanding is what clears the badge.
+
+     "(+X new) clears when viewed" — and viewing means opening the row, not
+     landing on the page. A reader with twelve follows who scrolls past eleven of
+     them has not read eleven authors' news, and marking them seen on arrival
+     would empty the sidebar badge for changes nobody has looked at. */
+  async function toggleRow(id) {
+    if (expanded.has(id)) {
+      expanded.delete(id);
+      const t = seenTimers.get(id);
+      if (t) { clearTimeout(t); seenTimers.delete(id); }
+    } else {
+      expanded.add(id);
+      scheduleSeen(id);
+    }
+    saveSet(OPEN_KEY, expanded);
+    await repaintRow(id);
+  }
+
+  async function toggleRecent(id) {
+    if (recentOpen.has(id)) recentOpen.delete(id); else recentOpen.add(id);
+    saveSet(RECENT_KEY, recentOpen);
+    await repaintRow(id);
+  }
+
+  /* Marked seen after a beat, not on the click. Marking instantly would clear
+     the badge before the eye reaches it; the badge itself stays on screen for
+     this visit because `newsAtRender` is a snapshot, so the information does not
+     vanish as it is being read. The sidebar is refreshed, because that count and
+     this one are the same number counted in the same place. */
+  function scheduleSeen(id) {
+    if (seenTimers.has(id)) return;
+    const t = setTimeout(async () => {
+      seenTimers.delete(id);
+      if (!pageAlive() || !location.hash.startsWith('#/people')) return;
+      if (await BT.follows.markNewsSeen(id) && BT.tree && BT.tree.refresh) BT.tree.refresh();
+    }, 2000);
+    seenTimers.set(id, t);
+  }
+
+  /* ── FOLLOWING SOMEBODY STARTS THEIR ROW IMMEDIATELY ───────────────────
+     The row is inserted in the same frame the button is pressed, expanded and in
+     the "Checking…" state, and the follow jumps to the FRONT of the refresher
+     queue — so a reader who has just followed someone is not behind a roster
+     walk of thirty other authors. */
   async function onToggle(btn) {
     const key = btn.dataset.fkey;
     const name = btn.dataset.fname || key;
@@ -1126,14 +1279,15 @@ BT.viewPeople = (function () {
       btn.disabled = false;
     }
     /* null means there was nothing to key on — no OLID. It is NOT a silent
-       no-op: following by name is the one thing this feature must never do, so
-       the reason is said out loud rather than leaving a button that appears
-       broken. */
+       no-op: following by an unverified name is the one thing this feature must
+       never do, so the reason is said out loud rather than leaving a button that
+       appears broken. */
     if (!res) {
       BT.ui.toast('Open Library has no id for that record, so it cannot be followed reliably.', { bad: true });
       return;
     }
-    if (res.following) followSet.add(res.id); else followSet.delete(res.id);
+    if (res.following) { followSet.add(res.id); expanded.add(res.id); saveSet(OPEN_KEY, expanded); }
+    else followSet.delete(res.id);
     markButtons(res.id, res.following);
     BT.ui.toast(res.following ? `Following ${res.name}` : `Unfollowed ${res.name}`);
 
@@ -1145,15 +1299,17 @@ BT.viewPeople = (function () {
     const gone = await BT.follows.unfollow(id);
     if (!gone) return;
     followSet.delete(id);
+    expanded.delete(id);
+    saveSet(OPEN_KEY, expanded);
     markButtons(id, false);
     BT.ui.toast('Unfollowed');
     await rebuildRoster();
   }
 
   /* EVERY button for this follow, not just the one that was pressed. The same
-     author can be a search result and a roster row at the same time, and a
-     screen that shows "Follow" and "✓ Following" for one person simultaneously
-     reads as a bug in the app rather than as two views of one row. */
+     author can be a search result and a roster row at the same time, and a screen
+     that shows "Follow" and "✓ Following" for one person simultaneously reads as
+     a bug in the app rather than as two views of one row. */
   function markButtons(id, on) {
     for (const b of document.querySelectorAll('[data-follow]')) {
       if (b.dataset.follow !== id) continue;
@@ -1163,13 +1319,10 @@ BT.viewPeople = (function () {
     }
   }
 
-  /* Roster and sections together, because they are two views of one list and
-     letting them drift is how the old page ended up claiming an author had
-     never been checked while showing their catalogue. */
   async function rebuildRoster() {
+    dropBands();
     const host = document.getElementById('froster');
-    const secs = document.getElementById('fsections');
-    if (!host || !secs) return;
+    if (!host) return;
     const follows = await BT.follows.all();
     rosterRows = sortRoster(follows);
     followSet = new Set(follows.map(f => f.id));
@@ -1177,7 +1330,7 @@ BT.viewPeople = (function () {
       if (!newsAtRender.has(f.id)) newsAtRender.set(f.id, BT.follows.unseenNews(f).length);
     }
     host.innerHTML = roster(rosterRows);
-    secs.innerHTML = rosterRows.map(sectionHtml).join('');
+    repaintWindow();
   }
 
   /* ══ OPENING A CARD ════════════════════════════════════════════════════
@@ -1187,92 +1340,32 @@ BT.viewPeople = (function () {
 
      No stub is handed over either, and that is deliberate rather than lazy.
      56-inspector already knows how to show a book it does not hold — see
-     fetchTransient() and BT.openlibrary.lookupUid() — and what it fetches is the
-     WORK record, which carries the description and subjects that the lean stored
-     row behind this card does not. So one deliberate tap costs one deliberate
-     request and buys a better pane than the shortcut would have, with an
-     explicit "Add to library" button on it instead of an add that already
-     happened. */
+     fetchTransient() — and what it fetches is the WORK record, which carries the
+     description and subjects the lean stored row behind this card does not. So
+     one deliberate tap costs one deliberate request and buys a better pane than
+     the shortcut would have, with an explicit "Add to library" button on it
+     instead of an add that already happened. */
   function onOpen(uid) {
-    if (!uid) return;
+    if (!uid) {
+      /* A Google-only volume with no ISBN. There is no uid the pane can resolve,
+         and opening an empty one would look like a failure of the app rather
+         than a gap in the record. */
+      BT.ui.toast('No catalogue record to open for this one yet.');
+      return;
+    }
     if (!BT.inspector || typeof BT.inspector.show !== 'function') return;
     BT.inspector.show(uid);
   }
 
-  /* ══ SHARPENING ════════════════════════════════════════════════════════
-     Turn 'this year, no month' rows into real dates, or leave them honestly
-     labelled.
-
-     NOTHING HAPPENS WITHOUT A KEY. Anonymous Books API access answers HTTP 429
-     with a quota of ZERO, so a keyless attempt is not a slower version of this,
-     it is an error every time. BT.follows.sharpenYear returns null before
-     building a URL, and this loop never runs at all.
-
-     SERIALIZED, for the same reason the refresher is: the quota belongs to the
-     reader, and a fan-out spends it faster without producing an answer any
-     sooner on a list this short.
-
-     A SHARPENED ROW CAN CHANGE BANDS, and that is the point rather than a side
-     effect. If Google says the 2026 book came out on March 5th it moves to
-     "Recently published", where it belongs — and the section's verdict line is
-     recomputed with it, so the hard answer stays true. */
-  let sharpening = false;
-
-  async function sharpen() {
-    const gb = BT.googlebooks;
-    if (!gb || typeof gb.enabled !== 'function' || !gb.enabled()) return;
-    if (typeof BT.follows.sharpenYear !== 'function') return;
-    /* One pass at a time. This is triggered by the refresher going idle, and
-       that event can arrive twice in quick succession — a queue that drains and
-       is immediately topped up by a per-author Refresh — which would otherwise
-       start a second serialized walk over the same rows, spending the reader's
-       Google quota twice for one answer. `sharpAsked` would stop the duplicate
-       REQUESTS, but not the duplicate repaints. */
-    if (sharpening) return;
-    sharpening = true;
-    try { await sharpenPass(); } finally { sharpening = false; }
-  }
-
-  async function sharpenPass() {
-    let spent = 0;
-    for (const row of rosterRows) {
-      if (!pageAlive()) return;
-      const b = bandsOf(row);
-      let touched = false;
-      for (const r of b.maybe) {
-        if (spent >= SHARPEN_MAX) break;
-        if (sharpAsked.has(r.w.workId)) continue;
-        sharpAsked.add(r.w.workId);
-        spent++;
-        let better = null;
-        try {
-          better = await BT.follows.sharpenYear(r.w, row.name, { release: r.release });
-        } catch (e) {
-          /* Enrichment is a nicety and must never be the reason a section fails
-             to paint. The row keeps its honest year-only date and the loop
-             carries on. */
-          console.warn('[people] date sharpening failed for', r.w.title, e && e.message);
-          continue;
-        }
-        if (!better) { touched = true; continue; }
-        sharpMap.set(r.w.workId, better);
-        touched = true;
-      }
-      if (touched && pageAlive()) await repaintSection(row.id);
-      if (spent >= SHARPEN_MAX) break;
-    }
-  }
-
   /* ── The writes from elsewhere this page has to hear ───────────────────
      Subscribed ONCE at module scope. This module is a singleton whose render()
-     runs again on every visit, and subscribing there would stack one more copy
-     of this handler per visit — the same failure the `view.onclick =`
-     assignment above avoids.
+     runs again on every visit, and subscribing there would stack one more copy of
+     this handler per visit.
 
-     Note what is NOT listened for: `follow:change`. The refresher writes a
-     follow row on every check, so repainting on it would rebuild the whole page
-     once per author during a roster walk. `follows:updated` carries the same
-     news with the id attached, which is what lets one section repaint alone. */
+     Note what is NOT listened for: `follow:change`. The refresher writes a follow
+     row on every check, so repainting on it would rebuild the whole page once per
+     author during a roster walk. `follows:updated` carries the same news with the
+     id attached, which is what lets one row repaint alone. */
   function subscribeOnce() {
     if (subscribed || !BT.repo || typeof BT.repo.subscribe !== 'function') return;
     subscribed = true;
@@ -1281,31 +1374,23 @@ BT.viewPeople = (function () {
 
       if (ev === 'follows:updated' && detail && detail.id) {
         pendingIds.delete(detail.id);
-        repaintSection(detail.id).catch(e => console.warn('[people] repaint', e));
+        repaintRow(detail.id).catch(e => console.warn('[people] repaint', e));
         return;
       }
 
       if (ev === 'follows:progress' && detail) {
         setRefreshAllBusy(!!detail.running);
-        /* The whole queue drained. This is the moment the undecidable rows are
-           worth spending Google Books requests on: until every follow has
-           answered we do not know which of them will still be in the maybe band
-           when the dust settles. */
-        if (!detail.running) sharpen().catch(e => console.warn('[people] sharpen', e));
         return;
       }
 
       if (!detail) return;
 
       /* Undo. BT.ui.addItem's toast offers it and it lands here, so a work left
-         in `addedHere` would leave the card claiming "In your library" for a
-         book that is no longer in it — the same untruth in the other direction.
-         The uid grammar is the M2 contract (`book:openlibrary:{OLID}`), and
-         BT.util.olid reads the id out of it wherever it sits; a `book:isbn:` uid
-         yields '' and deletes nothing. */
+         in `addedHere` would leave the card claiming "In your library" for a book
+         that is no longer in it. */
       if (ev === 'item:delete') {
         const w = BT.util.olid(detail.uid || '');
-        if (w) { addedHere.delete(w); ownedWorks.delete(w); markCard(w); }
+        if (w) { addedHere.delete(w); ownedWorks.delete(w); dropBands(); markCard(w); }
         return;
       }
 
@@ -1315,19 +1400,18 @@ BT.viewPeople = (function () {
       /* Only books this page is showing. Every write anywhere in the app emits
          this — a rating, a status change, a background hydrate — and marking a
          card off the back of one would be a claim this screen has no evidence
-         for. Scanned rather than selected: a uid is `book:openlibrary:OL27482W`
-         and a colon is a combinator, so a selector built from one by hand
-         silently matches nothing rather than erroring. */
+         for. */
       if (!onScreen(work)) return;
       addedHere.add(work);
       ownedWorks.add(work);
+      dropBands();
       markCard(work);
     });
   }
 
   function onScreen(workId) {
     const uid = 'book:openlibrary:' + workId;
-    for (const el of document.querySelectorAll('#fsections .card[data-uid]')) {
+    for (const el of document.querySelectorAll('.card[data-uid]')) {
       if (el.dataset.uid === uid) return true;
     }
     return false;
@@ -1336,7 +1420,7 @@ BT.viewPeople = (function () {
   function markCard(workId) {
     const uid = 'book:openlibrary:' + workId;
     const owned = addedHere.has(workId);
-    for (const el of document.querySelectorAll('#fsections .card[data-uid]')) {
+    for (const el of document.querySelectorAll('.card[data-uid]')) {
       if (el.dataset.uid !== uid) continue;
       el.classList.toggle('is-mine', owned);
       const cs = el.querySelector('.cs');

@@ -181,6 +181,46 @@ are scoped to the origin, not the path. Every key here is `bt.`, the database is
 `bt-shell-` (so `activate` deletes our old shells and not the sibling's). A
 stray `mt.` prefix does not fail loudly — it reaches into the other app's data.
 
+### Google Books is the primary source; Open Library is retained for the graph
+
+The app was built Open-Library-first and is not any more. The reason is
+measured and is in the table below: Google wins search relevance, wins dates
+outright (a real `YYYY-MM-DD` against a bare year), and is the **only** one of
+the two that knows about books that have not come out yet. That last point is
+the whole pivot — a reader following an author wants to know what is coming.
+
+Open Library is not a fallback that happened to be left in. It is kept for
+three things Google structurally cannot do:
+
+- **the work/edition graph.** A Google volume id names ONE PRINTING. There is
+  no editions-of-a-work endpoint, so "Specify edition" and the `isbncand:` net
+  the scanner resolves against can only come from Open Library.
+- **stable author OLIDs.** A Google author is a bare name string, and a
+  name-scoped author query returns the wrong writer's books at HTTP 200 in
+  *both* catalogues. A follow may only be keyed on an OLID.
+- **running the app with no key at all.** Google has no anonymous tier — it is
+  a quota of zero, not a small one. Without a key BookTrak still searches,
+  adds and scans, on Open Library, with year-granular dates, and says so once
+  with a link to Settings rather than as ambient explainer text.
+
+**Nothing migrates.** A row both catalogues return keeps Open Library's
+identity (`book:openlibrary:{OLID}`) and takes Google's facts, so every book
+already on the reader's shelves still dedupes on `olwork:{OLID}` exactly as
+before. Only a book Open Library has never heard of — which is what a
+forthcoming title is — gets a `book:googlebooks:{id}` uid, in a namespace
+nothing existing can collide with. `BT.normalize.mergeSearchStubs` is the one
+place the two are reconciled.
+
+**Precision is a ratchet, in both directions.** `pickRelease` refuses any
+payload coarser than what is already stored, whichever source it came from, so
+Google's day beats Open Library's year *and* Google's coarse backlist year
+cannot take back a real day off an Open Library edition record. Neither source
+is trusted by name; precision is.
+
+**Explainer microcopy is gone app-wide.** What survives is empty states that
+say what to do, real error messages, and source attribution. The reasoning
+moved into code comments and into this file.
+
 ## Verified live (2026-08-03), not assumed
 
 | Claim | Result |
@@ -199,6 +239,16 @@ stray `mt.` prefix does not fail loudly — it reaches into the other app's data
 | A missing cover image | **HTTP 200 and a 43-byte transparent GIF**, so `<img onerror>` never fires — `?default=false` required. `covers` arrays contain a `-1` sentinel |
 | Text fields (`description`, `bio`) | Sometimes a string, sometimes `{type,value}`. Rendering raw prints `[object Object]` |
 | `/search/authors.json` | Returns a **bare OLID**; every other endpoint returns a path |
+| **Google Books `q=dune` with a key** | Frank Herbert's *Dune* **first**, correctly attributed. This is why Google leads search now — Open Library answers the same query with *Children of Dune* first and the real novel eighth |
+| **Google `publishedDate` granularity** | Full `YYYY-MM-DD`. *Wind and Truth* → `2024-12-06` where Open Library holds a bare `2024`. Forthcoming titles exist in this index and do **not** exist in Open Library's at all |
+| **`orderBy=newest`** | Does **not** sort by publication date — it sorts by when Google *added the record*. Observed publication years in returned order: 2023, 2020, 2024, 2018. Anything needing date order must sort client-side (`BT.googlebooks.sortByPublished`). Still useful as a discovery **arm**: a forthcoming title is a recently-added record, so it nets exactly the books relevance ranking buries |
+| **`inauthor:` in Google** | `inauthor:"Stephen King"` → **zero**. `inauthor:Kiste` → 300 books about Queen Victoria. Plain `"Gwendolyn Kiste"` → her real books. So the query is a **net** and the credit check on `volumeInfo.authors` is the answer |
+| **Google's top hit for `dune` is a reprint** | `publishedDate 1990-09-01` (and on another run `2023-09-26`, *Movie Tie-In*). Real dates about real objects, and the **wrong** date for a search row, which is a WORK. Hence the year gate in `BT.normalize.workDate`: Google may sharpen Open Library's year, never move it forward |
+| **Surname-only author matching** | Merged Google's *Dune* into Open Library's **Brian** Herbert work record (`OL19618275W`), which then took the 1990 printing date — two failures from one loose compare. `personKey` is `surname\|first-initial` for this reason, and the same fold keeps Tabitha King out of Stephen King's bibliography |
+| **Open Library transliterated author duplicates** | `OL893414W` is credited to both `Frank Herbert` and `Френк Герберт` — one man, two rows. A name that folds to nothing under `normalizeTitle` is dropped from a merged byline |
+| **Google `imageLinks` URLs** | Arrive as `http://` (blocked as mixed content on the https site) and carry `edge=curl`, which draws a fake page curl into the pixels **server-side**. Both corrected in `BT.GB.cover`; `zoom=` sets the size |
+| **`langRestrict` / `language=` server-side filtering** | Both filter on a *declared* value, so both delete records that declare nothing — which is disproportionately the thin, newly-catalogued records a forthcoming title always is. Filtering is therefore client-side in `BT.lang`: **keep the undeclared, drop only a declared foreign language** |
+| **Language filtering measured on a real editions page** | Dune, first 50 fetched: 39 shown, **11 hidden**, 5 with no usable ISBN. Paging still advances by what the endpoint returned, never by what survived |
 | `BarcodeDetector` on Chrome/Edge, Windows desktop | Does not exist. The vendored ZXing wasm is the primary decoder, not a fallback |
 | The `barcode-detector` ponyfill | Contains a hardcoded `fastly.jsdelivr.net` wasm URL; must be overridden via `locateFile` against `document.baseURI` |
 | First load on a phone (Slow 4G, 4x CPU, 390x844, cold, **live** GitHub Pages) | First paint **3.6 s**, tree **3.8 s**, 36 requests, **494 KB** on the wire. A local HTTP/2 harness reproduced this within 4%; an HTTP/1.1 one did not, and flattered first paint by two seconds |
@@ -212,6 +262,18 @@ stray `mt.` prefix does not fail loudly — it reaches into the other app's data
 
 ## Open
 
+- **Google serves a grey "image not available" placeholder as a real cover.**
+  A volume with no art can still carry `imageLinks`, and the image loads with
+  HTTP 200 — so `<img onerror>` never fires and the app's generated bookcloth
+  block never replaces it. Same class of trap as Open Library's 43-byte
+  transparent GIF, but visibly benign: it reads as "no cover" rather than as a
+  broken tile. No field distinguishes it and no client-side signal was found,
+  so it is accepted rather than worked around.
+- **A book Google does not return for a broad query keeps its Open Library
+  year.** *The Haunting of Velkwood* is not in the top 40 for `gwendolyn
+  kiste`, so its search row shows `2024-▨▨-▨▨` even though Google holds
+  `2024-03-05`. The targeted `intitle:`+`inauthor:` upgrade path finds it once
+  the book is added; the broad query is a ranking limit, not a merge fault.
 - **Real-device camera scanning is unverified on glossy and curved covers.**
   The decoder, the accept gate and the whole scan path were exercised with
   generated and printed codes; a laminated mass-market paperback under a ceiling
@@ -248,3 +310,207 @@ sales history) · full-text search inside books (Internet Archive lending, not
 the catalogue API) · Goodreads/StoryGraph sync (no public write API) · push
 notifications (nothing runs while the app is closed) · a "coming up" timeline
 with real forthcoming dates in it.
+
+## Following: two catalogues, one cached answer
+
+The Following page and `70-follows.js` were rebuilt for the pivot. What follows
+is the reasoning that used to be printed on the screen.
+
+### The follow record now carries two identities
+
+Google has **no author ids at all** — a volume id names one printing, and the
+only handle the index offers for a person is the exact name string it prints in
+`volumeInfo.authors`. Open Library has stable OLIDs. They are different kinds of
+thing, so the row keeps both and asks each source with the identifier it
+understands:
+
+| field | example | used for |
+|---|---|---|
+| `olid` | `OL7481853A` | `search.json?author={OLID}` — exact, never a name |
+| `gbName` | `Gwendolyn Kiste` | the Google query, and the credit check on every volume that comes back |
+| `gbNameSource` | `seed` → `volume` | whether that string is a guess or something Google actually printed |
+
+`gbName` is **seeded at follow time** from whatever the Follow button had to
+hand and **confirmed on the first check** against the most frequent exact string
+across the verified volumes. The source flag moves to `volume` even when the
+string did not change, because a guess that turns out to be right has still been
+verified and a row that could not tell those apart would re-guess for ever.
+
+Either half may be missing. A follow with no OLID is keyed
+`author:googlebooks:{slug}`; `authorId(olid)` is **unchanged**, so every follow
+already in the user's synced database keeps its key. The OLID-less path is
+opt-in (`toggleAuthor(olid, name, { googleOnly, gbName })`) precisely so that
+`61-view-search.js` and `56-inspector.js`, which call it with two arguments and
+read `null` as "no id, refuse", keep the behaviour rule 2 exists for.
+
+### Neither author query is trusted; the credit check is
+
+`inauthor:` is unusable (`inauthor:"Stephen King"` → **zero results**;
+`inauthor:Kiste` → 300 books about Queen Victoria) and `search.json?author=`
+with a *name* returns a different writer's bibliography at HTTP 200. So the
+Google query is a **net** — a plain quoted name — and the filter is the volume's
+own `volumeInfo.authors` array. Open Library is asked by OLID, which needs no
+such check.
+
+None of that is implemented here. `BT.googlebooks.authorWorks` owns the query
+shape, the two arms, the credit check (`creditsAuthor`, keyed
+`surname|first-initial` so Tabitha King stays out of Stephen King's feed), the
+language filter and the printing grouping; `BT.normalize.matchKey` owns "same
+book?"; `BT.lang` owns "may this be shown?". A private copy of any of them here
+would be a second answer, and the symptom is a duplicate row no call site can
+explain.
+
+**What 70-follows.js does own is depth.** `authorWorks` asks each arm once, at
+offset 0 — right for a lookup, measurably not enough for a follow:
+
+| author | adapter default | + two relevance pages |
+|---|---|---|
+| Brandon Sanderson | 20 credited volumes | **39** — and the extra pages held his only forthcoming printing |
+| Stephen King | 13 | **22** |
+| Gwendolyn Kiste | 7 | **15** |
+
+So the refresher calls the adapter and then pages it twice more through the
+adapter's own `search` + `creditsAuthor` + `groupPrintings`. Four Google calls
+per follow per refresh, well inside the 400/day budget for a roster of twenty
+refreshed six times a day.
+
+### The union is keyed on `BT.normalize.matchKey`
+
+There is no shared identifier: Google has no OLIDs, Open Library's author-works
+field list carries no ISBNs. So the join is "same title, same person", through
+the one fold 38-normalize.js exports for exactly this purpose. **The follow's
+own name is passed on both sides**, because an Open Library author-works doc
+carries no author field at all — key the Open Library side on the title alone
+and it folds to `wind and truth` against Google's `wind and truth|sanderson-b`,
+so the two halves never merge and every book either source knows about appears
+twice. Every row in the list is by definition this author's, so supplying the
+name is not an assumption. **The year is deliberately not part of the key** — Open Library's year for a work is frequently a decade early,
+so keying on it would refuse to merge exactly the rows where Google has the real
+date. On a merge, Google's date wins when it is no coarser, and Open Library's
+work id and cover are kept because Google does not have them.
+
+Two printings of one title collapse to the row that is **still ahead of us**,
+because that is the user's own rule ("i just want things listed with a
+publication date that is in the future from the current date"). `firstYear`
+survives the collapse so the card can say `first published 2024` rather than
+implying the work is new.
+
+### An author is only ever said to have nothing coming when both were asked
+
+`coverageOf(row)` is the one place that is decided. A source that **failed** is
+recorded and named on the row; a source that is **switched off** (no Google key)
+is not a failure — the app falls back to Open Library, still gives a hard
+answer, and says so **once**, at the top of the page, with a link to Settings.
+
+### The migration that would otherwise have flooded the feed
+
+A follow written by the previous build has a `knownWorkIds` full of Open Library
+work OLIDs. The new baseline is folded titles, and Google contributes rows Open
+Library never had — so the first diff would have reported **every book of every
+followed author as new, at once**. `refreshOne` treats a row whose `schema < 2`
+exactly like a first sighting: re-baseline, emit nothing, stamp `schema: 2`.
+`knownWorkIds` and `works` are left on the row rather than deleted, because the
+migrating check needs to see them to know it is not cold, and because this user
+syncs real data. Measured: 41 works stored, 41 keys baselined, **0 added, 0
+changed, 0 feed rows, 0 news** — and the very next check diffs normally.
+
+A finer date inside the window a coarse one described is also **not** a change:
+`2026 → 2026-10-06` is us learning something. Without that test, every row
+Google sharpened would have been announced as a date change on the pass that
+sharpened it.
+
+### The release-window toggle: containment, not overlap
+
+`next week · this month · next month · end of year · next year`, pooled across
+every follow, with the per-author rows below. Windows come from
+`BT.util.releaseWindow`, so this page and `#/up` agree about where a month ends.
+
+A release is **in** the window when its own window fits inside the asked-for one,
+and **could fall here** when the two merely overlap. Under a plain overlap test,
+Open Library's bare `2026` for *Isles of the Emberdark* appeared under four of
+the five windows at once, as though four different things were happening. Both
+groups are shown, each with its own count — the row is never dropped, and it
+never impersonates a confirmed date.
+
+### Verified live, 2026-08-03, with a real key
+
+| Claim | Result |
+|---|---|
+| Union is not redundant | Google alone found *In These Gilded, Ghostly Hearts* (Kiste, `2026-09-15`) — Open Library has no record of it. Open Library alone found *Other Worlds Than These* (King) and *Isles of the Emberdark* (Sanderson) — neither was in any Google slice |
+| The two halves feed each other | Open Library dated *Other Worlds Than These* `2026` (a bare year, undecidable). One targeted `intitle:+inauthor:` lookup returned **`2026-10-06`** — a real future date the primary source's own author query had missed |
+| The English filter changes an answer | *Isles of the Emberdark* carries a 2026 in Open Library's `publish_year`. Google shows why: `2026-03-24` is the **Spanish** edition, the English one is `2025-07-01`. Filtering the translation is what stops a 2025 book being announced as forthcoming |
+| Open Library's cover is not language-aware | `cover_i` for Sanderson's *Wind and Truth* is the Spanish *Viento y Verdad*. Cards therefore prefer Google's thumbnail whenever Google supplied the date, so the cover and the date describe the same printing |
+| `maxResults=40` | Returns **20** for a quoted-name query, every time, on all three test authors. Paging steps by 20, not by the requested page size |
+| Google `503 backendFailed` | Still 10–12 in 20 requests, still succeeding on a later attempt. `BT.NET_POLICY.googlebooks.retries = 4` is what makes the union reliable rather than intermittent |
+| Cost per follow per refresh | 1 Open Library page + 3 Google slices + at most 6 targeted date lookups — and the sharpened date is **stored**, so a settled roster costs four requests, not ten |
+
+---
+
+## Verification pass — 2026-08-03
+
+Independent re-verification of the pivot, on `127.0.0.1:9511/Lorelaibrary/`,
+chromium 151 / firefox 153 / webkit 26.5. Two defects were found and fixed, and
+one requirement was found to be only half-delivered.
+
+### A refresh could blunt a date it already held, and then report the blunting
+
+**Measured**, on four identical back-to-back refreshes of one author with
+nothing changed upstream: Google's author arms do **not** return a stable set
+for an identical query. *Boneset & Feathers* came back on three rounds and was
+simply missing from the fourth — Google `503`s under load, `authorWorks` asks
+two fixed arms at offset 0, and relevance ordering shifts underneath them.
+
+On the round the volume went missing, `unionWorks` was rebuilt from Open Library
+alone — whose record is a bare `2020` — and the stored `2020-11-03` was thrown
+away. The diff then announced **`date moved: 2020-11-03 → 2020`**. A book that
+had not moved, reported as news, on a refresh that had learned nothing. And it
+flaps: the next round sees the volume again and announces the reverse, so one
+unstable upstream row becomes a permanent two-lines-per-refresh feed spammer —
+the exact failure the migration guard exists to prevent, arriving by another
+door.
+
+Two fixes, deliberately independent:
+
+1. **`keepSharpestDate(held, works)`** in `70-follows.js`, run *before*
+   `sharpenPass` (so a row we can already answer never spends a Google request
+   being re-asked). A **coarser** answer that **agrees** with the finer one we
+   hold is not information and does not overwrite it. A date that genuinely
+   **contradicts** what we hold — a different year, a different month inside a
+   month — passes through untouched, because that is the event the feature
+   exists to catch. Losing a date entirely is treated as the same loss.
+2. **The diff tests containment both ways.** It already skipped
+   `year → day inside that year` as "us learning something". It now also skips
+   `day → year containing that day` as "us knowing less". Both are true
+   statements about precision, not about a schedule.
+
+Verified after the fix: five consecutive fresh refreshes produce **0** news
+entries and **0** date downgrades; a planted genuine move (`2024-01-05 →
+2026-09-15`, different year) is still reported as `moved`.
+
+### The explainer purge had only covered the Following page
+
+Requirement: *no explainer microcopy, app-wide*. Following, Activity and the
+footer were clean. Library first-run, Scan, Stats and Settings were not — and
+three of those paragraphs had been made **factually false** by the pivot:
+
+- Settings/About: *"Open Library … is the primary source here rather than a
+  fallback"*, and *"Open Library holds no forthcoming-title data … which is why
+  most publication dates in the app are year-only"*. Section removed; attribution
+  already lives in the footer.
+- Library first-run: *"Open Library needs no key and no account, so this works
+  now"*, plus a warnbox lecturing that *"searching adds the book, not the
+  edition"* — the work-versus-printing distinction is carried by the interface
+  itself, which is where a distinction belongs.
+- Stats: a `statnote` asserting Open Library's year-only dates are *"a ceiling on
+  what this app can know"*. Replaced with the bare percentage, plus an
+  actionable Settings link when there is no key.
+- The `/search` boot stub still promised *"no key and no signup"*.
+
+This is the failure mode that justifies the rule: explainer copy describes an
+**implementation**, so it rots the moment the implementation moves — and then it
+goes on lying with authority, from inside the product, to the one person who
+cannot check it. Removed app-wide; what remains is empty states that name the
+next action, statements about the reader's own data, real errors, and the footer.
+
+Settings' key section keeps one prompt, because requirement 11 needs somewhere
+actionable to point: a state line, a link that mints a key, and a field.

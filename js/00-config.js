@@ -16,18 +16,37 @@ window.BT = window.BT || {};
    Nothing is baked here, and that is not an oversight — it is what the two
    sources actually require.
 
-   Open Library (primary) — NO key, no signup, no quota page. The whole catalogue
-                            path (search, works, editions, authors, covers) runs
-                            keyless. This is why BookTrak needs no setup at all.
-   Google Books (optional) — user-supplied ONLY. Keyless Google Books is dead:
-                            an unauthenticated volumes request now answers HTTP
-                            429 with "quota_limit_value":"0" — a quota of zero,
-                            not a quota we exceeded. Verified. So there is no
-                            key to bake and no anonymous fallback to fall back
-                            to; `BT.config.hasKey('googlebooks')` gates that
-                            entire code path off when absent, and the app is
-                            expected to run its whole life with it off.
+   Google Books (PRIMARY) — user-supplied key ONLY. It is the primary source for
+                            search, metadata and — the reason for the whole
+                            arrangement — publication dates and forthcoming
+                            titles. Measured live against a real key:
+
+                              q=dune          -> Frank Herbert's Dune at #1,
+                                                 correctly attributed
+                              Wind and Truth  -> publishedDate '2024-12-06'
+
+                            Open Library answers the first query with Children
+                            of Dune at #1 and the real novel eighth, credited to
+                            the wrong Herbert, and it cannot answer the second
+                            at all: its dates are years by construction.
+
+                            Keyless Google Books is DEAD — an unauthenticated
+                            volumes request answers HTTP 429 with
+                            "quota_limit_value":"0", a quota of zero rather than
+                            a quota we exceeded. So there is no key to bake and
+                            no anonymous fallback to degrade to.
                             Get one: https://console.cloud.google.com/apis
+
+   Open Library (RETAINED) — NO key, no signup, no quota page, and it stays
+                            wired for the two things Google structurally cannot
+                            do: the WORK/EDITION GRAPH (every ISBN a work is
+                            known by, which is what the "Specify edition" picker
+                            and the scanner's candidate namespace are built on)
+                            and STABLE AUTHOR OLIDs (a Google volume carries an
+                            author NAME and nothing else — no id space at all).
+                            It is also the whole app's fallback: with no Google
+                            key BookTrak still searches, still adds, still
+                            scans. It just does it with year-granular dates.
 
    Anything set in Settings is stored in this browser only and WINS over the
    baked value — which, since nothing is baked, means "is the only value".
@@ -42,10 +61,11 @@ BT.config = (function () {
   const LS_SETTINGS = 'bt.settings.v1';
 
   const DEFAULTS = {
-    /* Open Library's language filter takes MARC/ISO codes ('eng'), while its
-       search takes a plain 'en'. We store the short form and let the net layer
-       widen it — storing the wide form would leak a source's vocabulary into
-       the settings file that we then have to migrate. */
+    /* Open Library's language filter takes MARC/ISO codes ('eng'), Google
+       Books answers a two-letter 'en', and edition records spell it
+       '/languages/eng'. We store the SHORT form and let each adapter widen it —
+       storing a wide form would leak one source's vocabulary into the settings
+       file that we then have to migrate. BT.lang below is the one reader. */
     language: 'en',
     region: 'US',
     /* Every genre bucket visible by default. `general` is the neutral
@@ -187,6 +207,134 @@ BT.config = (function () {
   };
 })();
 
+/* ══ THE LANGUAGE FILTER ═══════════════════════════════════════════════════
+   ONE helper, used by every DISCOVERY surface: search, the author bibliographies
+   behind Following, and the editions picker. Defined here rather than in an
+   adapter because three different files with three different spellings of "is
+   this English" is three different answers, and the disagreement is invisible —
+   a book present on one screen and missing from the next reads as a bug in the
+   app rather than as two filters.
+
+   ── THE RULE, AND WHY IT IS NOT `=== 'en'` ────────────────────────────────
+   KEEP anything that declares nothing. EXCLUDE only what positively declares
+   another language.
+
+   That asymmetry is load-bearing and is the difference between a filter and a
+   deletion. Language is one of the most commonly ABSENT fields in both
+   catalogues: Open Library edition records omit `languages` constantly, and a
+   thin Google volume — which is exactly the shape a forthcoming title has,
+   because nobody has catalogued it properly yet — routinely carries no
+   `language` at all. A strict `=== 'en'` therefore removes the newest and
+   least-catalogued records first, which is precisely the half of the catalogue
+   this app was pivoted to Google Books to see.
+
+   ── SERVER-SIDE FILTERING IS NOT THE SAME THING, AND IS NOT USED ──────────
+   Google's `langRestrict=en` and Open Library's `language=eng` both filter on
+   a DECLARED value, so both drop the undeclared records this helper keeps.
+   They also cannot be un-applied once a result set comes back. So the filtering
+   happens here, on the client, over whatever the endpoint returned.
+
+   ── SCANNING IS EXEMPT, AND THE EXEMPTION IS STRUCTURAL ───────────────────
+   A book the reader physically scanned is in their hands. Whatever language it
+   is in, it is theirs, and an app that refused to record it because a barcode
+   resolved to a Spanish printing would be worse than useless — it would be
+   wrong about a fact the reader can see.
+
+   So this is never called from an IDENTITY path: BT.openlibrary.byIsbn,
+   editionByIsbn, lookupUid and hydrate, and BT.googlebooks.byIsbn and volume()
+   all resolve a specific object the reader named, and none of them filters.
+   Only DISCOVERY paths filter — the ones that answer "what else is out there",
+   where a Spanish printing is noise rather than an answer. The asymmetry is
+   enforced by which functions call this rather than by a flag, because a flag
+   defaults to something and the wrong default here silently eats scans.
+   ══════════════════════════════════════════════════════════════════════════ */
+BT.lang = (function () {
+
+  /* Codes that mean "nobody recorded one" rather than naming a language.
+     `und` is ISO 639-2 for undetermined, `mul` for multiple, `zxx` for "no
+     linguistic content" (a wordless picture book, a score). All three are a
+     cataloguer declining to answer, so all three are treated as absent. */
+  const UNDECLARED = new Set(['', 'und', 'mul', 'zxx', 'unk', 'none']);
+
+  /* Every three-letter MARC code the app can produce, folded back to the short
+     form the setting is stored in. The reverse of 20-openlibrary's marcLang,
+     kept here so both directions live beside the setting they translate. */
+  const FROM_MARC = {
+    eng: 'en', fre: 'fr', fra: 'fr', ger: 'de', deu: 'de', spa: 'es', ita: 'it',
+    por: 'pt', dut: 'nl', nld: 'nl', rus: 'ru', jpn: 'ja', chi: 'zh', zho: 'zh',
+    kor: 'ko', swe: 'sv', dan: 'da', nor: 'no', fin: 'fi', pol: 'pl', cze: 'cs',
+    ces: 'cs', tur: 'tr', ara: 'ar', heb: 'he', lat: 'la', gre: 'el', ell: 'el',
+  };
+
+  /* Anything -> a short code, or ''. Eats every shape the two catalogues use:
+       'en'                        Google Books volumeInfo.language
+       'en-GB'                     Google, occasionally, on regional records
+       'eng'                       Open Library search docs
+       '/languages/eng'            Open Library edition records
+       { key: '/languages/eng' }   Open Library edition records, wrapped */
+  function short(v) {
+    if (v == null) return '';
+    const raw = typeof v === 'string' ? v : (v.key || v.name || '');
+    /* The code is the LAST path segment and the part before any region tag.
+       Matched rather than sliced because '/languages/eng' and 'en-GB' need
+       opposite ends of the string. */
+    const m = /([A-Za-z]{2,3})(?:[-_][A-Za-z0-9]+)?\s*$/.exec(String(raw).trim());
+    if (!m) return '';
+    const code = m[1].toLowerCase();
+    if (UNDECLARED.has(code)) return '';
+    return code.length === 3 ? (FROM_MARC[code] || code) : code;
+  }
+
+  /* A value (scalar or array) -> the distinct short codes it declares. */
+  function codesOf(v) {
+    const list = Array.isArray(v) ? v : [v];
+    const out = [];
+    for (const one of list) {
+      const c = short(one);
+      if (c && out.indexOf(c) < 0) out.push(c);
+    }
+    return out;
+  }
+
+  const home = () => short(BT.config.get('language')) || 'en';
+
+  /* THE TEST. `true` when this record may be shown.
+
+     ANY declared code matching is enough, not all of them. Open Library's
+     search docs carry the union of every edition's language, so a novel written
+     in English with a French translation catalogued against the same work
+     declares ['eng','fre'] — and that work is still the English book the reader
+     is looking for. Requiring all would delete every translated classic. */
+  function accepts(v) {
+    const codes = codesOf(v);
+    if (!codes.length) return true;          // undeclared is kept — see the header
+    return codes.indexOf(home()) >= 0;
+  }
+
+  /* The three record shapes, named, so no call site has to remember which field
+     a given payload spells it in. Each is one line and exists so that a future
+     fourth source adds a function here rather than a `.language ||
+     .languages || .lang` chain at a call site. */
+  const acceptsVolume  = vol => accepts(vol && vol.volumeInfo && vol.volumeInfo.language);
+  const acceptsDoc     = doc => accepts(doc && doc.language);
+  const acceptsEdition = raw => accepts((raw && (raw.languages || raw.language)) || null);
+
+  /* Filter a list, reporting how many went. The COUNT is the point: a surface
+     that silently shows eleven of forty rows is a surface that tells the reader
+     their book does not exist, so every caller is handed the number and can say
+     so. Rows are kept in the order they arrived. */
+  function keep(list, read) {
+    const kept = [];
+    let dropped = 0;
+    for (const row of (list || [])) {
+      if (read(row)) kept.push(row); else dropped++;
+    }
+    return { kept, dropped };
+  }
+
+  return { accepts, acceptsVolume, acceptsDoc, acceptsEdition, keep, codesOf, short, home };
+})();
+
 /* ── Network policy, per source ───────────────────────────────────────────
    Each source is throttled according to what it actually enforces — verified
    against the providers' own pages, because these limits are different in kind
@@ -252,8 +400,26 @@ BT.NET_POLICY = {
      only real price is latency, and this path is a lazy background upgrade
      that paints when it lands rather than something a screen is waiting on.
      A lookup that still fails is not stamped as checked, so the next open of
-     that pane simply asks again. */
-  googlebooks: { rps: 2,   concurrency: 2, retries: 4, dailyBudget: 400,  monthlyBudget: null, timeout: 10000 },
+     that pane simply asks again.
+
+     THE BUDGET WENT UP WITH THE PIVOT, from 400 to 800, and the arithmetic is
+     worth stating because it is the constraint the whole Google half lives
+     inside. Google's free tier is ~1,000 requests/day against a key that
+     belongs to the user, and Google is now on the SEARCH path rather than only
+     the enrichment one:
+
+         a search                     1 request per settled query (debounced)
+         an author's bibliography     2 requests (relevance + newest — see
+                                      BT.googlebooks.authorWorks)
+         a date upgrade               1 request per book, once per month
+
+     A forty-author roster costs 80 requests to refresh completely, a heavy
+     day's searching maybe 60, and the library's date enrichment is spread over
+     BT.TTL.gbDateRecheck. 800 leaves two hundred of the user's own allowance
+     for whatever else that key is doing, which is the point of stopping short:
+     the app must never be the reason somebody's key gets throttled somewhere
+     else. Exceeding it degrades to Open Library rather than failing. */
+  googlebooks: { rps: 2,   concurrency: 2, retries: 4, dailyBudget: 800,  monthlyBudget: null, timeout: 10000 },
 };
 
 /* ── Cache TTLs (ms) ──────────────────────────────────────────────────────
@@ -302,6 +468,20 @@ BT.TTL = {
      that the answer was no". */
   gbVolume:     30 * DAY,
   gbDateRecheck: 30 * DAY,
+
+  /* A SEARCH is a live question and takes the short TTL, same as Open
+     Library's. Deliberately NOT gbVolume: the thing being cached is the ANSWER
+     TO A QUERY, not a record about a book, and the whole reason this app now
+     leads with Google is that its index gains forthcoming titles — a query
+     cached for a month would be a month blind to exactly what it is for. */
+  gbSearch:     10 * 60 * 1000,
+
+  /* An author's bibliography sits between the two. It is a query, so it goes
+     stale; but the follows refresher already has its own cooldown
+     (BT.SWEEP.cooldownMs) and this only has to stop two screens asking the same
+     question inside one session. An hour is long enough for that and short
+     enough that "check now" after a book is announced actually finds it. */
+  gbAuthorWorks: 60 * 60 * 1000,
 
   HARD_TTL:     150 * DAY,
 };
@@ -1454,27 +1634,42 @@ BT.OL = {
 };
 
 /* ── Google Books ─────────────────────────────────────────────────────────
-   Enrichment only — never the primary source, never load-bearing, and never
-   called at all unless BT.config.hasKey('googlebooks') is true.
+   THE PRIMARY SOURCE for search, metadata, publication dates and forthcoming
+   titles — but still never called at all unless BT.config.hasKey('googlebooks')
+   is true, because anonymous access is a quota of zero rather than a small one.
 
-   THE ONE THING IT IS ACTUALLY FOR IS DATES. Open Library's publication data
-   is year-granular and there is no setting that changes that: `search.json`
-   answers `first_publish_year: 2024` and nothing finer, and an edition's
-   `publish_date` is a free-text string that is almost always a bare year. Of
-   twelve editions of The Hobbit, eleven read '2020', '1937', '2003'… and
-   exactly one carried a day ('15 julho 2019', in Portuguese). Pinning a
-   specific edition does not help, because the edition record has no better
-   date to give. That is the catalogue, not a bug in the adapter.
+   WHAT IT WINS, MEASURED LIVE:
 
-   Google Books answers the same question properly. Verified live:
+     search relevance   q=dune -> Frank Herbert's Dune at #1, correctly
+                        attributed. Open Library answers Children of Dune at #1
+                        with the real novel eighth, credited to Brian Herbert.
+     dates              full 'YYYY-MM-DD'. Wind and Truth -> '2024-12-06',
+                        The Haunting of Velkwood -> '2024-03-05', Project Hail
+                        Mary -> '2021-05-04'. Open Library gives the bare year
+                        for all three and has no parameter that changes it.
+     forthcoming        titles with street dates ahead of today exist in this
+                        index and do not exist in Open Library's at all.
 
-       The Haunting of Velkwood -> '2024-03-05'   (Open Library: 2024)
-       Project Hail Mary        -> '2021-05-04'   (Open Library: 2021)
-       The Hobbit, 2012 edition -> '2012'         (older titles stay coarse)
+   WHAT IT DOES NOT HAVE, AND WHY OPEN LIBRARY STAYS WIRED:
 
-   So the Google half buys PRECISION on recent titles and nothing at all on
-   the backlist, which is the honest thing to tell a user deciding whether to
-   go and make a key. See js/25-googlebooks.js for the upgrade path itself. */
+     no work graph      a volume id ('LLSpngEACAAJ') names ONE PRINTING. There
+                        is no editions-of-a-work endpoint and no work concept,
+                        so "which of these is the copy on your shelf" cannot be
+                        asked here at all.
+     no author ids      an author is a NAME. There is no id space, so a follow
+                        cannot be keyed on anything stable.
+     coarse backlist    'The Hobbit, 2012 edition' -> '2012'. Google is precise
+                        about recent trade publishing and year-granular about
+                        the backlist, so an old paperback gains nothing.
+
+   ── THE `orderBy=newest` TRAP ─────────────────────────────────────────────
+   It does NOT sort by publication date. It sorts by when Google ADDED the
+   record — observed order of publication years on one author query: 2023, 2020,
+   2024, 2018. Anything that needs date order must sort client-side; see
+   BT.googlebooks.sortByPublished. The parameter is still USEFUL, and 25's
+   authorWorks uses it deliberately: a forthcoming title is by definition a
+   recently-added record, so "newest record" is a good net for exactly the books
+   relevance ranking buries. It is a discovery arm, never a sort. */
 BT.GB = {
   volumes: 'https://www.googleapis.com/books/v1/volumes',
   /* A single volume by its Google id. Only reachable once a search or an ISBN
@@ -1483,6 +1678,69 @@ BT.GB = {
   volume(id) {
     const clean = String(id == null ? '' : id).replace(/[^A-Za-z0-9_-]/g, '');
     return clean ? `${this.volumes}/${clean}` : '';
+  },
+
+  /* Hard ceiling the API enforces on one response. Asking for more is not an
+     error and does not get you more — it silently returns 40 — so a pager that
+     trusts its own page size walks off the end of the results and reports a
+     short page as the end of the list. */
+  MAX_RESULTS: 40,
+
+  /* ── COVER URL, AND THREE THINGS THAT MUST BE DONE TO IT ───────────────
+     `imageLinks` arrives as, verbatim:
+
+         http://books.google.com/books/content?id=…&printsec=frontcover
+              &img=1&zoom=1&edge=curl&source=gbs_api
+
+     1. IT IS `http://`. BookTrak is served over https from GitHub Pages, and a
+        browser BLOCKS a mixed-content image outright — no request, no onerror
+        in some engines, just a gap. Rewritten to https, which the same host
+        serves happily.
+
+     2. `edge=curl` DRAWS A FAKE PAGE CURL onto the image, server-side. It is
+        not a CSS effect that can be turned off later; the pixels arrive bent,
+        with a shadow, against a transparent corner. Stripped.
+
+     3. `zoom=` PICKS THE SIZE and the small end is genuinely small (~128px
+        wide at zoom=1). A cover at that size on a modern phone is a blur, so
+        the large request asks for zoom=2.
+
+     BT.ui.posterUrl treats any absolute URL as a deliberate override and checks
+     it BEFORE an Open Library cover id, so a record holding both renders
+     Google's. That is right for a record Google supplied, and wrong for a
+     search row that merged the two — where Open Library's L (~500px) is the
+     better image — which is why 38-normalize's mergeSearchStubs drops this URL
+     when the Open Library side brought a cover id.
+
+     Returns null rather than a broken URL when there is nothing to ask for, so
+     callers branch on the URL and never on the record — the same contract
+     BT.OL.cover holds to. */
+  ZOOM: { sm: '1', md: '1', lg: '2' },
+
+  cover(imageLinks, size) {
+    const links = imageLinks || {};
+    /* Best available first. A search response with a lean `fields` list carries
+       only the two thumbnails; a full volume record can carry all six. */
+    const raw = links.extraLarge || links.large || links.medium
+             || links.thumbnail || links.small || links.smallThumbnail || '';
+    if (!raw) return null;
+    let url = String(raw).replace(/^http:\/\//i, 'https://');
+    /* Both spellings — the parameter appears mid-string and, on a few records,
+       first. A blind `&edge=curl` replace leaves a stray `?&` behind. */
+    url = url.replace(/([?&])edge=curl&?/gi, '$1').replace(/[?&]$/, '');
+    const zoom = this.ZOOM[size] || '1';
+    url = /[?&]zoom=/.test(url)
+      ? url.replace(/([?&]zoom=)\d+/i, '$1' + zoom)
+      : url + (url.indexOf('?') >= 0 ? '&' : '?') + 'zoom=' + zoom;
+    return url;
+  },
+
+  /* The public volume page, for the inspector's external links. Built from the
+     id rather than kept from `infoLink`, because infoLink carries a `source`
+     tracking parameter and a locale that the reader did not choose. */
+  infoLink(id) {
+    const clean = String(id == null ? '' : id).replace(/[^A-Za-z0-9_-]/g, '');
+    return clean ? `https://books.google.com/books?id=${clean}` : null;
   },
 };
 
@@ -1498,6 +1756,12 @@ BT.LIMITS = {
      work still carries 40+ subjects; a dozen is where the useful ones stop. */
   subjectsShown: 12,
   authorWorks: 60,
+  /* How many Google volumes one author query gathers before deduplication.
+     Google has no work graph, so a prolific author's first forty rows are
+     routinely a dozen books in three printings each — the cap is on RAW ROWS,
+     and the number of distinct books that survives is much smaller. Two pages
+     of forty, which is the ceiling one request can return. */
+  gbAuthorVolumes: 80,
   /* Longest raw scan string we will even try to normalize. A barcode scanner
      acting as a keyboard occasionally emits a burst of junk on a bad read, and
      there is no legitimate symbology in this app longer than an EAN-13 with an

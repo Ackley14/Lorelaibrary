@@ -719,18 +719,23 @@ BT.viewLibrary = (function () {
   }
 
   /* ══ FIRST RUN ════════════════════════════════════════════════════════════
-     The empty library. MovieTrak's version of this screen was mostly an
-     apology: it could not search at all until the reader had gone to another
-     website, made an account and pasted a TMDB key back in, so two thirds of
-     its first run was that errand.
+     The empty library: what the thing is, and the shortest path to having one
+     book in it. Three steps and two buttons, and nothing else.
 
-     BookTrak has no errand. Open Library is keyless — no signup, no quota page,
-     nothing to configure — so this screen can be what a first run should be:
-     what the thing is, and the shortest path to having one book in it. The
-     optional Google Books key is deliberately not mentioned; it enriches
-     descriptions and nothing here depends on it, and offering a key on the
-     first screen would re-create exactly the impression this app gets to
-     avoid. */
+     THE TWO WARNBOXES THAT USED TO SIT HERE ARE GONE. One lectured that
+     "searching adds the book, not the edition" and the other explained the
+     encrypted-repository sync model — two screens of reasoning shown to
+     somebody who has not yet added a single book, and who cannot act on either.
+     The work-versus-printing distinction is carried by the interface itself
+     (scanning pins a printing; a book's page offers "Specify edition"), which
+     is where a distinction belongs. Sync explains itself in Settings, where it
+     is switched on.
+
+     The steps no longer claim search "needs no key and no account" either: the
+     Google Books pivot made that half-false, and a first-run screen that
+     misdescribes the app is worse than one that says nothing. The app still
+     works with no key — see BT.googlebooks.enabled and the Settings prompt —
+     it simply is not this screen's business. */
   function firstRun(view) {
     exitSelection();
     BT.ui.crumb(['Library']);
@@ -738,13 +743,12 @@ BT.viewLibrary = (function () {
     view.innerHTML = `
       <div class="firstrun">
         <h1>Everything you mean<br>to read, on one shelf.</h1>
-        <p class="lede">Books you want, books you are in the middle of, and books you have finished —
-        with publication dates that never pretend to know more than the catalogue does, page positions
-        taken from the copy in your hand, and a pile for the ones you are ready to part with.</p>
+        <p class="lede">Books you want, books you are in the middle of, and books you have
+        finished.</p>
 
         <ol>
           <li>Press <kbd>/</kbd> to jump to the index filter, or open <a href="#/search">Search</a>.</li>
-          <li>Type a title or an author — Open Library needs no key and no account, so this works now.</li>
+          <li>Type a title or an author.</li>
           <li>Press <kbd>⏎</kbd> to add the top result, or <a href="#/scan">scan a barcode</a> to add the
               exact printing on your shelf.</li>
         </ol>
@@ -752,20 +756,6 @@ BT.viewLibrary = (function () {
           <a class="btn btn--primary" href="#/search">Find a book</a>
           <a class="btn" href="#/scan">Scan one</a>
         </p>
-
-        <div class="warnbox" style="margin-top:var(--bt-space-7)">
-          <strong>Searching adds the book, not the edition</strong>
-          A search result is the work — “Dune”, not the 1990 Ace paperback — because printings of the
-          same book disagree about page count, cover, publisher and ISBN. Scanning a barcode names one
-          printing, and you can pin an edition to any book later from its page.
-        </div>
-
-        <div class="warnbox" style="margin-top:var(--bt-space-5)">
-          <strong>Your library lives in the repository, not in this browser</strong>
-          It is encrypted here before it is saved, so anyone can read the file and nobody can read your
-          shelves. Sign in with the same passphrase on any device and you get the same single library.
-          This browser keeps a working copy for speed, which is what makes it usable offline.
-        </div>
       </div>`;
   }
 

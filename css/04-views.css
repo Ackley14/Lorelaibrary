@@ -657,17 +657,140 @@ a.src:hover { background: var(--bt-surface-hover); }
   min-height: 18px;                     /* reserved, so results never jump */
 }
 
-/* ── A section ────────────────────────────────────────────────────────────
-   One per followed author. The top rule is what separates them; a card or a
-   box would nest a grid inside a panel inside a pane, which this app does not
-   do anywhere else. */
-.fsec { border-top: var(--bt-rule-w) solid var(--bt-line-rule); }
-.fsec + .fsec { margin-top: 0; }
-.fsec-h {
+/* ── THE RELEASE-WINDOW STRIP ─────────────────────────────────────────────
+   Five windows across every follow at once: next week, this month, next month,
+   end of year, next year. It sits ABOVE the roster because it is the more
+   common question — the rows answer "what about this person", this answers
+   "what is coming", which is what somebody opens this screen for.
+
+   `.seg` and `.seg--wrap` are the app's existing segmented control (03-
+   components.css); nothing new is invented for it, so the pressed state, the
+   focus ring and the touch target are the ones every other toggle in the app
+   already uses. */
+.fwin {
+  padding: var(--bt-space-4) var(--bt-space-6) var(--bt-space-2);
+}
+
+/* ── ONE ROW PER AUTHOR ───────────────────────────────────────────────────
+   Collapsed by default, carrying its counts. The top rule is what separates
+   them; a card or a box would nest a grid inside a panel inside a pane, which
+   this app does not do anywhere else.
+
+   THE HEADER IS A GRID, NOT A FLEX ROW, and that is what lets the sub-line sit
+   under the name while the action buttons stay vertically centred against BOTH
+   lines. Written as a flex row, the sub-line either pushed the buttons down or
+   had to be nested inside the toggle button — and nesting it there would make
+   the last-checked text part of the expand control's accessible name, so a
+   screen reader would announce "Brandon Sanderson 2 upcoming checked 4 minutes
+   ago OL1394865A, expanded" on every toggle. */
+.frow { border-top: var(--bt-rule-w) solid var(--bt-line-rule); }
+.frow + .frow { margin-top: 0; }
+.frow-h {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0 var(--bt-space-3);
+  padding: var(--bt-space-4) var(--bt-space-6) var(--bt-space-4);
+}
+.frow:hover .frow-h { background: var(--bt-surface-hover); }
+
+/* The whole name-and-counts area is the expand control, so the target is the
+   row rather than a caret somebody has to aim at. */
+.frow-toggle {
+  grid-column: 1; grid-row: 1;
+  display: flex; align-items: center; gap: var(--bt-space-3);
+  min-width: 0; width: 100%;
+  background: none; border: 0; padding: 0; margin: 0;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.frow-toggle:focus-visible { outline: 2px solid var(--bt-focus-ring); outline-offset: 2px; border-radius: var(--bt-radius-sm); }
+/* Pointing down when open, right when closed — the same rotation the index
+   tree uses, driven off aria-expanded rather than a data attribute so the
+   visual state and the announced state cannot drift apart. */
+.frow-toggle[aria-expanded="false"] .tri { transform: rotate(-90deg); }
+.frow-toggle:hover .tri { color: var(--bt-text-secondary); }
+
+.frow-main {
+  display: flex; align-items: baseline; gap: var(--bt-space-3);
+  min-width: 0; flex-wrap: wrap;
+}
+.frow-name {
+  font-weight: 600; font-size: var(--bt-fs-md);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The counts line: "2 upcoming · +1 new · 12 recent", or the sentence that
+   says why there is no number. Tabular figures so the numbers do not jitter
+   as rows repaint behind a refresh. */
+.frow-counts {
+  display: flex; align-items: center; gap: var(--bt-space-2);
+  font-size: var(--bt-fs-sm); color: var(--bt-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.fq-yes { color: var(--bt-teal-text); font-weight: 600; }
+/* Deliberately QUIET. An empty answer is an ordinary result here, not a
+   warning, and colouring it red would teach the reader that a working feature
+   is broken. */
+.fq-no { color: var(--bt-text-muted); }
+/* The one variant that is a claim about US rather than about the catalogues —
+   not checked, still checking, or one source did not answer. Amber, the app's
+   existing "this value is not settled" hue. */
+.fq-wait { color: var(--bt-amber-text); }
+.fq-sep { color: var(--bt-text-faint); }
+
+.frow-acts {
+  grid-column: 2; grid-row: 1 / span 2;
+  display: flex; align-items: center; gap: var(--bt-space-2);
+  flex-shrink: 0;
+}
+.frow-sub {
+  grid-column: 1; grid-row: 2;
+  padding-left: calc(13px + 22px + var(--bt-space-3) * 2);
+  font-size: var(--bt-fs-mini); color: var(--bt-text-muted); margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.frow-body { padding-bottom: var(--bt-space-5); }
+
+/* THREE BUTTONS AND A NAME DO NOT FIT ON A PHONE. Below this width the actions
+   drop to their own line under the sub-line rather than squeezing the name into
+   an ellipsis — an author row whose only readable content is "Brandon Sand…"
+   beside three buttons has got the priority exactly backwards.
+
+   The rule lives here, next to the component, rather than in 05-responsive.css:
+   that file owns the LADDER — how the three panes collapse — and this is one
+   component reflowing inside a pane that has not changed. 560px is the same
+   step the ladder uses, so the two still break at the same places. */
+@media (max-width: 560px) {
+  .frow-h { grid-template-columns: minmax(0, 1fr); }
+  .frow-acts {
+    grid-column: 1; grid-row: 3;
+    margin-top: var(--bt-space-3);
+    padding-left: calc(13px + 22px + var(--bt-space-3) * 2);
+  }
+  .frow-sub { white-space: normal; }
+}
+
+/* "Recent · 12" — the second fold, inside an expanded row. Recent titles are
+   the long tail and stay collapsed behind their own count, so opening an author
+   shows what is COMING and nothing else until asked. */
+.fmore {
+  display: inline-flex; align-items: center; gap: var(--bt-space-2);
+  margin: var(--bt-space-2) var(--bt-space-6) var(--bt-space-3);
+  padding: var(--bt-space-2) var(--bt-space-3);
+  background: none; border: 0; border-radius: var(--bt-radius-sm);
+  font: inherit; font-size: var(--bt-fs-sm); color: var(--bt-text-muted);
+  cursor: pointer;
+}
+.fmore:hover { background: var(--bt-surface-hover); color: var(--bt-text-primary); }
+.fmore[aria-expanded="false"] .tri { transform: rotate(-90deg); }
+.fmorewrap { padding: var(--bt-space-5) var(--bt-space-6); text-align: center; }
+
+/* ── SEE WORKS ────────────────────────────────────────────────────────────
+   One author's whole catalogue, for somebody you follow or somebody you do
+   not. Same header idiom as a row, without the expander. */
+.fworks-h {
   display: flex; align-items: center; gap: var(--bt-space-4);
-  padding: var(--bt-space-5) var(--bt-space-6) var(--bt-space-3);
-  position: sticky; top: 0; z-index: 1;
-  background: var(--bt-surface-canvas);
+  padding: var(--bt-space-5) var(--bt-space-6) var(--bt-space-4);
+  border-bottom: var(--bt-rule-w) solid var(--bt-line-rule);
 }
 .fsec-name {
   font-weight: 600; font-size: var(--bt-fs-md);
@@ -678,7 +801,6 @@ a.src:hover { background: var(--bt-surface-hover); }
   font-size: var(--bt-fs-mini); color: var(--bt-text-muted); margin-top: 2px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.fsec-body { padding-bottom: var(--bt-space-5); }
 
 /* A name, wherever one is a row's subject rather than its label. */
 .fname {
@@ -745,6 +867,19 @@ a.src:hover { background: var(--bt-surface-hover); }
   background: var(--bt-coral-wash); color: var(--bt-coral-text);
   box-shadow: inset var(--bt-marker-w) 0 0 var(--bt-coral-edge);
 }
+/* The one notice on this page that is a PROMPT rather than a report: Google
+   Books is the primary source and there is no key, so the lists are Open
+   Library only. AMBER rather than coral — nothing is broken, a switch is off —
+   and it carries the button that turns it on, because "say so once, actionably"
+   is the whole difference between this and the ambient explainer text that used
+   to sit under every band heading. It disappears the moment a key exists. */
+.fwarn--act {
+  display: flex; align-items: center; gap: var(--bt-space-4); flex-wrap: wrap;
+  margin: var(--bt-space-4) var(--bt-space-6);
+  background: var(--bt-amber-wash); color: var(--bt-amber-text);
+  box-shadow: inset var(--bt-marker-w) 0 0 var(--bt-amber-edge);
+}
+.fwarn--act .btn { flex: 0 0 auto; }
 
 /* The prose under a band heading, and the counts under a section. Small,
    secondary, and never allowed to be absent: these carry "3 already on your
@@ -757,12 +892,6 @@ a.src:hover { background: var(--bt-surface-hover); }
 }
 .fbandnote b { color: var(--bt-text-secondary); font-weight: 600; }
 .fbandnote a { text-decoration: underline; }
-.fbandnote--foot {
-  margin-top: var(--bt-space-2);
-  padding-top: var(--bt-space-3);
-  border-top: var(--bt-rule-w) solid var(--bt-line-hairline);
-  color: var(--bt-text-faint);
-}
 
 /* ── The unread mark ──────────────────────────────────────────────────────
    Matches the sidebar badge's job without matching its shape: the tree's
@@ -813,32 +942,43 @@ a.src:hover { background: var(--bt-surface-hover); }
 .fnewsrow.is-new .fnw { color: var(--bt-teal-text); }
 
 /* ── A DATE THAT MIGHT ALREADY BE BEHIND US ───────────────────────────────
-   The strip lists works dated after today, but Open Library records YEARS: a
-   bare '2026' read in August could be last March or next November, and the
-   record does not say which. Those rows are kept and marked rather than guessed
+   A bare '2026' read in August could be last March or next November, and the
+   record does not say which. Those rows are kept and MARKED rather than guessed
    at in either direction — see 70-follows.js futureness().
 
-   The .date field above already hatches the month and day, which says the value
-   is not in the record. This line says what that MEANS for the promise the
-   section heading just made, and the two are deliberately separate: the hatch
-   is a fact about the data, this is a caveat about the claim.
+   THE MARK IS THE RING AND THE HATCHED DATE FIELD, AND NOTHING ELSE. There used
+   to be a caption under every one of these reading "Year only — may already be
+   out", and it was the clearest case on the page of the app explaining its own
+   data: BT.ui.dateField already draws `2026-▨▨-▨▨`, which says the month and
+   the day do not exist in the record, in the same grammar every other date in
+   the app uses. A sentence repeating that in words is a sentence the reader has
+   to read on every card to learn something the card already showed them.
 
    AMBER, reusing the palette's existing "coarse precision" hue — .prec.month
    and .prec.quarter are already amber for exactly this idea — so a reader who
-   has seen a month-only date anywhere else in the app recognises the colour
-   before reading the words. No new value is introduced; the palette is shared
-   with a sibling app and a one-off hex here would drift out of both themes. */
-.capprox {
-  margin-top: 3px; padding: 2px var(--bt-space-2);
-  border-radius: var(--bt-radius-sm);
-  font-size: var(--bt-fs-micro); line-height: 1.35;
-  color: var(--bt-amber-text); background: var(--bt-amber-wash);
-  box-shadow: inset 0 0 0 1px var(--bt-amber-edge);
-}
-/* The poster gets the same hue at the same weight the owned marker uses, so
-   the two states are legible from the ring alone while scrolling — which is how
-   this grid is actually read, rather than card by card. */
+   has seen a month-only date anywhere else in the app recognises the ring
+   before reading anything. The poster carries it at the weight the owned marker
+   uses, so the two states are legible from the ring alone while scrolling,
+   which is how this grid is actually read. */
 .card.is-approx .poster { box-shadow: 0 0 0 2px var(--bt-amber-edge); }
+
+/* WHO WROTE IT, on a pooled card. The release-window strip mixes every followed
+   author into one grid, so a title alone does not say whose it is — inside a
+   single author's row it obviously does, which is why this is opt-in per card
+   rather than always on. */
+.card .cby {
+  font-size: var(--bt-fs-micro); color: var(--bt-violet-text);
+  margin-top: 1px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* "first published 2024" on a card whose date is ahead of us — a reissue. A
+   FACT about the book, not a caveat about the app: the date on the card is a
+   real future printing (the user's own rule: "i just want things listed with a
+   publication date that is in the future from the current date"), and this says
+   the work behind it is not new. */
+.card .cfirst {
+  font-size: var(--bt-fs-micro); color: var(--bt-text-faint); margin-top: 1px;
+}
 
 /* "in 34d", beside a date we know to the day. It appears on certain future
    rows only: counting down to a bare year would be counting down to January
@@ -851,14 +991,20 @@ a.src:hover { background: var(--bt-surface-hover); }
    this the ten-slot mono date and a countdown collide and the field — the one
    element on the card that must stay exact — is what gives way.
 
-   SCOPED TO .fsec, not written as a bare `.card .cs`. The card is a shared
-   component and the search view lays out hundreds of them; relaxing its
-   subtitle row from here would reflow a screen this file has no business
-   touching, and the symptom would show up somewhere nobody would think to
-   connect to the Following page. (It was `#fgrid` while the page had one shared
-   strip; the sections replaced that, and a selector left pointing at an id
-   nothing renders any more is a rule that silently stops applying.) */
-.fsec .card .cs { flex-wrap: wrap; }
+   SCOPED, not written as a bare `.card .cs`. The card is a shared component and
+   the search view lays out hundreds of them; relaxing its subtitle row globally
+   would reflow a screen this file has no business touching, and the symptom
+   would show up somewhere nobody would think to connect to the Following page.
+
+   THREE SELECTORS, because this page now draws cards in three places: inside an
+   expanded author row, in the pooled release-window strip, and on the See-works
+   screen. A rule left pointing only at the old `.fsec` — which nothing renders
+   any more — is a rule that silently stops applying, which is exactly how the
+   date field and the countdown ended up colliding the last time this page was
+   restructured. */
+.frow .card .cs,
+#fwinbody .card .cs,
+#fwbody .card .cs { flex-wrap: wrap; }
 
 /* A card the reader added FROM this strip, in the session they added it.
 
@@ -873,9 +1019,9 @@ a.src:hover { background: var(--bt-surface-hover); }
    a non-wrapping flex row, so without this the "✓ In your library" marker
    pushes the date field and one of the two breaks mid-phrase.
 
-   The rule above already wraps this row for the follows grid; this one stays
-   because `.is-mine` is set on cards elsewhere too, and scoping the general
-   case to #fgrid would have silently dropped the wrap on those. */
+   The rules above already wrap this row for the three grids on the Following
+   page; this one stays because `.is-mine` is set on cards elsewhere too, and
+   scoping the general case to that page would silently drop the wrap on those. */
 .card.is-mine .cs { flex-wrap: wrap; }
 
 /* ══ SETTINGS ═════════════════════════════════════════════════════════════ */

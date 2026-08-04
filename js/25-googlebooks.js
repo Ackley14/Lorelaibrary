@@ -1,45 +1,81 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   Google Books — the ONLY file that knows Google's URL shapes, and the only
-   reason the app asks for an API key at all.
+   Google Books — the ONLY file that knows Google's URL shapes, and the reason
+   the app asks for an API key at all.
 
-   ── WHY THIS EXISTS ───────────────────────────────────────────────────────
-   Open Library cannot tell you what day a book came out. Not "usually does
-   not" — cannot. Measured against the live API:
+   ── WHY THIS IS NOW THE PRIMARY SOURCE ────────────────────────────────────
+   It used to be an enrichment path bolted onto Open Library. It is the other
+   way round now, and the reversal is measured rather than felt. Against the
+   live API with a real key:
 
-     · `search.json` answers `first_publish_year: 2024` and
-       `publish_year: [2024, 2025]`. Year granularity, always, with no
-       parameter that changes it.
-     · An EDITION record carries `publish_date` as a free-text string, and it
-       is almost always a bare year. Of twelve editions of The Hobbit, eleven
-       read '2020', '1937', '2003'…, exactly one carried a day ('15 julho
-       2019', in Portuguese), and some carried `None`.
-     · `first_publish_year` is frequently wrong on top of being coarse: The
-       Alloy of Law, published 2011, reports 2001.
+     SEARCH RELEVANCE
+       q=dune  ->  Frank Herbert's *Dune* at #1, correctly attributed.
+       Open Library answers the same query with *Children of Dune* at #1, *Go
+       Ask Alice* at #6, and the real novel eighth — credited to Brian Herbert
+       and dated 2001.
 
-   So pinning a specific edition and still getting no real date is not a bug
-   to be found and fixed. It is the shape of the catalogue. The only way to a
-   finer date is to ask somebody else, and Google Books answers properly:
+     DATES
+       Wind and Truth           -> '2024-12-06'
+       The Haunting of Velkwood -> '2024-03-05'
+       Project Hail Mary        -> '2021-05-04'
+       Open Library answers 2024, 2024 and 2021. It is year-granular by
+       construction — `search.json` returns `first_publish_year`, and an
+       edition's `publish_date` is free text that is almost always a bare year
+       (of twelve editions of The Hobbit, eleven read '2020', '1937', '2003'…,
+       one carried a day, and it was in Portuguese). No parameter changes this.
 
-       The Haunting of Velkwood -> '2024-03-05'   (Open Library: 2024)
-       Project Hail Mary        -> '2021-05-04'   (Open Library: 2021)
-       The Hobbit, 2012 edition -> '2012'         (older titles stay coarse)
+     FORTHCOMING TITLES
+       They exist here. They do not exist in Open Library AT ALL — no
+       announcement flag, no street date, no publisher feed. This is the whole
+       reason for the pivot: a reader following an author wants to know what is
+       coming, and only one of the two catalogues can answer.
 
-   That last line is the honest limit and is not a defect either — Google is
-   precise about recent trade publishing and coarse about the backlist, so a
-   library of old paperbacks gains almost nothing here and should be told so
-   rather than sold a key.
+   ── WHAT GOOGLE CANNOT DO, AND WHY 20-openlibrary.js STAYS ────────────────
+   NO WORK GRAPH. A volume id ('LLSpngEACAAJ') names ONE PRINTING. There is no
+   editions-of-a-work endpoint, no work concept, and no way to ask "what other
+   printings of this book exist" — so the "Specify edition" picker and the
+   scanner's candidate-ISBN net are both structurally impossible here and both
+   remain Open Library's job.
+
+   NO AUTHOR IDS. An author is a bare NAME string. A follow keyed on a name is
+   a follow that can silently watch the wrong person, which is why a follow
+   record stores an Open Library OLID *and* Google's exact name spelling.
+
+   ── AUTHOR QUERIES ARE UNRELIABLE IN BOTH CATALOGUES ──────────────────────
+   Verified, and this is the sharpest edge in the file:
+
+       inauthor:"Stephen King"   -> ZERO results
+       inauthor:Kiste            -> 300 books about Queen Victoria
+       "Gwendolyn Kiste"         -> her actual books
+
+   Open Library is no better: `search.json?author=gwendolyn+kiste` returns
+   Laird Barron's bibliography at HTTP 200. So NEITHER name-based author query
+   may be trusted blindly. authorWorks() below queries on the plain quoted name
+   and then CHECKS the credit on every volume it got back, because the query is
+   a net and the check is the answer.
+
+   ── THE `orderBy=newest` TRAP ─────────────────────────────────────────────
+   It does not sort by publication date. It sorts by when Google added the
+   RECORD. Observed publication years, in the order returned: 2023, 2020, 2024,
+   2018. Anything that needs date order sorts client-side — sortByPublished().
+   The parameter is still used, deliberately, as a second discovery ARM: a
+   forthcoming title is by definition a recently-added record, so "newest
+   record" is a good net for exactly the books relevance ranking buries.
 
    ── THE KEY GATE IS NOT A THROTTLE, IT IS AN ON/OFF SWITCH ────────────────
    Anonymous Google Books is DEAD. An unauthenticated volumes request answers
    HTTP 429 carrying `"quota_limit_value":"0"` — a quota of zero, not a quota
    we exhausted. Verified from two separate addresses. There is therefore no
-   anonymous fallback to degrade to, and every entry point in this file
-   returns before building a URL when `BT.config.hasKey('googlebooks')` is
-   false. Firing the request anyway would spend a lane slot, a bucket token
-   and a retry cycle to be told something already known, and four in a row
-   would trip 05-net's circuit breaker for a source that is merely switched
-   off. 05-net has the same gate; this one is here so the cost is not paid at
-   all, rather than paid and then refunded.
+   anonymous fallback to degrade to, and every entry point here returns before
+   building a URL when `BT.config.hasKey('googlebooks')` is false. Firing the
+   request anyway would spend a lane slot, a bucket token and a retry cycle to
+   be told something already known, and four in a row would trip 05-net's
+   circuit breaker for a source that is merely switched off.
+
+   WITHOUT A KEY THE APP STILL WORKS. Every function here returns an EMPTY,
+   WELL-SHAPED answer with `checked: false` on it rather than throwing, so a
+   caller can tell "Google says there is nothing" from "Google was never
+   asked" — which is the difference between telling a reader their author has
+   nothing coming and telling them we could not check.
 
    NOTHING IS BAKED. The key comes from BT.config, which reads it from this
    browser's localStorage and nowhere else. This repository is public: a key
@@ -48,11 +84,10 @@
 
    ── EVERYTHING GOES THROUGH BT.net ────────────────────────────────────────
    No fetch() here. 05-net owns the token bucket, the daily request budget
-   (BT.NET_POLICY.googlebooks, deliberately well under Google's own 1,000/day
-   so enrichment can never be why the user's key gets throttled elsewhere),
-   the circuit breaker, the retry policy and the response cache. It also
-   strips `key=` before building a cache key, which is what stops a rotated
-   key from orphaning every payload already paid for.
+   (BT.NET_POLICY.googlebooks, deliberately well under Google's own 1,000/day),
+   the circuit breaker, the retry policy and the response cache. It also strips
+   `key=` before building a cache key, which is what stops a rotated key from
+   orphaning every payload already paid for.
    ══════════════════════════════════════════════════════════════════════════ */
 
 BT.googlebooks = (function () {
@@ -83,8 +118,6 @@ BT.googlebooks = (function () {
     return q ? `${base}?${q}` : base;
   }
 
-  /* Shared net options. Volume records are frozen artefacts like edition
-     records, so they take the long TTL — see BT.TTL.gbVolume. */
   function netOpts(opts, ttl) {
     opts = opts || {};
     return {
@@ -111,30 +144,44 @@ BT.googlebooks = (function () {
     }
   }
 
-  /* THE LEAN FIELD LIST, and the same kind of budget 20-openlibrary.js keeps
-     for its search. Google supports partial responses through `fields`, and on
-     the query this file actually makes it is worth an order of magnitude:
+  /* ══ TWO FIELD LISTS, AND THE CHOICE IS A BUDGET ═══════════════════════════
+     Google supports partial responses through `fields`, and on the query this
+     file makes most often it is worth an order of magnitude:
 
          20 results, full payload ......  41,827 bytes
-         20 results, this list .........   4,873 bytes   (8.6x smaller)
+         20 results, LEAN_FIELDS .......   4,873 bytes   (8.6x smaller)
 
-     because a full volume record carries a description paragraph, a category
-     list, sale and access blocks, image links and a text snippet — none of
-     which the date matcher looks at. Measured live.
+     LEAN is what the DATE MATCHER reads and nothing more — confidentMatch()
+     and volumeHasIsbn() together touch exactly these fields. It is the default
+     for the enrichment path, which runs in the background over a whole library
+     against a quota that belongs to the user.
 
-     WHAT IS IN IT IS EXACTLY WHAT confidentMatch() AND volumeHasIsbn() READ.
-     If you add a caller that wants `description`, `pageCount` or `categories`,
-     pass `opts.fields` rather than widening this constant — every existing
-     caller would otherwise pay 8.6x for fields it ignores, on a phone, against
-     a quota that belongs to the user. */
+     RICH is what a SCREEN reads: a search result the reader is about to look
+     at, or an author's bibliography that has to render covers and dates. It is
+     the 8.6x payload and it is correct to pay it there, because the
+     alternative is a second request per row to fill in what the first one
+     deliberately left out.
+
+     `language` is in BOTH, and that is not an oversight. It is what BT.lang
+     filters on, and a filter that has to fetch the field it filters on is not
+     a filter — it is a second round trip per row. */
   const LEAN_FIELDS =
-    'totalItems,items(id,volumeInfo(title,subtitle,authors,publishedDate,industryIdentifiers))';
+    'totalItems,items(id,volumeInfo(title,subtitle,authors,publishedDate,language,industryIdentifiers))';
+
+  const RICH_FIELDS =
+    'totalItems,items(id,volumeInfo(title,subtitle,authors,publisher,publishedDate,'
+    + 'description,pageCount,categories,language,averageRating,ratingsCount,'
+    + 'imageLinks,industryIdentifiers,previewLink))';
 
   /* ══ SEARCH ═════════════════════════════════════════════════════════════
-     -> { items: [volume], totalItems }   ({ items: [], totalItems: 0 } when off)
+     -> { items, totalItems, dropped, checked }
+
+     `checked` is false ONLY when the Google half is switched off. Every caller
+     that reports an absence to the reader has to be able to say which kind of
+     absence it is, and an empty `items` array cannot carry that distinction.
 
      `printType: 'books'` is not tidiness. Without it the volumes index also
-     returns magazines, and a magazine's `publishedDate` is an issue date — a
+     returns magazines, and a magazine's `publishedDate` is an ISSUE date — a
      real, precise, completely wrong day to stamp on a novel that shares part
      of its title with a periodical.
 
@@ -142,22 +189,57 @@ BT.googlebooks = (function () {
      `items` key at all, not an empty array and not a 404, so the absence has
      to be checked by hand. `totalItems` is an ESTIMATE over a loose match and
      is not a count of anything — a query that can only have one true answer
-     routinely reports 300. Never branch on it. */
+     routinely reports 300. Never branch on it.
+
+     ── LANGUAGE ───────────────────────────────────────────────────────────
+     Filtered HERE, client-side, through BT.lang — and deliberately NOT through
+     Google's own `langRestrict=en`. langRestrict filters on a DECLARED value,
+     so it drops every volume that declares nothing; and the volumes that
+     declare nothing are disproportionately the thin, newly-catalogued records
+     that a forthcoming title always is. Filtering server-side would therefore
+     delete exactly the half of the index this app was pivoted to see.
+
+     `opts.anyLanguage` turns it off, and only the IDENTITY paths pass it: an
+     ISBN lookup and the date matcher both resolve a specific object the reader
+     already has, and a reader holding a Spanish printing is still holding
+     their own book. See the scan-exemption note in BT.lang. */
   async function search(q, opts) {
     opts = opts || {};
     const query = String(q == null ? '' : q).trim();
-    if (!enabled() || !query) return { items: [], totalItems: 0 };
+    if (!enabled() || !query) return { items: [], totalItems: 0, dropped: 0, checked: false };
 
     const data = await orNull(BT.net.get(SOURCE, url(BT.GB.volumes, {
       q: query,
-      maxResults: BT.util.clamp(opts.limit || 20, 1, 40),
+      maxResults: BT.util.clamp(opts.limit || 20, 1, BT.GB.MAX_RESULTS),
       startIndex: (opts.offset || 0) || undefined,
       printType: 'books',
-      fields: opts.fields || LEAN_FIELDS,
+      /* Only ever 'newest', only ever from authorWorks, and never as a sort —
+         see the trap note in the file header. */
+      orderBy: opts.orderBy || undefined,
+      fields: opts.fields || (opts.rich ? RICH_FIELDS : LEAN_FIELDS),
+      /* THE DEFAULT TTL IS THE LONG ONE, and the asymmetry is deliberate.
+         Most callers of this function are not asking a live question — they are
+         looking up a fact about a book (a date to sharpen, a volume behind an
+         ISBN) whose answer is a frozen artefact, and a short TTL there spends
+         the user's own daily allowance re-learning it. The ONE caller that
+         genuinely needs freshness is the search screen, and it is in this
+         repository and passes `ttl: BT.TTL.gbSearch` itself.
+         Defaulting the other way would silently cost quota in every module
+         that reaches for this without thinking about caching — which is the
+         failure mode a default should never have. */
     }), netOpts(opts, BT.TTL.gbVolume)));
 
-    const items = Array.isArray(data && data.items) ? data.items : [];
-    return { items, totalItems: Number(data && data.totalItems) || items.length };
+    const raw = Array.isArray(data && data.items) ? data.items : [];
+    if (opts.anyLanguage) {
+      return { items: raw, totalItems: Number(data && data.totalItems) || raw.length, dropped: 0, checked: true };
+    }
+    const { kept, dropped } = BT.lang.keep(raw, BT.lang.acceptsVolume);
+    return {
+      items: kept,
+      totalItems: Number(data && data.totalItems) || raw.length,
+      dropped,
+      checked: true,
+    };
   }
 
   /* ══ BY ISBN ════════════════════════════════════════════════════════════
@@ -174,27 +256,24 @@ BT.googlebooks = (function () {
                                    [3] Reading for Thinking ISBN_13 9780395782903  ✗
 
      The third row is a different book with a different ISBN, sitting in the
-     answer to a query that named one. `totalItems: 300` for a query that can
-     only have one true answer is the same symptom: the number is an estimate
-     over a loose match, not a count.
+     answer to a query that named one. So the identifier is CHECKED rather than
+     assumed — this is the arm whose answers are accepted WITHOUT corroboration,
+     precisely because an ISBN is supposed to be exact identity, and an
+     unverified items[0] would turn that trust into a mechanism for stamping a
+     stranger's publication date onto the reader's book.
 
-     So the identifier is CHECKED rather than assumed. Taking items[0] on faith
-     works right up until Google holds no volume for the barcode, at which
-     point the top row is simply the nearest thing the ranker found — and this
-     arm is the one whose answers the date upgrade accepts WITHOUT corroboration,
-     precisely because an ISBN is supposed to be exact identity. An unverified
-     items[0] would turn that trust into a mechanism for stamping a stranger's
-     publication date onto the reader's book.
+     RICH fields, because this is now a metadata path and not only a date one:
+     a scanned barcode that resolves here should fill a pane.
 
-     Widens an ISBN-10 to a 13 on both sides of the comparison. The ten-digit
-     form is what is printed on a copyright page, so it is what a hand-typed
-     record carries, and Google returns whichever forms it holds. */
+     `anyLanguage`, because this is an IDENTITY path. The reader is holding
+     this object. */
   async function byIsbn(isbn13, opts) {
     const isbn = cleanIsbn(isbn13);
     if (!enabled() || !isbn) return null;
     /* Three, not one: the true match is not reliably first, and the padding
        above shows up inside the first few rows rather than after them. */
-    const res = await search(`isbn:${isbn}`, Object.assign({}, opts, { limit: 3 }));
+    const res = await search(`isbn:${isbn}`,
+      Object.assign({}, opts, { limit: 3, rich: true, anyLanguage: true, ttl: BT.TTL.gbVolume }));
     for (const vol of res.items) {
       if (volumeHasIsbn(vol, isbn)) return vol;
     }
@@ -218,19 +297,304 @@ BT.googlebooks = (function () {
     return false;
   }
 
+  /* Every ISBN-13 a volume claims, widened from the ten-digit form. A Google
+     volume is ONE PRINTING, so this is normally one or two codes describing the
+     same object — never the forty a work carries. That is why 38-normalize
+     files them as CANDIDATES on an open item and never as an ownership claim:
+     search-adding a book must not tell the scanner you own a copy. */
+  function isbnsOf(vol) {
+    const out = [];
+    for (const row of ((vol && vol.volumeInfo && vol.volumeInfo.industryIdentifiers) || [])) {
+      const t = row && row.type;
+      if (t !== 'ISBN_10' && t !== 'ISBN_13') continue;
+      const c = cleanIsbn(row.identifier);
+      if (c && out.indexOf(c) < 0) out.push(c);
+    }
+    return out;
+  }
+
   /* ══ VOLUME ═════════════════════════════════════════════════════════════
      -> a single volume by its Google id, or null.
 
      Only reachable once a search has handed us that id — nothing in the app
      can guess one — so this exists for the refresh case: a record that already
      stores `ids.googlebooks` can be re-read for one request instead of
-     re-running the match that found it. */
+     re-running the match that found it.
+
+     No language filter: an id names one object, and the caller already has it. */
   async function volume(id, opts) {
     const endpoint = BT.GB.volume(id);
     if (!enabled() || !endpoint) return null;
     const raw = await orNull(BT.net.get(SOURCE, url(endpoint, {}),
                                         netOpts(opts, BT.TTL.gbVolume)));
     return (raw && raw.id) ? raw : null;
+  }
+
+  /* ══════════════════════════════════════════════════════════════════════════
+     AN AUTHOR'S BOOKS
+     ══════════════════════════════════════════════════════════════════════════
+     -> { works, volumes, totalItems, checked, credited, dropped }
+
+     This is the Google half of "what is this author releasing", and the Open
+     Library half is BT.openlibrary.authorWorks. NEITHER IS ALLOWED TO ANSWER
+     ALONE — 70-follows unions them, because Google holds forthcoming titles
+     Open Library has never heard of and Open Library holds a stable author id
+     Google does not have. `checked` is what makes that union honest: a caller
+     may only say "nothing scheduled" when BOTH sources answered.
+
+     ── THE QUERY IS A NET, THE CREDIT CHECK IS THE ANSWER ──────────────────
+     `inauthor:` is not usable. Measured:
+
+         inauthor:"Stephen King"  ->  zero results
+         inauthor:Kiste           ->  300 books about Queen Victoria
+         "Gwendolyn Kiste"        ->  her actual books
+
+     So the query is the plain quoted name, which is a free-text search and
+     therefore also returns books ABOUT the person, books that mention them in
+     a blurb, and anthologies they are not in. Every row is then checked
+     against `volumeInfo.authors` by creditsAuthor(). The query widens, the
+     check narrows, and the check is the part that decides.
+
+     ── TWO ARMS, AND THE SECOND ONE IS THE POINT ───────────────────────────
+     Arm 1 is relevance order — the author's known books.
+     Arm 2 is `orderBy=newest`, which sorts by when Google ADDED THE RECORD and
+     not by publication date (see the trap in the header). Used as a sort it is
+     a bug; used as a NET it is exactly right, because a book announced for next
+     spring is a record Google created recently and a record relevance ranking
+     buries under thirty years of backlist. Without this arm, forthcoming titles
+     for a prolific author are simply not in the first forty rows — which is the
+     one thing this whole feature exists to find.
+
+     Two requests per author per refresh. See the budget arithmetic in
+     BT.NET_POLICY.
+
+     ── PRINTINGS ARE COLLAPSED ─────────────────────────────────────────────
+     Google has no work graph, so a prolific author's forty rows are routinely
+     a dozen books in three printings each. groupPrintings() folds them by title
+     and author, and keeps BOTH ends of the date range: `firstRaw` (the earliest
+     printing, which is when the book came out) and `latestRaw` (the most recent
+     printing, which is what "is something new arriving" is asked of). Neither
+     alone is right — collapsing to the earliest hides a 2027 reissue, and
+     collapsing to the latest claims a 1953 novel is new. */
+  async function authorWorks(name, opts) {
+    opts = opts || {};
+    const person = String(name == null ? '' : name).trim();
+    const empty = { works: [], volumes: [], totalItems: 0, checked: false, credited: 0, dropped: 0 };
+    if (!enabled() || !person) return empty;
+
+    const perPage = BT.util.clamp(opts.limit || BT.GB.MAX_RESULTS, 1, BT.GB.MAX_RESULTS);
+    const q = phrase(person);
+    const shared = {
+      rich: true,
+      limit: perPage,
+      signal: opts.signal,
+      meta: opts.meta,
+      fresh: !!opts.fresh,
+      ttl: opts.ttl != null ? opts.ttl : BT.TTL.gbAuthorWorks,
+    };
+
+    /* Serialized rather than raced. 05-net's lane for this source allows two,
+       but a burst of two identical-shaped queries against a service that sheds
+       load with 503s (see the retry note in BT.NET_POLICY) gets both of them
+       retried; one at a time costs a little latency on a background refresh and
+       nothing at all in reliability. */
+    const byRelevance = await search(q, shared);
+    /* Arm 2 is skipped when arm 1 was not answered at all, so a switched-off or
+       budget-exhausted source spends one refusal rather than two. */
+    const byNewest = byRelevance.checked
+      ? await search(q, Object.assign({}, shared, { orderBy: 'newest' }))
+      : { items: [], totalItems: 0, dropped: 0, checked: false };
+
+    if (!byRelevance.checked) return empty;
+
+    /* Union by volume id. The two arms overlap heavily for a small catalogue
+       and barely at all for a large one, which is the whole reason arm 2 is
+       worth its request. */
+    const seen = new Set();
+    const volumes = [];
+    for (const vol of [].concat(byRelevance.items, byNewest.items)) {
+      const id = vol && vol.id;
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      volumes.push(vol);
+    }
+
+    const credited = volumes.filter(v => creditsAuthor(v, person));
+    return {
+      works: groupPrintings(credited),
+      volumes: credited,
+      totalItems: Math.max(byRelevance.totalItems || 0, byNewest.totalItems || 0),
+      checked: true,
+      credited: credited.length,
+      dropped: (byRelevance.dropped || 0) + (byNewest.dropped || 0),
+    };
+  }
+
+  /* Does this volume actually CREDIT that person as an author?
+
+     Compared on `surname|first initial` rather than on the whole string,
+     because the two catalogues and Google's own records disagree about
+     initials and middle names far more often than about the family name:
+     'J.R.R. Tolkien', 'J. R. R. Tolkien' and 'John Ronald Reuel Tolkien' are
+     one author and three strings, and all three fold to `tolkien|j`.
+
+     THE INITIAL IS REQUIRED WHEN BOTH SIDES HAVE ONE, and that is what keeps
+     Tabitha King out of Stephen King's bibliography — a surname-only test
+     would union two people's catalogues into one feed, which is the same class
+     of failure as `inauthor:Kiste` answering with Queen Victoria. Where one
+     side has no forename at all (a follow stored as a bare surname, a volume
+     credited to 'Colette') the surname alone decides, because there is nothing
+     finer to compare and refusing would lose the real author. */
+  function creditsAuthor(vol, name) {
+    const want = personKey(name);
+    if (!want) return false;
+    for (const credited of ((vol && vol.volumeInfo && vol.volumeInfo.authors) || [])) {
+      if (personMatches(personKey(credited), want)) return true;
+    }
+    return false;
+  }
+
+  /* 38-normalize's, not this file's — the same fold that decides whether a
+     Google row and an Open Library row are the same book also decides whether
+     a volume credits the author we asked about. Two copies would be two answers
+     to one question, and the disagreement would show up as an author whose
+     bibliography is right on one screen and wrong on the next. */
+  const personKey = n => (BT.normalize ? BT.normalize.personKey(n) : '');
+  const personMatches = (a, b) => (BT.normalize ? BT.normalize.personMatches(a, b) : false);
+
+  /* ── COLLAPSING PRINTINGS INTO BOOKS ─────────────────────────────────────
+     Google's index is printings, not works. Folded by title + primary author,
+     which is the same key BT.normalize.matchKey uses to merge a Google row
+     against an Open Library one — one fold in the app, so a book that merges
+     across sources also merges within a source.
+
+     NOTHING IS BLENDED ACROSS PRINTINGS except the date range. It is tempting
+     to fill a thin forthcoming record's missing cover and page count from its
+     older siblings, and it would be wrong: ISBN, extent, cover art and
+     publisher are properties of ONE printing, and a record assembled from
+     several is a printing that does not exist. The representative volume is
+     the most recently dated one — for "what is arriving", that is the row being
+     asked about — and it supplies every field on its own.
+
+     Both ends of the range are kept. See the note in authorWorks. */
+  function groupPrintings(volumes) {
+    const groups = new Map();
+    for (const vol of (volumes || [])) {
+      const info = (vol && vol.volumeInfo) || {};
+      const key = BT.normalize.matchKey(info.title, info.authors);
+      if (!key) continue;
+      const rel = releaseFromVolume(vol);
+      const row = groups.get(key);
+      if (!row) {
+        groups.set(key, { first: rel, last: rel, pick: vol, printings: 1 });
+        continue;
+      }
+      row.printings++;
+      /* An undated printing cannot move either end of the range, and must not
+         be allowed to become the representative of a book that has a dated
+         printing — that is how a forthcoming title loses its date. */
+      if (!rel) continue;
+      if (!row.first || rel.release.sortKey < row.first.release.sortKey) row.first = rel;
+      if (!row.last || rel.release.sortKey > row.last.release.sortKey) { row.last = rel; row.pick = vol; }
+      if (!row.pick) row.pick = vol;
+    }
+
+    const out = [];
+    for (const row of groups.values()) out.push(shapeWork(row));
+    return sortByPublished(out);
+  }
+
+  function shapeWork(row) {
+    const vol = row.pick;
+    const info = (vol && vol.volumeInfo) || {};
+    const isbns = isbnsOf(vol);
+    return {
+      volumeId: (vol && vol.id) || '',
+      title: String(info.title || '').trim(),
+      subtitle: String(info.subtitle || '').trim(),
+      authors: Array.isArray(info.authors) ? info.authors.slice() : [],
+      publisher: String(info.publisher || '').trim(),
+      description: String(info.description || ''),
+      categories: Array.isArray(info.categories) ? info.categories.slice() : [],
+      pageCount: Number(info.pageCount) || null,
+      language: BT.lang.short(info.language),
+      coverUrl: coverUrl(vol, 'md'),
+      isbn13: isbns[0] || null,
+      isbns,
+      printings: row.printings,
+      /* The RAW strings as well as the parsed releases, because the raw string
+         is what the inspector shows when a precision is coarse and is the only
+         way to tell '2027' from 'Fall 2027'. */
+      firstRaw: row.first ? row.first.raw : '',
+      latestRaw: row.last ? row.last.raw : '',
+      firstRelease: row.first ? row.first.release : null,
+      /* `release` is the LATEST printing's, which is the one "is something new
+         arriving from this author" is asking about. A reprint counts — that is
+         the reader's own rule, and a 2027 reissue of a 1953 novel has a 2027
+         publication date. */
+      release: row.last ? row.last.release : null,
+    };
+  }
+
+  /* ══ SORTING BY PUBLICATION DATE ════════════════════════════════════════
+     Exported, because `orderBy=newest` looks like it does this and does not —
+     it orders by when Google added the record. Anything that needs date order
+     calls this, over rows carrying a `release` built by the app's own date
+     engine, so a 'YYYY' and a 'YYYY-MM-DD' sort against each other correctly
+     instead of by string.
+
+     Newest first. Undated rows sink to the bottom rather than being dropped:
+     "we do not know when" and "it is not coming" are different facts, and a
+     list that silently deleted the first would report a real book as missing. */
+  function sortByPublished(rows) {
+    const sk = r => {
+      const v = r && r.release && r.release.sortKey;
+      return Number.isFinite(v) ? v : -1;
+    };
+    return (rows || []).slice().sort((a, b) => {
+      const ka = sk(a), kb = sk(b);
+      if (ka < 0 && kb < 0) return 0;
+      if (ka < 0) return 1;
+      if (kb < 0) return -1;
+      return kb - ka;
+    });
+  }
+
+  /* ══ COVERS ═════════════════════════════════════════════════════════════
+     Three corrections are applied inside BT.GB.cover and they are all
+     load-bearing: the URL arrives as `http://` (blocked as mixed content on an
+     https page), carries `edge=curl` (which draws a fake page curl into the
+     pixels, server-side), and defaults to a ~128px `zoom=1`. Returns null when
+     the volume carries no art, so a caller branches on the URL and never on the
+     record. */
+  function coverUrl(vol, size) {
+    return BT.GB.cover(vol && vol.volumeInfo && vol.volumeInfo.imageLinks, size || 'md');
+  }
+
+  /* ══ TRANSIENT LOOKUP ═══════════════════════════════════════════════════
+     -> a partial item for a `book:googlebooks:{id}` uid that is NOT in the
+        library, or null.
+
+     The inspector calls this when someone taps a search result or a Following
+     card for a book they do not own — which is the ORDINARY path for a
+     forthcoming title, since by definition nobody owns one yet. A tap must show
+     the book and never add it, so this is read-only and writes nothing.
+
+     Ids are ALPHANUMERIC with `-` and `_` ('LLSpngEACAAJ'). Never parseInt one. */
+  const UID_RX = /^book:googlebooks:([A-Za-z0-9_-]+)$/;
+
+  async function lookupUid(uid) {
+    const m = UID_RX.exec(String(uid == null ? '' : uid).trim());
+    if (!m || !enabled() || !BT.normalize) return null;
+    const vol = await volume(m[1]);
+    if (!vol) return null;
+    const stub = BT.normalize.fromVolume(vol);
+    if (!stub) return null;
+    /* The caller navigated to this uid, so it is the identity the pane and the
+       URL already agree on — keep it even if the normalizer would have minted a
+       different one from the record it just read. */
+    if (!stub.uid) stub.uid = uid;
+    return stub;
   }
 
   /* ══ DIAGNOSTICS ════════════════════════════════════════════════════════
@@ -247,7 +611,7 @@ BT.googlebooks = (function () {
 
   async function verifyKey() {
     if (!enabled()) {
-      return { ok: false, reason: 'No key set — the Google half stays switched off, and dates stay year-only.' };
+      return { ok: false, reason: 'No key set. Search and dates fall back to Open Library, which is year-only.' };
     }
     const t0 = Date.now();
     try {
@@ -284,10 +648,12 @@ BT.googlebooks = (function () {
   /* ══════════════════════════════════════════════════════════════════════════
      THE DATE UPGRADE PATH
      ══════════════════════════════════════════════════════════════════════════
-     One job: turn a year into a month or a day, and never do anything else to
-     the record. Every rule below exists because the alternative is worse than
-     the coarse date we already have — a WRONG date is worse than a vague one,
-     because a vague one is visibly vague and a wrong one is not.
+     For records that already exist in the library and were created before
+     Google was primary — a shelf full of Open Library work records with bare
+     years on them. One job: turn a year into a month or a day, and never do
+     anything else to the record. Every rule below exists because the
+     alternative is worse than the coarse date we already have — a WRONG date is
+     worse than a vague one, because a vague one is visibly vague.
      ══════════════════════════════════════════════════════════════════════════ */
 
   /* THE PRECISION FLOOR. Read through 38-normalize rather than kept here, so
@@ -432,12 +798,14 @@ BT.googlebooks = (function () {
      a 1937 novel — one is a reprint, the other has not been published yet.
      Without the year gate this arm confidently "upgrades" The Hobbit to July
      1986. With it, all three are refused and the record keeps its honest 1937.
-     (The third also fails the title fold, which is the cheap check catching
-     what the expensive one would have caught anyway.)
 
      Which is also why an item with no year at all does not get the title arm.
      There is nothing to corroborate against, and an uncorroborated title match
-     is exactly the wrong date this whole function exists to avoid. */
+     is exactly the wrong date this whole function exists to avoid.
+
+     `anyLanguage` on both arms: this is an owned record being enriched, not a
+     discovery surface, and a reader's Spanish paperback still deserves its real
+     publication date. */
   async function findVolumeFor(item, opts) {
     const pinned = Array.isArray(item.isbnsPinned) ? item.isbnsPinned : [];
     for (const raw of pinned) {
@@ -475,15 +843,12 @@ BT.googlebooks = (function () {
 
        The 2021-05-04 hardcover we are trying to sharpen sits at position
        eight. At `maxResults: 5` the year gate correctly refused every row and
-       the book kept its bare '2021' for ever; at twenty it finds the real
-       one. The gate is what makes widening the window SAFE — more rows can
-       only mean more chances to match the year we already trust, never a
-       looser match. (Position nine in that list is 'Book Club in a Box', also
-       2021 — refused by the title fold, which is the other half of the test
-       doing its job.) */
+       the book kept its bare '2021' for ever; at twenty it finds the real one.
+       The gate is what makes widening the window SAFE — more rows can only mean
+       more chances to match the year we already trust, never a looser match. */
     const res = await search(
       `intitle:${phrase(title)} inauthor:${phrase(authors[0])}`,
-      Object.assign({}, opts, { limit: 20 }));
+      Object.assign({}, opts, { limit: 20, anyLanguage: true, ttl: BT.TTL.gbVolume }));
 
     let best = null;
     for (const vol of res.items) {
@@ -504,17 +869,17 @@ BT.googlebooks = (function () {
     return best;
   }
 
-  /* Google's `publishedDate` -> a release object, or null when the volume has
+  /* Google's `publishedDate` -> { release, raw }, or null when the volume has
      no date at all.
 
-     Parsed through BT.util.parseOpenLibraryDate — the app's ONE date engine —
-     rather than a private `new Date(...)`. The name says Open Library and the
-     function is general: it normalises free text down to 'YYYY' / 'YYYY-MM' /
-     'YYYY-MM-DD' and then runs the same placeholder ladder, the same Jan-1
-     demotion for unpublished titles and the same TBA rule as every other date
-     in the app. Google's three ISO shapes are the easy end of what it already
-     handles, and routing them through it is what guarantees a Google date and
-     an Open Library date sort, render and hatch identically.
+     Parsed through BT.normalize.buildRelease — which runs the app's ONE date
+     engine — rather than a private `new Date(...)`. That engine normalises free
+     text down to 'YYYY' / 'YYYY-MM' / 'YYYY-MM-DD' and then runs the same
+     placeholder ladder, the same Jan-1 demotion for unpublished titles and the
+     same TBA rule as every other date in the app. Google's three ISO shapes are
+     the easy end of what it already handles, and routing them through it is what
+     guarantees a Google date and an Open Library date sort, render and hatch
+     identically.
 
      `new Date('2021-05-04')` would also have parsed it, and would have parsed
      it as UTC midnight — which is May 3rd for every reader west of Greenwich.
@@ -564,9 +929,7 @@ BT.googlebooks = (function () {
 
     /* 3. AN AUTHOR SURNAME MUST BE SHARED. Surnames rather than full names
           because the two catalogues disagree about initials and middle names
-          far more often than they disagree about the family name —
-          'J.R.R. Tolkien', 'J. R. R. Tolkien' and 'John Ronald Reuel Tolkien'
-          are one author and three strings. */
+          far more often than they disagree about the family name. */
     const mine = surnames((item.authors || []).map(a => a && a.name));
     const yours = surnames(info.authors || []);
     if (!mine.size || !yours.size) return false;
@@ -589,61 +952,19 @@ BT.googlebooks = (function () {
     return raw == null ? '' : (BT.util.olDateToNaive(String(raw)) || '');
   }
 
-  /* Titles folded for COMPARISON only, never for display. Uses the same
-     normaliser the search ranker uses, then drops a trailing parenthetical —
-     Google routinely appends edition furniture ('Dune (40th Anniversary
-     Edition)') that Open Library does not, and without this every anniversary
-     reissue fails a match it should pass.
+  /* Title and surname folds are 38-normalize's, not this file's, so that a
+     book which merges across the two sources folds the same way it does when
+     two Google printings merge against each other. Two folds is two answers to
+     "is this the same book", and the disagreement shows up as a duplicate row
+     nobody can explain. Delegated rather than copied for the same reason
+     `precisionRank` is. */
+  const fold = s => (BT.normalize ? BT.normalize.foldTitle(s) : '');
+  const surnames = names => (BT.normalize ? BT.normalize.surnameSet(names) : new Set());
 
-     AND THE LEADING ARTICLE IS NORMALISED AWAY, because the two catalogues
-     genuinely disagree about it and the disagreement is not an edge case.
-     Measured live, on the exact book this feature exists for:
-
-         Open Library work OL37620147W  title 'Haunting of Velkwood'
-         Google Books                   title 'The Haunting of Velkwood'
-                                                publishedDate '2024-03-05'
-
-     One row came back, it was unmistakably the right book, and an exact fold
-     refused it — so the record kept its bare '2024' and the whole upgrade path
-     looked like it was doing nothing. Open Library drops or inverts the article
-     on a large share of its work records; the MARC-derived ones carry the
-     inverted form ('Hobbit, The'), which is the same disagreement written
-     backwards, so both shapes are handled.
-
-     Safe to drop, and this is the part worth being sure about: the article is
-     never the distinguishing part of a title, and this test is already fenced
-     by the year gate and the shared surname in confidentMatch(). Two different
-     books by one author, published in one year, whose titles differ ONLY by a
-     leading 'the', is not a case that exists. What this cannot do is move a
-     year, which is the failure that actually matters. */
-  const ARTICLE_INVERTED = /,\s*(the|an|a)\s*$/i;
-  const ARTICLE_LEADING = /^(the|an|a) /;
-
-  function fold(s) {
-    const trimmed = String(s == null ? '' : s)
-      .replace(/\s*\([^)]*\)\s*$/, '')
-      /* Before normalizeTitle, which turns the comma into a space and destroys
-         the only signal that says this is an inverted title rather than a real
-         one ending in the word 'a'. */
-      .replace(ARTICLE_INVERTED, '');
-    return BT.util.normalizeTitle(trimmed).replace(ARTICLE_LEADING, '');
-  }
-
-  function surnames(names) {
-    const out = new Set();
-    for (const n of (names || [])) {
-      const parts = BT.util.normalizeTitle(n).split(' ').filter(Boolean);
-      /* Single-token names are real ('Homer', 'Colette') and are their own
-         surname; for everything else the last token is the family name. */
-      if (parts.length) out.add(parts[parts.length - 1]);
-    }
-    return out;
-  }
-
-  /* A quoted phrase for `intitle:` / `inauthor:`. Embedded quotes are replaced
-     rather than escaped: Google's query grammar has no escape sequence, so a
-     stray quote inside the phrase closes it early and silently widens the
-     search into an unrelated result set. */
+  /* A quoted phrase for `intitle:` / `inauthor:` and for a plain name query.
+     Embedded quotes are replaced rather than escaped: Google's query grammar
+     has no escape sequence, so a stray quote inside the phrase closes it early
+     and silently widens the search into an unrelated result set. */
   function phrase(s) {
     return '"' + String(s == null ? '' : s).replace(/"/g, ' ').replace(/\s+/g, ' ').trim() + '"';
   }
@@ -660,12 +981,18 @@ BT.googlebooks = (function () {
 
   return {
     enabled,
-    search, byIsbn, volume,
+    search, byIsbn, volume, authorWorks,
+    coverUrl, isbnsOf, volumeHasIsbn,
+    lookupUid,
     verifyKey,
     needsDateUpgrade, upgradeItemDate,
+    sortByPublished,
     /* Exposed so tests and the Settings diagnostics can assert the rules that
        cannot be seen from a response: that no URL leaves here without a key,
-       and that the match test refuses the near-misses it is supposed to. */
+       that the match test refuses the near-misses it is supposed to, and that
+       the author credit check keeps Tabitha King out of Stephen King's feed. */
     url, confidentMatch, releaseFromVolume, fold, surnames,
+    creditsAuthor, personKey, groupPrintings, phrase,
+    LEAN_FIELDS, RICH_FIELDS,
   };
 })();

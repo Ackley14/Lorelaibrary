@@ -427,21 +427,21 @@ BT.viewStats = (function () {
     let body;
 
     if (pace.rows && !pace.deltas.length) {
+      /* EMPTY STATES SAY WHAT TO DO, and nothing else. Each of these three is a
+         different reason the chart is blank, so each names the different next
+         action that would fill it — which is the only thing the reader can use.
+         The methodology that used to follow each one is in DECISIONS.md. */
       title = 'One reading each, so far';
-      body = `The log holds a single position for ${BT.util.pluralize(pace.books, 'book')}. `
-        + 'Pace is the distance between one recorded position and the next, so the first '
-        + 'entry in a book sets the starting point and the chart begins at the second.';
+      body = `Record a second page position in any of your ${
+        BT.util.pluralize(pace.books, 'book')} to start the chart.`;
     } else if (positions) {
       title = 'No dated trail to measure';
-      body = `BookTrak knows where you are in ${BT.util.pluralize(positions, 'book')}, but a `
-        + 'position on its own is a place, not a pace — this chart needs the same book '
-        + 'dated at two different pages to know how long the distance between them took. '
-        + 'The reading log currently records books being finished and books being rated.';
+      body = `Record a second page position in any of your ${
+        BT.util.pluralize(positions, 'book')} to start the chart.`;
     } else {
       title = 'No pages recorded yet';
-      body = 'Open a book from your library and set the page you are on. Record it again a '
-        + 'few days later and the difference between the two — pages per week — is what '
-        + 'this chart draws.';
+      body = 'Open a book from your library and set the page you are on, then record it '
+        + 'again in a few days.';
     }
 
     /* The finish log is worth drawing on its own. A reader who never records a
@@ -485,9 +485,7 @@ BT.viewStats = (function () {
        single finished book draws a 132px slab, which shouts far louder than
        the fact deserves. */
     return `<div class="hd hd--gap">Books finished, per ${esc(unit)}</div>
-      <div class="pace"><div class="pace-plot pace-plot--short">${cols}</div>${axisRow(tl.keys)}</div>
-      <p class="statfoot">Counted from the reading log, which records the day a book was moved
-        to Finished. It says nothing about how long the book took.</p>`;
+      <div class="pace"><div class="pace-plot pace-plot--short">${cols}</div>${axisRow(tl.keys)}</div>`;
   }
 
   /* ── Tiles ─────────────────────────────────────────────────────────────
@@ -646,10 +644,9 @@ BT.viewStats = (function () {
        identical-looking bar, so the difference is stated rather than left to be
        inferred from the numbers on the right. */
     return `<div class="bars">${top.map(([l, n]) => bar(l, n, top[0][1])).join('')}</div>`
-      + `<p class="statfoot">Bars here are drawn against the most-shelved author rather than
-           against the whole library, unlike the rest of this column.${ranked.length > top.length
-             ? ` ${esc(BT.util.pluralize(ranked.length - top.length, 'other author'))} have fewer books.`
-             : ''}</p>`;
+      + (ranked.length > top.length
+          ? `<p class="statfoot">${esc(BT.util.pluralize(ranked.length - top.length, 'other author'))} have fewer books.</p>`
+          : '');
   }
 
   /* ── Decade ────────────────────────────────────────────────────────────
@@ -738,16 +735,9 @@ BT.viewStats = (function () {
         bar(PREC_LABEL[p], counts[p], items.length, PREC_INK[p])).join('')}</div>
       <p class="statnote">
         <b>${esc(String(pct))}%</b> of the shelf is dated more precisely than a year.
-        Open Library records publication years, not days, so that figure is a ceiling on
-        what this app can know from it alone.
       </p>
-      ${hasKey
-        ? `<p class="statfoot">Google Books is switched on, and it is the only source here that
-             states a month or a day. Books added before you supplied the key keep the coarser
-             date until they are refreshed.</p>`
-        : `<p class="statfoot">A Google Books key — added in Settings, stored only in this
-             browser — is the one thing that moves books out of the year row. It is the
-             difference this chart is here to show.</p>`}`;
+      ${hasKey ? '' : `<p class="statfoot"><a href="#/settings">Add a Google Books key</a>
+             to get months and days on these dates.</p>`}`;
   }
 
   /* ── The accounting ────────────────────────────────────────────────────
@@ -762,43 +752,26 @@ BT.viewStats = (function () {
     const noFinishDate = items.filter(it =>
       BT.ui.statusOf(it) === 'finished').length - finishes.size;
 
+    /* WHAT SURVIVES HERE IS FACTS ABOUT THE READER'S OWN DATA, never methodology.
+       The removed notes explained how pages, pace, averages and genre buckets are
+       computed — six paragraphs teaching the app rather than reporting the shelf.
+       Each remaining line names a GAP the reader could actually close (a missing
+       page count, a missing finish date, nothing rated yet), which is the one
+       thing a note on a chart can say that the chart cannot. */
     return `
-      <p class="statnote"><b>Pages read</b> counts a finished book's full extent, and every other
-      book's recorded position. The extent is the page count you entered for your own copy where
-      you gave one, and the catalogue's figure otherwise — a paperback and a hardback of the same
-      novel genuinely differ by a couple of hundred pages, so the number off the book in your hand
-      always wins.</p>
       ${read.unknownFinished
         ? `<p class="statfoot">${esc(BT.util.pluralize(read.unknownFinished, 'finished book'))} has
-             no page count from either source and ${read.unknownFinished === 1 ? 'counts' : 'count'}
-             as nothing rather than as a guess.</p>`
+             no page count, so ${read.unknownFinished === 1 ? 'it is' : 'they are'} not counted
+             in the pages above.</p>`
         : ''}
 
-      <p class="statnote"><b>Reading pace</b> is differenced from the reading log, which records a
-      position at the moment you enter it. It measures the gap between two entries, so it is a
-      record of when you wrote a page number down rather than of when you turned the page — a
-      fortnight of reading logged in one sitting lands in one column.</p>
-
-      ${rated
-        ? `<p class="statnote"><b>Your average</b> is the mean of
-             ${esc(BT.util.pluralize(rated, 'rating'))} out of ten. Unrated books are absent from
-             it, not counted as zero.</p>`
-        : `<p class="statnote"><b>Your average</b> has nothing to average yet — no book has been
-             rated. It will stay blank rather than showing a zero, because an unrated shelf is not
-             a badly-rated one.</p>`}
+      ${rated ? '' : `<p class="statnote">No book has been rated yet.</p>`}
 
       ${noFinishDate > 0
         ? `<p class="statfoot">${esc(BT.util.pluralize(noFinishDate, 'finished book'))} has no date
              attached to finishing it, so ${noFinishDate === 1 ? 'it is' : 'they are'} counted on
              the shelf but not in a year.</p>`
-        : ''}
-
-      <p class="statnote"><b>Genre</b> counts each book once, under the first bucket it is filed
-      in — the same bucket the index tree counts it under, so the two always add up to the same
-      library. A book matching three genres is still one book.</p>
-
-      <p class="statfoot">Everything on this screen is computed in this browser from your own
-      records. Nothing here is sent anywhere, and no figure is estimated to fill a gap.</p>`;
+        : ''}`;
   }
 
   /* ── Primitives ────────────────────────────────────────────────────────

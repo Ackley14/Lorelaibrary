@@ -175,21 +175,22 @@
     <div class="scroll" id="viewScroll">
       <div id="view" tabindex="-1"></div>
 
+      <!-- ATTRIBUTION, AND NOTHING ELSE. This block used to carry three
+           sentences explaining the app's own architecture — which source was
+           primary, why the other one needed a key, where corrections belonged.
+           Two of the three went stale the moment Google Books became the
+           primary source, which is what explainer microcopy always eventually
+           does: it is a second copy of a decision, kept somewhere nobody
+           updates. The decision lives in DECISIONS.md and in the module
+           headers; this is the credit the two catalogues are owed. -->
       <footer class="colophon">
         <p>
-          Catalogue data and cover images from
+          Catalogue data and covers from
+          <a href="https://books.google.com/" target="_blank" rel="noopener">Google Books</a>
+          and
           <a href="https://openlibrary.org/" target="_blank" rel="noopener">Open Library</a>,
           a project of the <a href="https://archive.org/" target="_blank" rel="noopener">Internet Archive</a>.
-          Open Library is free, keyless and openly licensed, which is why it is
-          the primary source here and not a fallback.
-        </p>
-        <p>
-          <a href="https://books.google.com/" target="_blank" rel="noopener">Google Books</a>
-          is optional and only consulted when you supply your own API key —
-          anonymous access to it is closed
-          · Editions and covers are contributed by Open Library's own
-          volunteers, so corrections belong upstream
-          · A personal, non-commercial tool.
+          A personal, non-commercial tool.
         </p>
         <p id="footMeta" class="mono"></p>
       </footer>
