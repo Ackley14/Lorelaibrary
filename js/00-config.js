@@ -508,6 +508,35 @@ BT.SWEEP = {
   hiddenMsBeforeRecheck: 30 * 60 * 1000,
 };
 
+/* ── The work→editions bridge ─────────────────────────────────────────────
+   Google is the primary catalogue now and it has NO WORK CONCEPT: no editions
+   endpoint, no work id, no `related:` — a volume carries its own ISBNs and
+   nothing else. Verified. So a book added from Google arrives with nothing for
+   "Specify edition" or "all known ISBNs for this book" to stand on, and the
+   only way back into that graph is one Open Library lookup on an ISBN
+   (`/isbn/{isbn13}.json` → `works[0].key`). Open Library's ISBN coverage is far
+   better than its search, so arriving with an exact code usually works — but
+   not for a brand-new release, which is precisely where Google is strongest and
+   Open Library has nothing catalogued yet.
+
+   These two numbers pace the RETRY of that lookup, and both exist because a
+   miss is not cached: 05-net stores successful payloads only, so a 404 on an
+   uncatalogued ISBN costs a real request every single time it is asked.
+
+   `retryEveryMs` is the floor between two automatic attempts on one book. It is
+   the work TTL rather than something shorter because the thing being waited on
+   is a volunteer cataloguing a book, which happens on the scale of weeks. The
+   reader is never held to it — the picker's own retry is `force`.
+
+   `giveUpAfterMs` is when a book stops riding its own refresh tier for this and
+   drops to the half-yearly poke. NOT "never again": Open Library genuinely does
+   catalogue books years late, and two requests a year is not churn. What it
+   ends is the weekly one. */
+BT.EDITION_GRAPH = {
+  retryEveryMs: 7 * DAY,
+  giveUpAfterMs: 90 * DAY,
+};
+
 /* ── Genre bucketing ──────────────────────────────────────────────────────
    Twelve buckets, matched in order — FIRST rule that hits wins, so the specific
    buckets must precede the general ones. This ordering is not cosmetic:

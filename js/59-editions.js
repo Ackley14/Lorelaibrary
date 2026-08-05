@@ -104,6 +104,13 @@ BT.editions = (function () {
   let hasMore = false;
   let busy = false;
   let failure = null;
+  /* Null while there is a work to list. Otherwise { state, err } — the reason
+     this book has no edition list, held as STATE rather than painted once,
+     because the row box and the footer are both rewritten on every filter
+     keystroke. Painting the empty state directly meant one keypress replaced
+     "No edition list available yet" with the ordinary "No editions listed" and
+     threw the retry button away with the footer. */
+  let noGraph = null;
   let needle = '';
   let picking = false;    // a pin is in flight; nothing else may write the item
 
@@ -324,6 +331,13 @@ BT.editions = (function () {
       box.innerHTML = `<div class="editions-empty">${
         busy ? 'Fetching editions…'
         : needle ? `Nothing fetched so far matches <b>${esc(needle)}</b>.`
+        /* No work id at all is a different sentence from an empty list, and
+           conflating them tells a reader whose book simply is not catalogued
+           yet that it has no printings. See renderNoWork. */
+        : noGraph ? `${noGraph.err ? esc(noGraph.err)
+            : noGraph.state === 'unavailable'
+              ? 'No edition list available for this book.'
+              : 'No edition list available yet.'}<br>Scan the barcode on your copy to pin it.`
         : 'No editions listed. Scan the barcode on your copy to pin it.'
       }</div>`;
       domFullCount = -1;
@@ -357,6 +371,10 @@ BT.editions = (function () {
   function renderCount() {
     const el = root && root.querySelector('#edCount');
     if (!el) return;
+    /* "0/0" beside "No edition list available yet" reads as a list that came
+       back empty, which is a different and wronger claim than the sentence
+       under it. There is no list to count, so nothing is counted. */
+    if (noGraph && !rows.length) { el.textContent = ''; return; }
     const shown = needle ? visibleRows().length : rows.length;
     el.textContent = needle
       ? `${shown} matching · ${rows.length}/${total || rows.length} fetched`
@@ -376,6 +394,16 @@ BT.editions = (function () {
     const write = html => { foot.innerHTML = html; foot.style.display = html ? '' : 'none'; };
 
     if (busy) { write('<span>Fetching editions…</span>'); return; }
+
+    /* An affordance, not an explanation. The reader pressed a button and got
+       nothing; "Look again" is the only thing they can usefully do about it,
+       and it is a real retry — 48-sync's `force` skips the once-a-week floor
+       that paces the automatic one, because that floor exists to be polite to
+       Open Library on a sweeper's behalf, not to make somebody wait. */
+    if (noGraph && !rows.length) {
+      write('<button class="btn btn--sm" type="button" data-act="regraph">Look again</button>');
+      return;
+    }
 
     if (failure) {
       write(`<span style="color:var(--bt-coral-text)">${esc(failure)}</span>`
@@ -624,6 +652,13 @@ BT.editions = (function () {
         loadPage();
         return;
       }
+      /* A step further back than `retry`: that one re-requests a page of a work
+         we have, this one asks whether the work exists at all. */
+      if (e.target.closest('[data-act="regraph"]')) {
+        failure = null;
+        retryGraph();
+        return;
+      }
       const btn = e.target.closest('[data-pick]');
       if (btn) { pick(+btn.dataset.pick); return; }
       /* Backdrop dismissal, gated on where the PRESS started. Without that, a
@@ -723,16 +758,59 @@ BT.editions = (function () {
      record: a book added from a Google-only result has a volume id and no
      OLID, because Google has no work graph and Open Library has not catalogued
      next spring's books. The empty state names the way out rather than the
-     cause; the cause is in this comment, where it belongs. */
-  function renderNoWork() {
-    const box = root && root.querySelector('#edRows');
-    if (box) {
-      box.innerHTML = '<div class="editions-empty">No printings listed for this book.'
-        + ' Scan the barcode on your copy to pin it.</div>';
+     cause; the cause is in this comment, where it belongs.
+
+     ── NOTHING IS FABRICATED HERE, AND THAT IS THE DESIGN ──────────────────
+     The obvious way to fill this box is a title+author search against Open
+     Library, taking whatever work comes back as "the" work. It is rejected
+     outright. Book titles collide constantly — every catalogue holds a dozen
+     unrelated *Twilight*s — so that list would sometimes be another book's
+     printings, presented indistinguishably from the real thing, and the reader
+     would only find out AFTER pinning the wrong one: the wrong ISBN in the
+     `isbn13:` namespace, the wrong publisher and extent on the record, and a
+     scan of their actual copy then offering to add a duplicate. An empty list
+     costs one feature and says so. A wrong list corrupts the record silently.
+
+     THREE STATES, THREE SENTENCES, and each one is true of a different thing:
+       'unresolved'   asked, no answer yet. Say "yet" and offer the retry.
+       'unavailable'  asked for months. Drop the "yet"; keep the retry, because
+                      Open Library does catalogue books late.
+       failed         the request itself did not complete. 05-net has already
+                      written a human sentence for offline, maintenance and
+                      timeout, so it is shown as-is. */
+  function renderNoWork(state, err) {
+    noGraph = { state: state || 'unresolved', err: err || '' };
+    render();
+  }
+
+  /* The reader pressing "Look again". Separate from the `retry` branch above,
+     which re-requests an editions PAGE for a work we already have — this one is
+     a step further back and asks whether the work exists at all. */
+  async function retryGraph() {
+    if (busy || !root || !uid) return;
+    const target = uid;
+    busy = true;
+    render();
+
+    let resolved = '';
+    let err = '';
+    try {
+      resolved = await resolveWorkOlid(target, item, true);
+    } catch (e) {
+      console.warn('[editions] work lookup failed', e);
+      /* 05-net has already written a human sentence for every kind it
+         classifies — offline, maintenance, timeout — so it is shown as-is
+         rather than paraphrased into something vaguer. */
+      err = (e && e.message) || 'Could not reach Open Library.';
     }
-    const foot = root && root.querySelector('#edFoot');
-    if (foot) { foot.innerHTML = ''; foot.style.display = 'none'; }
-    renderCount();
+    busy = false;
+    if (!root || uid !== target) return;      // closed, or reopened on another book
+
+    if (!resolved) { renderNoWork(graphState(), err); return; }
+    /* Resolved on demand: the list is drawn now, not after some later sweep. */
+    noGraph = null;
+    workOlid = resolved;
+    await loadPage();
   }
 
   /* The third identity case, and the reason it needs its own request.
@@ -743,18 +821,49 @@ BT.editions = (function () {
      reads. What is left is a record that came through /api/books, which
      carries NO work key at all: that is the documented cost of the scan hot
      path. One /isbn/ lookup recovers it, and only /isbn/ can, because it is
-     the only shape with a `works[]` array on it. */
-  async function workOlidFromIsbn(it) {
+     the only shape with a `works[]` array on it.
+
+     THROUGH 48-sync, NOT STRAIGHT AT THE ADAPTER, and the difference is that
+     the answer is KEPT. This overlay used to call BT.openlibrary.workOlidForIsbns
+     itself and hold the OLID in a module variable that close() then wiped — so
+     a Google-added book paid for the same lookup on every single open, and the
+     record it belonged to never learned its own work id. Routing it through
+     BT.sync.resolveEditionGraph writes `ids.olWork` onto the item (via BT.repo,
+     so the `olwork:` index row is claimed and last write's stale rows are
+     retracted), which is also what makes the sweep stop retrying a book the
+     reader has already resolved by hand.
+
+     `force` because this is a person waiting, not a background job: it skips
+     the once-a-week floor that paces the automatic retry. Feature-detected and
+     falling back to the adapter, the same seam every other cross-module call in
+     this app uses — an M-ordering where 48-sync failed to parse must cost the
+     persistence, not the picker. */
+  async function resolveWorkOlid(targetUid, it, force) {
+    const signal = ac ? ac.signal : undefined;
+    if (BT.sync && typeof BT.sync.resolveEditionGraph === 'function') {
+      const fresh = await BT.sync.resolveEditionGraph(targetUid, { force, signal });
+      if (fresh) {
+        if (uid === targetUid) item = fresh;
+        return BT.util.olid((fresh.ids || {}).olWork || (fresh.ids || {}).workOlid || '');
+      }
+      return '';
+    }
     const ol = BT.openlibrary;
     if (!ol || typeof ol.workOlidForIsbns !== 'function') return '';
-    /* Pinned first — that is the copy the reader actually holds and the ISBN
-       most likely to resolve — then the candidates a Google record supplied. */
     const isbns = [].concat(
       (it.ids && it.ids.isbn13) ? [it.ids.isbn13] : [],
       it.isbnsPinned || [],
       it.isbnsCandidate || []);
     if (!isbns.length) return '';
-    return ol.workOlidForIsbns(isbns, { signal: ac ? ac.signal : undefined });
+    return ol.workOlidForIsbns(isbns, { signal });
+  }
+
+  /* 'unresolved' | 'unavailable', straight off the record. 38-normalize owns
+     the question so the picker and the sweep can never disagree about which
+     sentence this book has earned. */
+  function graphState() {
+    if (!BT.normalize || typeof BT.normalize.editionGraphOf !== 'function') return 'unresolved';
+    return BT.normalize.editionGraphOf(item || {});
   }
 
   async function open(targetUid) {
@@ -772,9 +881,22 @@ BT.editions = (function () {
     mount();
 
     workOlid = BT.util.olid((it.ids || {}).olWork || (it.ids || {}).workOlid || '');
-    if (!workOlid) workOlid = await workOlidFromIsbn(it);
+    /* ON DEMAND, EVERY TIME, because the reader must never be left waiting on
+       an invisible background job for a button they just pressed. The sweep may
+       get here first and usually does; when it has not, or when its attempt
+       came back empty, this asks again with `force` and draws the list at once
+       if it resolves. */
+    if (!workOlid) {
+      try {
+        workOlid = await resolveWorkOlid(targetUid, it, true);
+      } catch (e) {
+        console.warn('[editions] work lookup failed', e);
+        if (root) renderNoWork(graphState(), (e && e.message) || 'Could not reach Open Library.');
+        return;
+      }
+    }
     if (!root) return;             // closed while that was in the air
-    if (!workOlid) { renderNoWork(); return; }
+    if (!workOlid) { renderNoWork(graphState()); return; }
 
     await loadPage();
   }
@@ -796,6 +918,7 @@ BT.editions = (function () {
     hasMore = false;
     busy = false;
     failure = null;
+    noGraph = null;
     needle = '';
     picking = false;
     pressedBackdrop = false;

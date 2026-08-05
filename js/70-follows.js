@@ -60,13 +60,12 @@
 
    2. NEITHER CATALOGUE'S AUTHOR QUERY CAN BE TRUSTED BLINDLY.
 
-      Verified live, all three on the same afternoon:
+      Verified live:
 
           openlibrary  search.json?author=gwendolyn+kiste
                        -> Occultation, Swift to Chase, The Beautiful Thing
                           That Awaits Us All          — LAIRD BARRON'S books
 
-          google       inauthor:"Stephen King"        -> ZERO results
           google       inauthor:Kiste                 -> 300 books about
                                                          Queen Victoria
 
@@ -76,11 +75,29 @@
       Open Library HAS an id, so we use it and never a name — `author=OLID` is
       exact. Google has no id, so the query is only a fishing net and the
       VERIFICATION happens on the way back: every volume is kept only if its
-      own `volumeInfo.authors` array contains the followed author's name. A
-      plain quoted name is the net that actually works (`inauthor:` is the one
-      that returns zero for Stephen King), and the returned field is the truth.
-      Measured: `q="Brandon Sanderson"` returned 20 volumes, 20 of which listed
-      him. `q="Stephen King"` returned 20, of which 13 did.
+      own `volumeInfo.authors` array contains the followed author's name.
+
+      WHICH NET, THOUGH, IS NOT A FREE CHOICE. Credited volumes out of the 20
+      Google returns, three identical trials each:
+
+          author              plain "Name"    inauthor:"Name"
+          ──────────────────  ────────────    ───────────────
+          Martha Wells              1               19
+          Stephen King             13               20
+          Gwendolyn Kiste           7               16
+          Brandon Sanderson        20               20
+
+      A plain quoted name is a FULL-TEXT query — it matches books that merely
+      mention the person, which is why it finds one Martha Wells book in
+      twenty. `inauthor:` with the QUOTES is the net that works; the bare
+      surname is the Queen Victoria trap above. See askGoogle().
+
+      AND AN EARLIER NOTE HERE WAS WRONG: `inauthor:"Stephen King"` was
+      recorded as returning zero. It returns 20 of 20. The endpoint answers
+      bare 503s often enough to counterfeit an empty catalogue — 13 of 37
+      probe requests needed a retry — so no property of this API may be
+      concluded from a single request, and a failed request may never be read
+      as an empty one.
 
    3. `orderBy=newest` DOES NOT SORT BY PUBLICATION DATE — it sorts by when
       Google added the record (observed publication years in returned order:
@@ -92,22 +109,22 @@
       order, because a recently-added record is where an announced title lives.
       That call belongs to the adapter and so does the decision.
 
-      WHAT BELONGS HERE IS DEPTH. `authorWorks` asks each arm once, at offset 0,
-      which is right for a lookup and measurably not enough for a follow:
+      WHAT BELONGS HERE IS REACH. `authorWorks` asks its two arms once, at
+      offset 0, on the plain-name net — right for a lookup, and measurably not
+      enough for a follow. Merged works stored per follow:
 
-          author              adapter default   + two relevance pages
-          ──────────────────  ────────────────   ─────────────────────
-          Brandon Sanderson   20 volumes         39   — and the extra pages
-                                                        held his only
-                                                        forthcoming printing
-          Stephen King        13 volumes         22
-          Gwendolyn Kiste      7 volumes         15
+          author              adapter alone   + the inauthor arm
+          ──────────────────  ─────────────   ──────────────────
+          Martha Wells         1 work          20   — including Platform Decay
+          Brandon Sanderson   20 works         38
+          Stephen King        13 works         22
+          Gwendolyn Kiste      7 works         14
 
-      So askGoogle() calls the adapter and then pages it twice more through the
-      adapter's own `search` + `creditsAuthor` + `groupPrintings`. The adapter
-      keeps owning what a Google author query IS; this file owns only how much
-      of one author a FOLLOW is worth, which is a budget question about a
-      feature the adapter knows nothing about.
+      So askGoogle() calls the adapter and then runs two more pages of its own
+      through the adapter's `search` + `creditsAuthor` + `groupPrintings`. The
+      adapter keeps owning what a Google request IS; this file owns which net
+      a FOLLOW casts and how wide, which is a recall-and-budget question about
+      a feature the adapter knows nothing about.
 
    4. THE FIRST SIGHTING OF A FOLLOW EMITS NOTHING, and so does the first
       sighting after this file changed shape. See `cold` and `migrating` in
@@ -121,7 +138,8 @@
    BT.NET_POLICY caps this app at 400. So per follow, per refresh:
 
        1  Open Library author page          (skipped with no OLID)
-       3  Google slices                     (skipped with no key or no gbName)
+       4  Google slices                     (skipped with no key or no gbName)
+                                           2 from the adapter, 2 author-field
        ≤6 targeted Google date lookups      (only for undecidable years, and
                                              the answer is STORED, so this is
                                              a one-off per work, not per pass)
@@ -142,8 +160,17 @@ BT.follows = (function () {
 
   /* The stored shape's version. Bumped when the meaning of `works` or the
      diff baseline changes, and read by refreshOne() to decide whether the next
-     check is a re-baseline or a real diff. See MIGRATION below. */
-  const SCHEMA = 2;
+     check is a re-baseline or a real diff. See MIGRATION below.
+
+     3 — the author-field arm in askGoogle(). WIDENING THE NET IS A BASELINE
+     CHANGE even though the record shape did not move an inch: a roster last
+     checked on the plain-name query holds a baseline of what THAT query could
+     see, which for Martha Wells was one work out of twenty. Diffing the
+     thirty-three the new arm returns against it would announce thirty-two
+     backlist titles as brand new, for every follow at once — the exact flood
+     rule 4 exists to prevent. The bump makes the first check after this change
+     re-baseline in silence. */
+  const SCHEMA = 3;
 
   /* How long a stored catalogue is treated as current. BT.SWEEP.cooldownMs is
      REUSED rather than a fresh number invented — it is already this app's
@@ -156,16 +183,17 @@ BT.follows = (function () {
      size of the answer one request returns. */
   const OL_PAGE = BT.LIMITS.authorWorks;
 
-  /* Google's `maxResults` maxes at 40 and in practice hands back 20 for a
-     quoted-name query (measured repeatedly, across all three test authors), so
-     the offsets step by 20 rather than by the requested page size. Three pages
-     of relevance is where the marginal page stopped finding author-matched
-     volumes — see rule 3 for what was tried instead and why it was worse. */
+  /* Google's `maxResults` maxes at 40 and in practice hands back 20 for one
+     author query however large the parameter is (measured repeatedly, across
+     all four test authors), so the offsets step by 20 rather than by the
+     requested page size. */
   const GB_PER_PAGE = (BT.GB && BT.GB.MAX_RESULTS) || 40;
-  /* Google hands back 20 for a quoted-name query however large `maxResults`
-     is (measured, repeatedly, on all three test authors), so the offsets step
-     by 20 rather than by the requested page size. */
-  const GB_EXTRA_OFFSETS = [20, 40];
+  /* OFFSET 0 IS INCLUDED, which looks like a duplicate of the adapter's first
+     arm and is not: this arm asks a DIFFERENT QUESTION — the author field
+     rather than the full text — and its first page is where the answer lives.
+     See the measured table in askGoogle(). Two requests either way, so the
+     per-follow Google budget is unchanged. */
+  const GB_EXTRA_OFFSETS = [0, 20];
 
   /* The merged catalogue kept per follow. Larger than one Open Library page
      because it is now the UNION of two, and still bounded because this row
@@ -650,18 +678,59 @@ BT.follows = (function () {
        Failures here are SWALLOWED rather than returned. Arm one already
        answered, so the author has a real list; a page-three timeout should
        shorten it, not turn a good answer into "could not check". */
+    /* ── THE AUTHOR-FIELD ARM, AND WHY IT IS NOT THE ADAPTER'S PLAIN NAME ──
+       `authorWorks` nets on a plain quoted name, which is a FULL-TEXT query —
+       it matches every book that so much as MENTIONS the person. Measured
+       live, three identical trials each, counting the volumes whose own
+       `authors` array credits the followed writer out of the 20 Google
+       returns:
+
+           author              plain "Name"    inauthor:"Name"
+           ──────────────────  ────────────    ───────────────
+           Martha Wells              1               19
+           Stephen King             13               20
+           Gwendolyn Kiste           7               16
+           Brandon Sanderson        20               20
+
+       One credited volume out of twenty is the whole bug: *Platform Decay*,
+       which Google dates 2026-05-05 and which is the FIRST hit for
+       `inauthor:"Martha Wells"`, never reached this file at all, so the row
+       fell back to Open Library's bare '2026' and rendered as a year.
+
+       THE QUOTES ARE LOAD-BEARING and a bare surname is the trap:
+       `inauthor:Kiste` credits 4 of 20 and pads the rest with books about
+       Queen Victoria, while `inauthor:"Gwendolyn Kiste"` credits 16.
+
+       `inauthor:"Stephen King"` is recorded in this repo as returning ZERO.
+       It does not — it returns 20 of 20, three trials running. That endpoint
+       sheds load with bare 503s often enough to counterfeit an empty
+       catalogue: 13 of 37 probe requests needed a retry. No measurement of
+       this API taken from a single request can be trusted, and nothing here
+       may read a failed request as an empty one — which is what `checked` is
+       for.
+
+       This is an ARM, not a replacement. The adapter still owns the URL
+       shape, the credit check, the language filter and the printing grouping;
+       its own two arms still run and still contribute. */
     const extra = [];
+    const extraVolumes = [];
     if (typeof gb.search === 'function' && typeof gb.creditsAuthor === 'function'
         && typeof gb.groupPrintings === 'function' && typeof gb.phrase === 'function') {
+      const byAuthorField = 'inauthor:' + gb.phrase(name);
       for (const offset of GB_EXTRA_OFFSETS) {
         try {
-          const page = await gb.search(gb.phrase(name), {
+          const page = await gb.search(byAuthorField, {
             rich: true, limit: GB_PER_PAGE, offset, signal: opts.signal, fresh: true,
           });
           if (!page || !page.checked) break;
           const credited = (page.items || []).filter(v => gb.creditsAuthor(v, name));
           if (!credited.length) continue;
           for (const w of gb.groupPrintings(credited)) extra.push(w);
+          /* Kept for the byline count below. On the authors this arm exists for
+             these ARE the verified volumes — the adapter's plain-name arms
+             returned one for Martha Wells — so counting names without them
+             would pick the follow's stored spelling off a single record. */
+          for (const v of credited) extraVolumes.push(v);
         } catch (e) {
           if (e && (e.kind === 'abort' || e.name === 'AbortError')) throw e;
           console.warn('[follows] a Google page failed for', name, e && e.message);
@@ -686,7 +755,7 @@ BT.follows = (function () {
     /* The exact strings Google printed for this person, counted off the VERIFIED
        volumes rather than off the grouped works, because a work carries only the
        representative printing's byline. */
-    for (const vol of (res.volumes || [])) {
+    for (const vol of [].concat(res.volumes || [], extraVolumes)) {
       for (const credited of (((vol && vol.volumeInfo) || {}).authors || [])) {
         if (!creditsThisAuthor(credited, name)) continue;
         names.set(credited, (names.get(credited) || 0) + 1);

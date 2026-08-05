@@ -671,8 +671,30 @@ BT.openlibrary = (function () {
 
      Failures are swallowed and answer '': the caller already has a usable
      Google record and a missing work id costs a lazier editions picker, not a
-     broken screen. */
-  async function workOlidForIsbns(isbns, opts) {
+     broken screen.
+
+     ── "NO" AND "COULDN'T ASK" ARE DIFFERENT ANSWERS ─────────────────────────
+     `workGraphFor` is the same walk reporting BOTH, because the caller that
+     retries has to tell them apart and the bare '' cannot.
+
+       { olid: 'OL…W', failed: false }  resolved.
+       { olid: '',     failed: false }  Open Library ANSWERED and holds no such
+                                        ISBN. Evidence about the book. Ordinary
+                                        for a title published next spring.
+       { olid: '',     failed: true }   offline, 503, aborted, circuit open.
+                                        Evidence about the NETWORK and about
+                                        nothing else.
+
+     48-sync counts only the middle one toward giving up. Counting the third
+     would let three sweeps on a train mark a perfectly well-catalogued book
+     "no edition list available", permanently as far as the reader can tell,
+     and the app would look broken exactly where it had merely been offline.
+
+     A transport failure stops the walk rather than trying the next ISBN: it is
+     a condition of the SOURCE, not of the code, so the second and third
+     requests can only fail the same way — and this runs on a bucket that grants
+     about one request a second. */
+  async function workGraphFor(isbns, opts) {
     const list = (Array.isArray(isbns) ? isbns : [isbns]).map(cleanIsbn).filter(Boolean).slice(0, 3);
     for (const isbn of list) {
       let ed = null;
@@ -680,14 +702,18 @@ BT.openlibrary = (function () {
         ed = await editionByIsbn(isbn, opts);
       } catch (e) {
         console.warn('[openlibrary] could not resolve a work from', isbn, e && e.message);
-        return '';
+        return { olid: '', failed: true };
       }
       const w = ed && Array.isArray(ed.works) ? ed.works[0] : null;
       const id = BT.util.olid(w && w.key);
-      if (id) return id;
+      if (id) return { olid: id, failed: false };
     }
-    return '';
+    /* An empty candidate list is not a verdict on the book — there was nothing
+       to ask with — so it reports the same "couldn't ask" as an outage. */
+    return { olid: '', failed: !list.length };
   }
+
+  const workOlidForIsbns = async (isbns, opts) => (await workGraphFor(isbns, opts)).olid;
 
   /* ══ COVERS ═════════════════════════════════════════════════════════════
      TWO verified traps, both of which produce a UI that looks broken in a way
@@ -1077,6 +1103,10 @@ BT.openlibrary = (function () {
        had an OLID, and because 61-view-search uses it to give a Google-only
        add a work id at the moment it is added rather than a week later. */
     workOlidForIsbns,
+    /* The same walk, reporting whether the source answered. 48-sync needs that
+       distinction to decide whether an empty result is evidence about the book
+       or evidence about the train tunnel. */
+    workGraphFor,
     coverUrl, coverUrlForIsbn,
     verifyReachable,
     hydrate, lookupUid,

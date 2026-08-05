@@ -65,9 +65,55 @@ BT.sync = (function () {
      hour cycle for no possible gain. So the fast tiers are available only to
      records that actually state a month or a day; a bare year is judged on the
      year alone. */
+
+  /* Is the ISBN bridge the ONLY thing a refresh could do for this record?
+
+     `BT.openlibrary.hydrate` reads exactly these five ids, and a record holding
+     none of them has no work to fetch, no edition to fetch and no ISBN to ask
+     about — which is the ordinary shape of a book added from Google, because
+     Google has no work id and an OPEN record does not claim the volume's ISBN
+     (it is a candidate, not an ownership claim — see 38-normalize's
+     `pinnedIsbns`). The one request that can help is the bridge.
+
+     A SCANNED BOOK IS NEVER THIS SHAPE and that distinction is the whole reason
+     the bridge is needed so rarely: a scan starts from a barcode, so `ids.isbn13`
+     is populated before the record exists and hydrateClosed walks
+     edition → work on its own. Nothing below ever runs for one. */
+  function bridgeOnly(item) {
+    const ids = (item && item.ids) || {};
+    return !(ids.olWork || ids.workOlid || ids.olEdition || ids.editionOlid || ids.isbn13);
+  }
+
   function tierOf(item) {
     const t = item.tracking || {};
     if (t.mutedFlag) return 'T5';
+
+    /* ── THE BRIDGE RUNG, AND IT IS DELIBERATELY SLOW ──────────────────────
+       This is a statement about what CAN be asked, not about how interesting
+       the book is, so it outranks every rung below including `reading`.
+
+       A record with no Open Library id has exactly one useful request: the ISBN
+       bridge. Tiering it by its street date would put a forthcoming title in T0
+       and re-ask the same uncatalogued ISBN every twelve hours — and 05-net
+       caches successful payloads only, so each of those is a real 404 against a
+       source that grants about one request a second and asks not to be used for
+       high-traffic work.
+
+       Nothing is lost by slowing it down, and that is the part worth stating:
+       the fast tiers exist to catch a DATE moving, this sweeper never spends the
+       Google budget (see the header), and Google is the only source that holds a
+       date for a book Open Library has not catalogued. A T0 slot on such a book
+       could only ever re-ask Open Library about a book it does not have.
+
+       WITHOUT THIS RUNG THESE RECORDS ATE THE SWEEP. `urgency` divides age by
+       tier ttl and a record that never refreshes keeps `lastRefreshAt: 0`, so a
+       handful of Google-only books sorted above everything else on every run,
+       took the whole 40-book budget, and refreshItem returned null for each one
+       without writing anything — so they were still first next time. Forty
+       slots, no requests, no progress, indefinitely. */
+    if (bridgeOnly(item)) {
+      return BT.normalize.editionGraphOf(item) === 'unavailable' ? 'T4' : 'T3';
+    }
 
     const rel = item.release || {};
     const status = (item.user && item.user.status) || '';
@@ -262,7 +308,21 @@ BT.sync = (function () {
     opts = opts || {};
     const ol = BT.openlibrary;
     if (!ol || typeof ol.hydrate !== 'function') return null;
-    if (!item || !item.ids || !(item.ids.olWork || item.ids.olEdition || item.ids.isbn13)) return null;
+    if (!item || !item.ids) return null;
+
+    /* THIS ITEM'S SLOT IS SPENT ON THE BRIDGE INSTEAD. There is no work record
+       to fetch yet — see bridgeOnly — so the useful request is the one that
+       finds out whether there is a work record at all.
+
+       Returns null rather than the item, and that is not laziness: nothing a
+       reader can see has changed, so there is nothing for 45-alerts to diff and
+       handing it a record would only risk announcing an id as news. If the
+       bridge resolved, the NEXT sweep hydrates the work properly and the alerts
+       pass runs then, on real content. */
+    if (bridgeOnly(item)) {
+      await resolveEditionGraph(item.uid, { signal: opts.signal });
+      return null;
+    }
 
     /* `editions: false` — the candidate-ISBN list is a nicety filled on add and
         when a book is opened, and asking for it here would turn a forty-book
@@ -304,6 +364,166 @@ BT.sync = (function () {
     BT.repo.dfObserve(merged.uid, Object.keys((merged.rec && merged.rec.terms) || {}));
     await BT.repo.putItemQuiet(merged);
     return merged;
+  }
+
+  /* ══ THE EDITION GRAPH ═══════════════════════════════════════════════════
+     -> the item, whatever the outcome, so a caller can read
+        BT.normalize.editionGraphOf() off it. Null only if the book is gone.
+
+     ONE OPEN LIBRARY ISBN LOOKUP, spent on a Google-sourced record to find the
+     work id that "Specify edition" and "every known ISBN for this book" are
+     built on. Google exposes no editions API — `/editions` 404s, `related:`
+     returns nothing, a volume carries only its own ISBNs — so this is the
+     entire supply of that graph, and it is why Open Library is retained.
+
+     THREE CALLERS, ONE IMPLEMENTATION, and they must stay one:
+
+       50-ui-core.addItem   once, at add time. Usually enough, and cheap.
+       the sweep, above     the retry, on the item's own tier. THERE IS NO NEW
+                            QUEUE, deliberately: a second scheduler would double
+                            the rate-limit pressure on a source that grants
+                            about one request a second and asks not to be used
+                            for high-traffic work, and each half would believe
+                            it was the only spender. refreshDueAt, the tier
+                            table and the urgency sort already exist and already
+                            do this job.
+       59-editions          `force`, when the reader opens the picker. Nobody
+                            should have to wait on an invisible background job
+                            for a button they just pressed.
+
+     NOTHING HERE PINS ANYTHING. It writes `ids.olWork` and meta, and never
+     touches `scope`, `isbnsPinned` or `ids.isbn13` — so the record stays open,
+     12-repo keeps writing its ISBNs to `isbncand:` and not one row lands in the
+     `isbn13:` namespace. Resolving where a book sits in the catalogue is not a
+     claim to own a copy of it, and conflating those two silently breaks the
+     scanner (see the id-namespace note in 12-repo.js). The write goes through
+     BT.repo so the new `olwork:` row is claimed and the previous write's
+     breadcrumb retracts anything stale — this file never touches BT.db. */
+  function bridgeIsbns(item) {
+    /* Pinned first — that is the copy the reader actually holds, so it is both
+       the most likely to be catalogued and the most specific answer. Then the
+       record's own code, then the candidates Google supplied. workGraphFor caps
+       the walk at three. */
+    return [].concat(
+      item.isbnsPinned || [],
+      (item.ids && item.ids.isbn13) ? [item.ids.isbn13] : [],
+      item.isbnsCandidate || []);
+  }
+
+  async function resolveEditionGraph(uid, opts) {
+    opts = opts || {};
+    const ol = BT.openlibrary;
+    if (!ol || typeof ol.workGraphFor !== 'function') return null;
+
+    const item = await BT.repo.getItem(uid);
+    if (!item) return null;
+    if (BT.normalize.editionGraphOf(item) === 'resolved') return item;
+
+    /* ALREADY REACHABLE ANOTHER WAY, so the bridge would be a second request
+       buying what the first one already gets. A SCANNED book is this case and
+       is the reason the guard is here: it starts from a barcode, so `ids.isbn13`
+       exists before the record does and BT.openlibrary.hydrateClosed walks
+       edition → work on its own. Nothing about scanning changes, and it must
+       not — that path is the app's hot path and it was never broken.
+
+       `force` overrides, for the one shape that slips through: a record built
+       from /api/books, which carries author names and a cover inline and NO
+       work key at all. The picker's "Look again" is the only thing that
+       recovers it, and the reader is standing there. */
+    if (!opts.force && !bridgeOnly(item)) return item;
+
+    const cfg = BT.EDITION_GRAPH;
+    const meta = item.meta || (item.meta = {});
+    const now = Date.now();
+
+    /* The floor between two AUTOMATIC attempts. What is being waited on is a
+       volunteer cataloguing a book, which happens on the scale of weeks, and a
+       miss is not cached — 05-net stores successful payloads only, so asking
+       again is a real 404 every time. `force` is the reader asking, and the
+       reader is never held to it.
+
+       The clock is still stamped, because the sweep DID consider this record
+       and must not hand it the same slot again in four hours. */
+    if (!opts.force && meta.editionGraphAt && now - meta.editionGraphAt < cfg.retryEveryMs) {
+      return settle(item, { spent: true });
+    }
+
+    const isbns = bridgeIsbns(item);
+    const res = await ol.workGraphFor(isbns, { signal: opts.signal });
+
+    /* Cancelled mid-flight — a closed picker, a sweep the user stopped. Writing
+       now would record a verdict nobody waited for. */
+    if (opts.signal && opts.signal.aborted) return item;
+
+    /* RE-READ BEFORE WRITING, the rule this file already states at length on
+       refreshItem: an Open Library round trip is one to three seconds and
+       everything the reader did in that window is committed and missing from
+       the copy in hand. A missing row ends the write — the add toast's own Undo
+       is a delete, and it sits on screen for seven seconds. */
+    const current = await BT.repo.getItem(uid);
+    if (!current) return null;
+    const cm = current.meta || (current.meta = {});
+    current.tracking = current.tracking || {};
+
+    if (res.olid) {
+      current.ids = current.ids || {};
+      current.ids.olWork = res.olid;
+      delete cm.editionGraph;
+      delete cm.editionGraphTries;
+      delete cm.editionGraphSince;
+      delete cm.editionGraphAt;
+      /* `partial: 1` is now TRUE where it was a guess: an Open Library work
+         record is known to exist and will fill in subjects, description and the
+         editions page that feeds the candidate net. This is the flag
+         50-ui-core's hydrate gate reads, so opening the book fills it in at
+         once rather than a tier from now.
+
+         AND THE REFRESH CLOCK IS RESET, because it is measuring the wrong
+         thing otherwise: `lastRefreshAt` means "this RECORD was refreshed", and
+         the failed attempts below stamped it only to keep the queue honest. The
+         record itself has still never been refreshed — we have just found the
+         address. Leaving those stamps would make the first real hydrate wait a
+         full tier for a request that is finally possible. */
+      cm.partial = 1;
+      cm.detailsFetchedAt = 0;
+      current.tracking.lastRefreshAt = 0;
+      return settle(current, { spent: false });
+    }
+
+    /* COULD NOT ASK — offline, 503, circuit open, or nothing to ask with. That
+       is evidence about the network, not about the book, so it costs no try and
+       leaves no verdict on the record. Counting it would let three sweeps on a
+       train tell the reader a well-catalogued book has no edition list. */
+    if (res.failed) return settle(current, { spent: true });
+
+    /* ASKED, AND OPEN LIBRARY HAS NO SUCH ISBN. Evidence about the book, and
+       entirely ordinary for a title published next spring — which is exactly
+       the shape of record that got here, because a forthcoming book is the one
+       Open Library never has and Google always does. */
+    cm.editionGraphSince = cm.editionGraphSince || now;
+    cm.editionGraphTries = (cm.editionGraphTries || 0) + 1;
+    cm.editionGraphAt = now;
+    /* Aged out, not given up on. 'unavailable' only moves this record from its
+       own tier down to the half-yearly one (see tierOf) — Open Library does
+       catalogue books years after publication, and two requests a year is not
+       churn. What it ends is the weekly one, and it is what lets the picker say
+       "no edition list" instead of "not yet" without lying either way. */
+    if (now - cm.editionGraphSince >= cfg.giveUpAfterMs) cm.editionGraph = 'unavailable';
+    else cm.editionGraph = 'unresolved';
+    return settle(current, { spent: true });
+  }
+
+  /* Write the outcome and reschedule. `spent` marks an attempt that consumed
+     this record's turn — the queue has to move on, or urgency (age / ttl, and
+     age never shrinks) puts the same book back at the top of every sweep for
+     ever. Quiet: this is derived bookkeeping and nobody asked for it, so it
+     must not repaint a list under the reader's thumb or bump `updatedAt`, which
+     means "you changed this". */
+  async function settle(item, o) {
+    if (o && o.spent) item.tracking.lastRefreshAt = Date.now();
+    retier(item);
+    await BT.repo.putItemQuiet(item);
+    return item;
   }
 
   /* Record date drift on the item, so the list can draw "← 243d" and the
@@ -351,5 +571,10 @@ BT.sync = (function () {
 
   return {
     tierOf, retier, urgency, sweep, refreshItem, cancel, isSweeping,
+    /* The Google→Open Library work bridge. Exported because the add path
+       (50-ui-core) and the picker (59-editions) both need it and a second
+       implementation would be a second scheduler spending the same one-request-
+       per-second allowance without either knowing about the other. */
+    resolveEditionGraph,
   };
 })();

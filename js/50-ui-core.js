@@ -1008,6 +1008,34 @@ BT.ui = (function () {
        screen; enrichment is allowed to take as long as Open Library's ~1-3
        requests per second allows, and is never the reason an add feels slow. */
     hydrate(item.uid).catch(e => console.warn('[ui] hydrate failed', e));
+    /* ── THE WORK→EDITIONS BRIDGE, ONE REQUEST, AT ADD TIME ────────────────
+       A book added from a GOOGLE row has no work id, because Google has no
+       work concept at all — no editions endpoint, no `related:`, just the one
+       volume's own ISBNs. So "Specify edition" and "every printing of this
+       book" have nothing to stand on until an Open Library ISBN lookup supplies
+       `works[0].key`. Open Library's ISBN coverage is far better than its
+       search, so arriving with an exact code usually resolves it.
+
+       It cannot ride `hydrate` above, and that is the gap being closed here.
+       61-view-search deliberately clears `meta.partial` on a Google row nothing
+       merged into — correctly, since no Open Library work is known to exist —
+       and hydrate's gate is exactly `!partial && within TTL`, so for these
+       records it returns immediately and no bridge is ever attempted.
+
+       FIRED, NEVER AWAITED, AND NEVER ABLE TO FAIL AN ADD. The book is already
+       written, already on screen, and already fully usable: it tracks progress,
+       counts in stats, joins the sell pile and can be rated and finished. An
+       unresolved graph withholds ONE feature — pinning a printing — and must
+       not cost the record. When it does fail, 48-sync's sweep retries it on the
+       item's own tier and the picker retries on demand; there is no queue here.
+
+       Scanned books never reach this line: a scan starts from a barcode, so
+       `ids.isbn13` exists before the record does and 48-sync's bridge check
+       excludes it. Feature-detected on the same seam `retier` uses above. */
+    if (BT.sync && typeof BT.sync.resolveEditionGraph === 'function') {
+      BT.sync.resolveEditionGraph(item.uid)
+        .catch(e => console.warn('[ui] edition-graph lookup failed', e));
+    }
     return item;
   }
 

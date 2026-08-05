@@ -1533,13 +1533,21 @@ tbody td[data-col="title"] { position: relative; }
    50 at a time, and letting that grow the inspector's own scroll means the
    user loses the title, the cover and the Cancel affordance the moment they
    start hunting. Bounded box, bounded scroll, header stays put. */
+/* Opaque, not `raised`. In dark this box floats over the library grid, and
+   --bt-surface-raised is rgba(255,255,255,.045) — a 4.5% lift meant to sit ON
+   an opaque parent, never to BE one. It read as correct while the picker lived
+   inside the inspector's sheet; the moment it became a free-floating overlay
+   the grid showed straight through it. Glass + blur matches .gate__panel and
+   .sheet, which are the app's other floating surfaces. */
 .editions {
   display: flex; flex-direction: column; min-height: 0;
   border: var(--bt-rule-w) solid var(--bt-line-hairline);
   border-radius: var(--bt-radius);
-  background: var(--bt-surface-raised);
+  background: var(--bt-surface-glass);
+  backdrop-filter: var(--bt-glass-blur); -webkit-backdrop-filter: var(--bt-glass-blur);
   overflow: hidden;
 }
+@supports not (backdrop-filter: blur(2px)) { .editions { background: var(--bt-surface-canvas); } }
 .editions-head {
   flex: 0 0 auto;
   display: flex; align-items: center; gap: var(--bt-space-3);

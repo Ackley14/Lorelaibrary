@@ -745,9 +745,79 @@ BT.normalize = (function () {
     const byId = new Map();
     const key = a => a.olid || a.id || slug(a.name);
     for (const a of arr(existing)) if (a) byId.set(key(a), Object.assign({}, a));
+
+    /* ── ONE PERSON MUST NOT ARRIVE UNDER TWO KEYS ────────────────────────
+       An author who has just been GIVEN an OLID changes key, and a union keyed
+       on identity reads a re-key as a new person unless it is told otherwise.
+
+       The path, verified live on `the hobbit`: a Google-sourced record holds
+       { id: 'john-ronald-reuel-tolkien', olid: '' } — Google has no author id
+       space, so the key is the folded name. Hydrating from the work supplies
+       Open Library's author key, and 20-openlibrary's defendGoogleFields
+       correctly stitches it onto the name Google printed, handing this function
+       { id: 'OL26320A', olid: 'OL26320A' } for the same man. Those two keys
+       cannot collide, so the byline listed John Ronald Reuel Tolkien TWICE,
+       `idx.authorIds` carried both ids, and every author facet, count and
+       Follow button saw one writer as two.
+
+       UNREACHABLE BEFORE THE EDITION-GRAPH BRIDGE, which is why it surfaces
+       now: a Google-only record had no work id, so it was never hydrated from
+       Open Library at all and the stitch never ran. Resolving the graph is
+       precisely what makes that hydrate happen, so without this the bridge
+       would have added one duplicate author per Google-added book.
+
+       The rules are mergeAuthorIdentities' rules, one merge later, because it
+       is the same question asked at search time and the two must not disagree:
+       match on `personKey`, claim each row at most once, and never fold a name
+       that folds to nothing — Open Library's transliterated duplicate rows
+       ('Френк Герберт' beside 'Frank Herbert') have an empty key and must stay
+       separate rather than silently absorb somebody.
+
+       ONLY AN OLID-LESS ROW IS ADOPTABLE. A row that already carries a
+       different OLID is a different person and is left alone; Open Library
+       says so and it is the only side with an id space to say it with. */
+    const adoptable = new Map();
+    for (const [k, a] of byId) {
+      if (a.olid) continue;
+      const p = personKey(a.name);
+      if (!p) continue;
+      /* Two id-less rows folding alike is an ambiguity — an anthology with two
+         J. Smiths — and there is nothing here to break the tie with. Marked
+         unadoptable so the fresh row is appended rather than guessed at. */
+      if (adoptable.has(p)) { adoptable.set(p, ''); continue; }
+      adoptable.set(p, k);
+    }
+
     for (const f of arr(fresh)) {
       if (!f) continue;
       const k = key(f);
+      if (!byId.has(k) && f.olid) {
+        const p = personKey(f.name);
+        const from = p ? adoptable.get(p) : '';
+        if (from && byId.has(from)) {
+          const cur = byId.get(from);
+          byId.delete(from);
+          adoptable.delete(p);
+          byId.set(k, Object.assign({}, cur, f, {
+            /* The EXISTING name wins, which is the opposite of the ordinary
+               branch below and deliberate: on a Google-primary record it is the
+               spelling defendGoogleFields just protected, and it is also the
+               string a follow has to query Google with, since Google matches on
+               its own byline and nothing else. */
+            name: cur.name || f.name,
+            gbName: cur.gbName || f.gbName || '',
+            /* Explicit null test, not `||`: the FIRST author's order is 0, and
+               a falsy check would hand position 0 whatever the fresh payload
+               said and quietly reorder the byline. Existing order wins for the
+               same reason the existing name does — the two catalogues order
+               bylines differently on anthologies and collaborations (see
+               mergeAuthorIdentities), and the order on screen is the one the
+               reader has already seen. */
+            order: cur.order != null ? cur.order : (f.order || 0),
+          }));
+          continue;
+        }
+      }
       const cur = byId.get(k);
       if (!cur) { byId.set(k, Object.assign({}, f)); continue; }
       byId.set(k, Object.assign({}, cur, f, {
@@ -1884,6 +1954,37 @@ BT.normalize = (function () {
     return item;
   }
 
+  /* ══ THE EDITION GRAPH ═══════════════════════════════════════════════════
+     -> 'resolved' | 'unresolved' | 'unavailable'
+
+     Google has no work concept — no editions endpoint, no work id, `related:`
+     returns nothing — so a book added from a Google row has no edition list and
+     no ISBN set beyond the one printing it came from. Open Library can supply
+     both from a single ISBN lookup (`works[0].key`), and 48-sync owns the
+     asking. This is the one place that answers what state a given record is in,
+     so the sweep and the picker can never disagree about it.
+
+     THE WORK ID IS THE AUTHORITY, NOT THE STORED STRING, and that ordering is
+     what makes this need no migration at all. Every book already on the
+     reader's shelves has `ids.olWork` and has never heard of `meta.editionGraph`
+     — it reads 'resolved' on the first call, from the field it has always had.
+     The same holds for a record arriving over encrypted sync from a device
+     running an older build, and for a scanned book, which reaches the graph
+     through its own ISBN and never comes near the bridge at all.
+
+     `meta.editionGraph` therefore only ever records a NEGATIVE: we asked Open
+     Library and it had nothing. Stamping it is 48-sync's job.
+
+     'unavailable' is not "never look again" — see BT.EDITION_GRAPH. It means
+     this book has been asked about for long enough that it stops riding its own
+     refresh tier and drops to the slowest one. */
+  function editionGraphOf(item) {
+    const ids = (item && item.ids) || {};
+    if (ids.olWork || ids.workOlid) return 'resolved';
+    const state = (item && item.meta && item.meta.editionGraph) || '';
+    return state === 'unavailable' ? 'unavailable' : 'unresolved';
+  }
+
   /* ══ MERGE ═══════════════════════════════════════════════════════════════
      Refreshed remote data must never clobber what the reader typed, never
      clobber a field they corrected by hand, and — the part that is specific to
@@ -2005,7 +2106,40 @@ BT.normalize = (function () {
 
     merged.meta = Object.assign({}, existing.meta, fresh.meta, {
       manualOverrides: overrides,
+      /* PRIMARY SOURCE IS THE RECORD'S ORIGIN, NOT THE LAST PAYLOAD'S, and
+         letting a refresh rewrite it made 20-openlibrary's defence of Google's
+         title and byline a ONE-SHOT.
+
+         The path: a Google-sourced record is enriched from Open Library, which
+         is now an ordinary and recurring thing rather than a rarity — resolving
+         the edition graph is exactly what puts `ids.olWork` on such a record,
+         and every sweep afterwards hydrates it from the work. `fromWork` stamps
+         `primarySource: 'openlibrary'` in its own meta, so the FIRST enrichment
+         (correctly defended by defendGoogleFields) rewrote the very flag that
+         defence reads. The second one saw an Open Library record, defended
+         nothing, and replaced a correct title and byline with Open Library's —
+         live `q=dune` returns a work titled 'Dune' credited to BRIAN Herbert,
+         which is the precise defect the pivot to Google exists to fix.
+
+         Silently, weeks after the book was added, from a background sweep
+         nobody watched. Origin is immutable for the same reason `uid` is. */
+      primarySource: (existing.meta && existing.meta.primarySource)
+        || (fresh.meta && fresh.meta.primarySource) || null,
     });
+
+    /* A GRAPH THAT RESOLVED IS NOT UNRESOLVED ANY MORE. `ids.olWork` arrives
+       through the id merge above — from a work hydrate, from a pinned edition,
+       or from the ISBN bridge — and the negative stamp 48-sync left behind
+       would otherwise outlive the condition it describes and keep the picker
+       apologising in front of a list it could now draw. editionGraphOf reads
+       the work id first so nothing is BROKEN by a stale string; it is cleared
+       so that nothing has to be. */
+    if (merged.ids.olWork || merged.ids.workOlid) {
+      delete merged.meta.editionGraph;
+      delete merged.meta.editionGraphTries;
+      delete merged.meta.editionGraphSince;
+      delete merged.meta.editionGraphAt;
+    }
 
     /* Anything the reader edited by hand is restored on top of everything
        above — a corrected title or page count survives every refresh forever. */
@@ -2203,6 +2337,12 @@ BT.normalize = (function () {
        1965 novel, and the earliest-printing rule that dates a work. */
     workDate, earlierRelease,
     withDefaults, mergeItem, bucketGenres,
+    /* The one answer to "can this book show an edition list?", read by the
+       sweep (which decides whether to spend a request on the bridge) and by the
+       picker (which decides what to draw when there is nothing). Two copies of
+       this question would drift within a week and the symptom would be a picker
+       apologising about a book the sweep had already resolved. */
+    editionGraphOf,
     leanForSync, absorbSynced,
     /* ONE fold in the app, exported so that 25-googlebooks, 61-view-search and
        70-follows all answer "same book?" and "same person?" identically. A
