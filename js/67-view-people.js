@@ -81,6 +81,12 @@ BT.viewPeople = (function () {
   const WIN_KEY = 'bt.people.window';
   const OPEN_KEY = 'bt.people.open.v1';
   const RECENT_KEY = 'bt.people.recent.v1';
+  /* Which authors' hidden-reissue bands are open, plus WINDOW_ID for the pooled
+     band under the release-window strip. One store rather than two, and the
+     sentinel cannot collide: every other member is a follow id, which is always
+     `author:{source}:{id}`. */
+  const REISSUE_KEY = 'bt.people.reissue.v1';
+  const WINDOW_ID = 'window';
 
   let followSet = new Set();     // ids currently followed — drives every button
   let rosterRows = [];           // the follow rows this render drew
@@ -95,6 +101,7 @@ BT.viewPeople = (function () {
   let windowId = loadWindow();
   let expanded = loadSet(OPEN_KEY);
   let recentOpen = loadSet(RECENT_KEY);
+  let reissueOpen = loadSet(REISSUE_KEY);
   const seenTimers = new Map();  // followId -> the pending mark-seen timer
 
   /* Author lookups already answered, keyed on the folded query. Module-scoped
@@ -154,6 +161,11 @@ BT.viewPeople = (function () {
     if (f && typeof f.refreshAll !== 'function') out.push('70-follows.js (refreshAll)');
     if (f && typeof f.coverageOf !== 'function') out.push('70-follows.js (coverageOf)');
     if (f && typeof f.inWindow !== 'function') out.push('70-follows.js (inWindow)');
+    /* Read by computeBands for every stored work, so an older 70-follows.js
+       without it throws a TypeError per row — which presents as a Following page
+       that is simply blank, with one console line naming a function nobody was
+       looking for. */
+    if (f && typeof f.reissueOf !== 'function') out.push('70-follows.js (reissueOf)');
     return out;
   }
 
@@ -349,11 +361,19 @@ BT.viewPeople = (function () {
     const range = BT.util.releaseWindow(win.id);
     const firm = [];
     const loose = [];
+    /* ONE bucket for the reissues, not two. The in/possible split exists so a
+       bare year cannot impersonate a confirmed date among things the reader is
+       being told to look forward to; inside a band that already says "these are
+       not new books" the distinction buys nothing and costs a second heading. */
+    const reissues = [];
     for (const f of rosterRows) {
       for (const r of worksOf(f)) {
         const fit = BT.follows.windowFit(r.release, range.from, range.to);
         if (fit === 'in') firm.push(r);
         else if (fit === 'possible') loose.push(r);
+      }
+      for (const r of reissuesOf(f)) {
+        if (BT.follows.windowFit(r.release, range.from, range.to) !== 'out') reissues.push(r);
       }
     }
     /* SOONEST FIRST, then by precision. A window is a list of what is coming, so
@@ -365,24 +385,43 @@ BT.viewPeople = (function () {
       || String(a.w.title).localeCompare(String(b.w.title));
     firm.sort(order);
     loose.sort(order);
+    reissues.sort(order);
 
     const span = `${BT.util.skToISO(range.from)} → ${BT.util.skToISO(range.to)}`;
+    /* The reissue band is drawn under EVERY branch below, including the empty
+       one — a window with nothing new but four reprints in it must not print a
+       flat "nothing lands here" over four books it is holding. */
+    const hidden = reissueStrip(reissues);
     if (!firm.length && !loose.length) {
-      return `<div class="fverdict is-no">Nothing from the ${
+      return `<div class="fverdict is-no">${reissues.length ? 'Nothing new from the' : 'Nothing from the'} ${
         esc(BT.util.pluralize(rosterRows.length, 'author'))} you follow lands in ${
-        esc(win.label.toLowerCase())}.</div>`;
+        esc(win.label.toLowerCase())}.</div>` + hidden;
     }
     const out = [];
     out.push(BT.ui.groupHead(win.label, firm.length)
       + `<div class="fbandnote"><span class="mono">${esc(span)}</span></div>`);
     out.push(firm.length
       ? `<div class="grid">${firm.map(r => card(r, { byline: true })).join('')}</div>`
-      : `<div class="fverdict is-no">Nothing is dated inside ${esc(win.label.toLowerCase())}.</div>`);
+      : `<div class="fverdict is-no">${reissues.length ? 'Nothing new is dated inside' : 'Nothing is dated inside'} ${
+          esc(win.label.toLowerCase())}.</div>`);
     if (loose.length) {
       out.push(BT.ui.groupHead('Could fall here', loose.length)
         + `<div class="grid">${loose.map(r => card(r, { byline: true })).join('')}</div>`);
     }
+    out.push(hidden);
     return out.join('');
+  }
+
+  /* The pooled reissues for the current window, counted and one click away.
+     Same control as the per-author band so there is one gesture to learn. */
+  function reissueStrip(rows) {
+    if (!rows.length) return '';
+    const open = reissueOpen.has(WINDOW_ID);
+    return `<button class="fmore" type="button" data-freissue="${WINDOW_ID}"
+        aria-expanded="${open ? 'true' : 'false'}">
+      <span class="tri"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M2 4l4 4 4-4z"/></svg></span>
+      Reissues <span class="fq-sep">·</span> ${rows.length}</button>`
+      + (open ? `<div class="grid">${rows.map(r => card(r, { byline: true })).join('')}</div>` : '');
   }
 
   /* ══ FINDING SOMEONE ═══════════════════════════════════════════════════
@@ -696,10 +735,15 @@ BT.viewPeople = (function () {
     const b = bandsOf(row);
     const bits = [];
     const up = b.future.length + b.maybe.length;
+    const re = b.reissue.length;
     if (up) {
       bits.push(`<b class="fq-yes">${esc(BT.util.pluralize(up, 'upcoming', 'upcoming'))}</b>`);
     }
     if (news) bits.push(`<span class="fnews">+${news} new</span>`);
+    /* THE HIDDEN ROWS ARE COUNTED HERE, on the line that is this screen's whole
+       answer. A band that vanished without a number would leave the reader
+       unable to tell a quiet author from a filtered one. */
+    if (re) bits.push(`${esc(BT.util.pluralize(re, 'reissue'))}`);
     if (b.recent.length) bits.push(`${b.recent.length} recent`);
 
     if (!up) {
@@ -708,7 +752,13 @@ BT.viewPeople = (function () {
       if (!cov.complete && cov.missing.length) {
         bits.unshift(`<span class="fq-wait">${esc(cov.missing.join(' and '))} did not answer</span>`);
       } else {
-        bits.unshift('<span class="fq-no">Nothing scheduled</span>');
+        /* "NOTHING NEW" AND "NOTHING" ARE DIFFERENT FACTS. Saying "Nothing
+           scheduled" over an author with three reprints on the way would be
+           this file telling the reader something it knows is false — the same
+           class of lie as saying it during an outage. */
+        bits.unshift(re
+          ? '<span class="fq-no">Nothing new scheduled</span>'
+          : '<span class="fq-no">Nothing scheduled</span>');
       }
     }
     return bits.join('<span class="fq-sep">·</span>');
@@ -766,9 +816,24 @@ BT.viewPeople = (function () {
       const cov = BT.follows.coverageOf(row);
       out.push(`<div class="fverdict ${cov.complete ? 'is-no' : 'is-wait'}">${
         cov.complete
-          ? `Nothing scheduled for ${esc(row.name)}.`
+          ? (b.reissue.length
+              ? `Nothing new scheduled for ${esc(row.name)}.`
+              : `Nothing scheduled for ${esc(row.name)}.`)
           : `Not a complete answer — ${esc(cov.missing.join(' and ') || 'no catalogue')} did not answer.`
       }</div>`);
+    }
+
+    /* SHOWN, BEHIND ONE CLICK, in the same shape as Recent. The reader asked
+       for these to be out of the way, not gone — and the cards already state
+       "first published 2018", so opening this band answers WHY each one was
+       taken out without a sentence explaining the rule. */
+    if (b.reissue.length) {
+      const open = reissueOpen.has(row.id);
+      out.push(`<button class="fmore" type="button" data-freissue="${esc(row.id)}"
+          aria-expanded="${open ? 'true' : 'false'}">
+        <span class="tri"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M2 4l4 4 4-4z"/></svg></span>
+        Reissues <span class="fq-sep">·</span> ${b.reissue.length}</button>`);
+      if (open) out.push(`<div class="grid">${b.reissue.map(r => card(r)).join('')}</div>`);
     }
 
     if (b.recent.length) {
@@ -822,7 +887,7 @@ BT.viewPeople = (function () {
   function computeBands(row) {
     const works = BT.follows.cachedWorks(row);
     const thisYear = new Date().getFullYear();
-    const out = { future: [], maybe: [], recent: [],
+    const out = { future: [], maybe: [], recent: [], reissue: [],
                   owned: 0, older: 0, undated: 0, read: works.length };
 
     for (const w of works) {
@@ -833,6 +898,20 @@ BT.viewPeople = (function () {
       const release = BT.follows.releaseOfWork(w);
       const verdict = BT.follows.futureness(release);
       const r = { w, release, verdict, via: row, owned: !!kept };
+
+      /* ── A NEW PRINTING IS NOT A NEW BOOK ────────────────────────────────
+         Only ever asked of a row that would otherwise be UPCOMING, and that
+         narrowness is the point. A reissue already behind us belongs in
+         `recent` on its date alone, and testing it here would move books
+         between two bands that both already describe them correctly.
+
+         BT.follows.reissueOf owns the rule and fails toward showing the book;
+         see the measurement there. This band is DISCLOSED rather than dropped
+         — counted on the collapsed row, revealed by a toggle in the body, and
+         it is what turns "Nothing scheduled" into "Nothing new scheduled". */
+      if (verdict === 'future' || verdict === 'maybe') {
+        if (BT.follows.reissueOf(w, release).reissue) { out.reissue.push(r); continue; }
+      }
 
       if (verdict === 'future') { out.future.push(r); continue; }
       if (verdict === 'maybe') { out.maybe.push(r); continue; }
@@ -855,6 +934,9 @@ BT.viewPeople = (function () {
        available — and an unstable sort would let the cards shuffle on repaint. */
     out.maybe.sort(byTitle);
     out.recent.sort((a, b) => (b.release.sortKey - a.release.sortKey) || byTitle(a, b));
+    /* Soonest first, like `future` — this band is still a list of things that
+       are about to be printed, it is only not a list of new books. */
+    out.reissue.sort((a, b) => (a.release.sortKey - b.release.sortKey) || byTitle(a, b));
     return out;
   }
 
@@ -864,6 +946,12 @@ BT.viewPeople = (function () {
   function worksOf(row) {
     const b = bandsOf(row);
     return b.future.concat(b.maybe);
+  }
+
+  /* The forthcoming rows this author's reissue rule took out. Pooled by the
+     window strip so the strip can disclose them the same way a row does. */
+  function reissuesOf(row) {
+    return bandsOf(row).reissue;
   }
 
   const yearOf = w => {
@@ -910,10 +998,13 @@ BT.viewPeople = (function () {
       : '';
 
     /* A reissue: this printing is ahead of us and the work is not new. Stated as
-       a fact ("first published 2024"), never as a caveat about the app. */
-    const first = Number.isFinite(w.firstYear) ? w.firstYear : null;
-    const here = BT.util.sortKeyToParts(r.release.sortKey);
-    const reissue = first && here && here.y > first;
+       a fact ("first published 2024"), never as a caveat about the app.
+
+       THE BAND'S OWN RECORD, not a second reading of the same two fields. This
+       comparison used to live here as well as in the filter, which is how a card
+       ends up captioned "first published 2018" while sitting under the heading
+       for new releases — one copy rounded a guard the other did not. */
+    const age = BT.follows.reissueOf(w, r.release);
 
     return `<div class="card${r.owned ? ' is-mine' : ''}${maybe ? ' is-approx' : ''}"${
       uid ? ` data-uid="${esc(uid)}"` : ' data-noopen="1"'}>
@@ -925,7 +1016,7 @@ BT.viewPeople = (function () {
         ${soon ? `<span class="csoon">${esc(soon)}</span>` : ''}
         ${r.owned ? '<span class="cmine">✓ In your library</span>' : ''}
       </div>
-      ${reissue ? `<div class="cfirst">first published ${first}</div>` : ''}
+      ${age.reissue ? `<div class="cfirst">first published ${age.firstYear}</div>` : ''}
     </div>`;
   }
 
@@ -1186,6 +1277,9 @@ BT.viewPeople = (function () {
     const rc = e.target.closest('[data-frecent]');
     if (rc) { if (suppressTap()) return; await toggleRecent(rc.dataset.frecent); return; }
 
+    const ri = e.target.closest('[data-freissue]');
+    if (ri) { if (suppressTap()) return; await toggleReissue(ri.dataset.freissue); return; }
+
     const fb = e.target.closest('[data-follow]');
     if (fb) { if (suppressTap()) return; await onToggle(fb); return; }
 
@@ -1245,6 +1339,17 @@ BT.viewPeople = (function () {
   async function toggleRecent(id) {
     if (recentOpen.has(id)) recentOpen.delete(id); else recentOpen.add(id);
     saveSet(RECENT_KEY, recentOpen);
+    await repaintRow(id);
+  }
+
+  /* One handler for both places the band appears. WINDOW_ID belongs to the
+     pooled strip, which has no follow row to repaint — calling repaintRow with
+     it would find no section, return early, and leave a button whose
+     aria-expanded says open over nothing at all. */
+  async function toggleReissue(id) {
+    if (reissueOpen.has(id)) reissueOpen.delete(id); else reissueOpen.add(id);
+    saveSet(REISSUE_KEY, reissueOpen);
+    if (id === WINDOW_ID) { repaintWindow(); return; }
     await repaintRow(id);
   }
 

@@ -97,31 +97,42 @@
 }
 .dot.fill { background: currentColor; }
 
-/* Reading status. `want` is ice, the same hue MovieTrak spends on an unwatched
-   title; `reading` takes the brand teal because it is the one state the app is
-   actually about. finished and dropped are BOTH faint on purpose — a
-   closed book should recede, and the tree already distinguishes them by
-   section, so spending a hue here would only add noise to a long shelf.
+/* THE TWO AXES, and they share one palette on purpose. Ownership and reading
+   never appear in the same badge and live in different sections of the tree, so
+   a reader comparing two dots is always comparing two dots of the same kind —
+   the same trade the tokens file already makes between genre and precision.
 
-   `have` — owned, not started — is MOSS, and the choice is a legibility one
-   before it is a semantic one. This dot is 7px, and `have` sits directly above
-   `reading` in the status section of the tree, so the two hues have to survive
-   being read at that size a row apart. Moss is the one hue in the set that was
-   derived for exactly that: see the note in 01-tokens, H 172 → H 127 off teal.
-   Amber was the other candidate and is deliberately not used — amber is the
-   caution hue, it means "read this", and a library where most books are owned
-   and unread would paint half the shelf as a warning.
+   OWNERSHIP. `want` is ice, the same hue MovieTrak spends on an unwatched
+   title. `own` is MOSS, and the choice is a legibility one before it is a
+   semantic one: this dot is 7px and the ownership rows sit one above another in
+   the tree, so the hues have to survive being read at that size a row apart.
+   Moss is the one hue in the set derived for exactly that — see the note in
+   01-tokens, H 172 → H 127 off teal. Amber was the other candidate and is
+   deliberately not used: amber is the caution hue, it means "read this", and a
+   library where most books are owned and unread would paint half the shelf as a
+   warning. `dontown` is faint, because "not mine" is the absence of a claim
+   rather than a state worth a hue.
 
-   It shares the hue with `.c-nonfiction` and `.c-biography`, just as `.c-want`
-   shares ice with the speculative pair and `.c-reading` shares teal with
-   `.c-graphic`. That is fine, and it is the same trade the tokens file already
-   makes between genre and precision: status and genre never appear in one
-   badge, and they live in different sections of the tree — a reader comparing
-   two dots is always comparing two dots of the same kind. */
+   READING. `reading` takes the brand teal because it is the one state the app
+   is actually about, and it is the only dot ever drawn filled. `unread` is
+   muted rather than faint — it is the largest group in most libraries and has
+   to stay legible in a long list — while `finished` and `dnf` are BOTH faint:
+   a closed book should recede, and the tree already distinguishes them by row,
+   so spending a hue here would only add noise.
+
+   `.c-have` and `.c-dropped` are kept as ALIASES of their heirs. Nothing in
+   this build emits them, but a service worker can serve a cached older bundle
+   against this stylesheet, and a dot with no rule renders as `currentColor` —
+   an inherited grey ring that reads as a fourth, meaningless state rather than
+   as a bug anybody would report. */
 .c-want { color: var(--bt-ice); }
-.c-have { color: var(--bt-moss); }
+.c-own { color: var(--bt-moss); }
+.c-dontown { color: var(--bt-text-faint); }
+.c-unread { color: var(--bt-text-muted); }
 .c-reading { color: var(--bt-teal); }
 .c-finished { color: var(--bt-text-faint); }
+.c-dnf { color: var(--bt-text-faint); }
+.c-have { color: var(--bt-moss); }
 .c-dropped { color: var(--bt-text-faint); }
 
 /* Genre. These read the same --bt-genre-* aliases the tags do, so a genre is
@@ -237,6 +248,15 @@ kbd {
   border-bottom: var(--bt-rule-w) solid var(--bt-line-hairline);
 }
 .chips { display: flex; gap: var(--bt-space-1); flex-wrap: wrap; }
+/* The library toolbar carries TWO chip groups now — reading, then ownership —
+   and without a mark between them the seven chips read as one filter where
+   picking a second would clear the first. A hairline says they are two
+   questions. Dropped when the pair wraps onto its own line is not worth a media
+   query: the rule is a left edge, and a wrapped group still has one. */
+.chips + .chips {
+  padding-left: var(--bt-space-3);
+  border-left: var(--bt-rule-w) solid var(--bt-line-hairline);
+}
 .chip {
   height: 23px; padding: 0 9px; border-radius: var(--bt-radius-pill);
   font-size: 11px; color: var(--bt-text-secondary);
@@ -423,7 +443,15 @@ td.num { text-align: right; }
 .pile.sold { color: var(--bt-text-faint); box-shadow: none; background: none; padding: 0; }
 .pile.sold::before { content: "✓"; font-size: 9px; }
 
-.stat { display: flex; align-items: center; gap: var(--bt-space-2); color: var(--bt-text-secondary); font-size: var(--bt-fs-sm); }
+/* nowrap because "Don't own" is two words in a narrow column, and a cell that
+   wraps makes THAT ROW ALONE two lines tall — a ragged table where the height
+   of a row encodes nothing but the length of one label. The column is sized by
+   its content, so refusing the break costs a few pixels of width and keeps
+   every row on the same baseline. */
+.stat {
+  display: flex; align-items: center; gap: var(--bt-space-2);
+  color: var(--bt-text-secondary); font-size: var(--bt-fs-sm); white-space: nowrap;
+}
 
 .grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));

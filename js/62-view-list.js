@@ -28,6 +28,17 @@ BT.viewLibrary = (function () {
   const esc = BT.util.escapeHtml;
   const MODE_KEY = 'bt.library.mode';
 
+  /* Where each rung of the retired five-rung ladder now lives. Read only by the
+     `?status=` redirect at the top of render() — see the note there for why
+     each maps to ONE axis rather than to both. */
+  const LEGACY_STATUS_ROUTE = {
+    want: { ownership: 'want' },
+    have: { ownership: 'own' },
+    reading: { reading: 'reading' },
+    finished: { reading: 'finished' },
+    dropped: { reading: 'dnf' },
+  };
+
   /* ══ SORTING ══════════════════════════════════════════════════════════════ */
 
   const byTitle = (a, b) => (a.sortTitle || '').localeCompare(b.sortTitle || '');
@@ -159,6 +170,42 @@ BT.viewLibrary = (function () {
 
     if (!all.length) return firstRun(view);
 
+    /* ── OLD ?status= URLS ──────────────────────────────────────────────────
+       The five-rung ladder is gone from the tree, but a bookmark, a shared
+       link, a browser autocomplete or the back stack can still carry it. This
+       redirects rather than quietly filtering, because a hash that no screen in
+       the app can produce is a hash the tree cannot highlight and the chips
+       cannot reflect: the reader would get a correctly filtered list with
+       nothing on screen agreeing about what it was filtered by.
+
+       Each rung goes to its DEFINING axis — the one that carried its meaning —
+       rather than to both, which is what makes the redirect survive the reader
+       later disagreeing with the migration's inference. `?status=finished` was
+       migrated to own + finished, so mapping it to `?reading=finished` is the
+       same set today AND still the right shelf tomorrow when they mark a
+       borrowed one `dontown`; mapping it to both axes would have hidden it.
+
+       `have` widens: it meant own AND unread, and `?ownership=own` now also
+       includes what you are part-way through. That is the tree row the reader
+       is being sent to and it is the honest heir of the name — the alternative,
+       two params, matches no node and lights two rows at once.
+
+       location.replace, not a push: the dead URL must not sit in the back stack
+       waiting to be returned to. Other params ride along untouched, so
+       `?status=reading&genre=mystery` keeps its genre. */
+    if (q.status && !q.ownership && !q.reading) {
+      /* hasOwnProperty, not a bare index: `?status=toString` would otherwise
+         return an inherited FUNCTION and Object.assign it into the query. */
+      const to = Object.prototype.hasOwnProperty.call(LEGACY_STATUS_ROUTE, q.status)
+        ? LEGACY_STATUS_ROUTE[q.status] : null;
+      const next = Object.assign({}, q, { status: '' }, to || {});
+      const parts = Object.entries(next)
+        .filter(([, v]) => v)
+        .map(([k, v]) => `${k}=${encodeURIComponent(v)}`);
+      location.replace('#/library' + (parts.length ? '?' + parts.join('&') : ''));
+      return;
+    }
+
     let rows = all.slice();
 
     /* ── Filters ────────────────────────────────────────────────────────────
@@ -166,15 +213,18 @@ BT.viewLibrary = (function () {
        and a name there ever drift apart the tree does not error — it opens an
        empty list, which reads as "you own nothing in this genre" and is the
        most convincing wrong answer the app can give. The tree's own
-       FILTER_PARAMS['/library'] is the checklist: status, genre, format, tag,
-       pile. */
-    /* Five rungs since `have` was split out of `want`: want | have | reading |
-       finished | dropped. Read through BT.ui.statusOf rather than off the
-       record, so a book whose stored status this build does not recognise
-       counts as `want` here exactly as it does in the tree's Want total and on
-       its own row. Three places reading the field three ways is how a shelf
-       ends up listing a different number of books than the row you clicked. */
-    if (q.status) rows = rows.filter(i => BT.ui.statusOf(i) === q.status);
+       FILTER_PARAMS['/library'] is the checklist: ownership, reading, genre,
+       format, tag, pile. */
+    /* TWO INDEPENDENT FILTERS, and they compose: `?ownership=own&reading=dnf`
+       is "books I own and gave up on", a question the single ladder could not
+       ask at all. Read through BT.ui.ownershipOf / BT.ui.readingOf rather than
+       off the record, so a book whose stored values this build does not
+       recognise — or whose axes the migration sweep has not stamped yet —
+       counts here exactly as it does in the tree's totals and on its own row.
+       Three places reading the field three ways is how a shelf ends up listing
+       a different number of books than the row you clicked. */
+    if (q.ownership) rows = rows.filter(i => BT.ui.ownershipOf(i) === q.ownership);
+    if (q.reading) rows = rows.filter(i => BT.ui.readingOf(i) === q.reading);
 
     /* Genre matches the INDEXED ids rather than a single bucket, so a novel
        filed as both Fantasy & SF and Fiction appears under both — which is what
@@ -259,18 +309,21 @@ BT.viewLibrary = (function () {
     const cur = BT.inspector.current;
     view.innerHTML = `
       <div class="toolbar">
-        <div class="chips" id="statusChips" role="group" aria-label="Filter by reading status">
-          ${/* Ids AND labels come from ui-core's ladder rather than being typed
-                out here, for the reason the tree gives about its genre rows:
-                the day the ladder changed, a hand-written copy of it in a
-                second file was one more place to forget. That is not
-                hypothetical — `have` was added to the ladder after this screen
-                shipped, and a literal list here would have left the library's
-                own filter bar unable to reach the shelf the tree was pointing
-                at. BT.ui.STATUSES is in shelf order (want → have → reading →
-                finished → dropped), which is the order to read them in. */
-            [['', 'All']].concat(BT.ui.STATUSES.map(s => [s, BT.ui.STATUS_WORD[s]])).map(([k, l]) =>
-            `<button class="chip" type="button" data-status="${k}" aria-pressed="${(q.status || '') === k}">${esc(l)}</button>`).join('')}
+        <div class="chips" id="readingChips" role="group" aria-label="Filter by reading status">
+          ${/* Ids AND labels come from ui-core's vocabulary rather than being
+                typed out here, for the reason the tree gives about its genre
+                rows: the day the vocabulary changed, a hand-written copy of it
+                in a second file was one more place to forget. That is not
+                hypothetical — `have` was added to the old ladder after this
+                screen shipped, and a literal list here would have left the
+                library's own filter bar unable to reach the shelf the tree was
+                pointing at. */
+            [['', 'All']].concat(BT.ui.READINGS.map(s => [s, BT.ui.READING_WORD[s]])).map(([k, l]) =>
+            `<button class="chip" type="button" data-reading="${k}" aria-pressed="${(q.reading || '') === k}">${esc(l)}</button>`).join('')}
+        </div>
+        <div class="chips" id="ownershipChips" role="group" aria-label="Filter by ownership">
+          ${[['', 'All']].concat(BT.ui.OWNERSHIPS.map(s => [s, BT.ui.OWNERSHIP_WORD[s]])).map(([k, l]) =>
+            `<button class="chip" type="button" data-ownership="${k}" aria-pressed="${(q.ownership || '') === k}">${esc(l)}</button>`).join('')}
         </div>
         <div class="seg" id="pileSeg" role="group" aria-label="Filter by what you are doing with the book">
           ${[['', 'Any'], ['sell', 'To sell'], ['sold', 'Sold']].map(([v, l]) =>
@@ -343,7 +396,16 @@ BT.viewLibrary = (function () {
     if (q.tag) return ['Tags', '#' + q.tag];
     if (q.pile) return ['Shelf', BT.ui.PILE_WORD[q.pile] || q.pile];
     if (q.undated) return ['Shelf', 'No date set'];
-    if (q.status) return ['Library', BT.ui.STATUS_WORD[q.status] || q.status];
+    /* Both axes when both are set, joined, because "Own" over a list that is
+       also filtered to DNF is a crumb that describes a different list than the
+       one on screen. Ownership leads, matching the order of the two groups in
+       the tree. */
+    if (q.ownership || q.reading) {
+      const bits = [];
+      if (q.ownership) bits.push(BT.ui.OWNERSHIP_WORD[q.ownership] || q.ownership);
+      if (q.reading) bits.push(BT.ui.READING_WORD[q.reading] || q.reading);
+      return ['Library', bits.join(' · ')];
+    }
     /* BT.genreLabel, not a bare table lookup: a bookmark or a hand-typed URL
        can still carry ?genre=fantasysf, and the resolver gives it the heir's
        word ('Fantasy') instead of echoing a dead id back at the reader. */
@@ -416,10 +478,20 @@ BT.viewLibrary = (function () {
       BT.router.go('#/library' + (parts.length ? '?' + parts.join('&') : ''));
     };
 
-    const chips = document.getElementById('statusChips');
-    if (chips) chips.onclick = e => {
-      const b = e.target.closest('[data-status]');
-      if (b) go({ status: b.dataset.status || '' });
+    /* Two rows of chips, two independent filters, and picking one never clears
+       the other — that composition is the point of the split. `status: ''` goes
+       with every patch so a redirected old URL cannot leave the dead param
+       riding along in the hash after the reader touches a filter. */
+    const rdChips = document.getElementById('readingChips');
+    if (rdChips) rdChips.onclick = e => {
+      const b = e.target.closest('[data-reading]');
+      if (b) go({ reading: b.dataset.reading || '', status: '' });
+    };
+
+    const ownChips = document.getElementById('ownershipChips');
+    if (ownChips) ownChips.onclick = e => {
+      const b = e.target.closest('[data-ownership]');
+      if (b) go({ ownership: b.dataset.ownership || '', status: '' });
     };
 
     const pile = document.getElementById('pileSeg');
@@ -610,8 +682,8 @@ BT.viewLibrary = (function () {
      bar's own Clear selection is already sitting right there.
 
      "the current filtered view" is the entire point of it. `order` is what
-     survived the status, genre, format, tag and pile filters above, so pressing
-     this on ?status=finished picks the finished books and nothing else — never
+     survived the ownership, reading, genre, format, tag and pile filters above,
+     so pressing this on ?reading=finished picks those books and nothing else — never
      the whole library. That is what makes it safe to put next to a Mark sold.
 
      The label follows the state rather than being written once, so the button

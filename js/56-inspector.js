@@ -54,61 +54,45 @@ BT.inspector = (function () {
   };
   const prettyStatus = s => PUB_STATUS[s] || (s ? String(s) : 'Unknown');
 
-  /* ══ THE READING LADDER ═══════════════════════════════════════════════════
-     Five rungs, and the second one is the whole reason this list is not the
-     four it started as:
+  /* ══ THE TWO AXES ═════════════════════════════════════════════════════════
+     THREE separate facts about a book, and this pane draws all three as three
+     separate controls. Any two of them folded into one control loses something
+     the reader entered by hand:
 
-       want      you do not own it and would like to read it — a wishlist
-       have      it is on the shelf and you have not started it
-       reading   in progress
-       finished  done
-       dropped   abandoned
+       user.ownership   want | own | dontown       do you have a copy
+       user.reading     unread | reading | finished | dnf   have you read it
+       user.pile        null | 'sell' | 'sold'     what you mean to do with it
 
-     `want` and `have` were one rung for the first three milestones, and that
-     collapse is what made the shelf unusable: a physical library is mostly
-     books you own and have not opened, and filing them under the same word as
-     the ones you have not bought yet means the wishlist can never be read as a
-     wishlist. Scanning a barcode defaults to `have` for exactly this reason —
-     if the book is in your hand, you own it — while search-adding stays `want`.
-     Neither of those decisions is made here; 39-scan and 61-view-search own
-     them. This file only has to draw all five and never reorder them.
+     The single five-rung ladder this pane used to draw forced one answer to
+     the first two questions. A library copy you are halfway through had to be
+     filed as `reading`, which asserted you owned it; a book you own and gave up
+     on and one you borrowed and gave up on were the same rung. Both are now
+     sayable, and neither control moves the other — see BT.ui.setOwnership and
+     BT.ui.setReading.
 
-     Do NOT confuse this with `user.pile` (null | 'sell' | 'sold'), which is the
-     OWNERSHIP DISPOSITION axis drawn a few blocks further down. A book can be
-     `finished` and `sell` at the same time. See the block above PILES.
+     The vocabulary and the labels come from BT.ui rather than being spelt out
+     here, so this pane, the table, the tree and the stats page cannot disagree
+     about either the values or the nouns.
 
-     Kept as a literal rather than read from a shared constant because that is
-     how the rest of the app spells it too; if it ever moves to 00-config, this
-     is one of five places that has to follow. STATUS_WORD lives in BT.ui so the
-     table, the tree and this pane cannot disagree about the noun — read through
-     it, and only fall back when it has not learned the new rung yet. */
-  const STATUS_LADDER = ['want', 'have', 'reading', 'finished', 'dropped'];
+     `user.pile` is the OWNERSHIP DISPOSITION axis drawn a few blocks further
+     down. Its heading is no longer "Ownership" — that word now belongs to the
+     first control — and two headings reading "Ownership" in one pane, meaning
+     two different things, is worse than either name alone. */
+  const OWNERSHIPS = BT.ui.OWNERSHIPS;
+  const READINGS = BT.ui.READINGS;
+  const ownershipWord = o => BT.ui.ownershipWord(o);
+  const readingWord = r => BT.ui.readingWord(r);
 
-  /* "Have", not "Owned" and not "TBR". "Owned" invites the reading of pile as
-     the same axis, and an initialism has to be learned. */
-  const STATUS_FALLBACK = {
-    want: 'Want', have: 'Have', reading: 'Reading',
-    finished: 'Finished', dropped: 'Dropped',
-  };
-  const statusWord = s =>
-    (BT.ui.STATUS_WORD && BT.ui.STATUS_WORD[s]) || STATUS_FALLBACK[s] || s;
+  /* Read forgivingly, write nothing. BT.ui derives both axes from the legacy
+     `user.status` when the stored field is absent, so a record the migration
+     sweep has not reached yet — or one with no `user` state at all, from a
+     hand-edited import — still shows a pressed button on each control rather
+     than seven unpressed ones and no clue what is stored.
 
-  /* MIGRATION, and the rule is: read forgivingly, write nothing.
-
-     Every record written before `have` existed carries one of the original four,
-     and all four are still on the ladder — so there is no migration to run and
-     none is run. What this guards is the other case: a record with no
-     `user.status` at all (a hand-edited import, a sync from a future ladder).
-     Those read as `want`, which leaves the segment control showing something
-     rather than five unpressed buttons and no clue what is stored.
-
-     It is display-only and is never written back. Rewriting somebody's shelf so
-     the UI looks tidy is a silent data edit they never asked for, and `want` is
-     the safest possible guess to put in front of them: it claims the least. */
-  const statusOf = u => {
-    const s = u && u.status;
-    return STATUS_LADDER.indexOf(s) >= 0 ? s : 'want';
-  };
+     Display-only, never written back. Rewriting somebody's shelf so the UI
+     looks tidy is a silent data edit they never asked for. */
+  const ownershipOf = item => BT.ui.ownershipOf(item);
+  const readingOf = item => BT.ui.readingOf(item);
 
   async function show(uid, opts) {
     opts = opts || {};
@@ -232,7 +216,10 @@ BT.inspector = (function () {
     const stub = await lookupFrom(BT.googlebooks, uid) || await lookupFrom(BT.openlibrary, uid);
     if (!stub) return null;
     if (BT.normalize && typeof BT.normalize.withDefaults === 'function') {
-      return BT.normalize.withDefaults(stub, 'want', 'link');
+      /* A transient record is never written, so this state is only what the
+         pane draws for a book that is not on the shelves. want + unread is the
+         claim-the-least pair, and it is what the Add button would store. */
+      return BT.normalize.withDefaults(stub, { ownership: 'want', reading: 'unread' }, 'link');
     }
     return stub;
   }
@@ -311,10 +298,18 @@ BT.inspector = (function () {
       ${item._transient ? `
       <div class="blk"><button class="btn btn--primary" data-act="add">Add to library</button></div>` : `
       <div class="blk">
-        <div class="blk-h">Reading status</div>
+        <div class="blk-h">Reading</div>
         <div class="seg seg--wrap" role="group" aria-label="Reading status">
-          ${STATUS_LADDER.map(s =>
-            `<button type="button" data-status="${s}" aria-pressed="${statusOf(u) === s}">${esc(statusWord(s))}</button>`).join('')}
+          ${READINGS.map(s =>
+            `<button type="button" data-reading="${s}" aria-pressed="${readingOf(item) === s}">${esc(readingWord(s))}</button>`).join('')}
+        </div>
+      </div>
+
+      <div class="blk">
+        <div class="blk-h">Ownership</div>
+        <div class="seg seg--wrap" role="group" aria-label="Ownership">
+          ${OWNERSHIPS.map(s =>
+            `<button type="button" data-ownership="${s}" aria-pressed="${ownershipOf(item) === s}">${esc(ownershipWord(s))}</button>`).join('')}
         </div>
       </div>
 
@@ -323,8 +318,8 @@ BT.inspector = (function () {
       ${progressBlock(item)}
 
       <div class="blk">
-        <div class="blk-h">Ownership</div>
-        <div class="seg" role="group" aria-label="Ownership">
+        <div class="blk-h">Sell pile</div>
+        <div class="seg" role="group" aria-label="Sell pile">
           ${PILES.map(([v, label]) =>
             `<button type="button" data-pile="${v}" aria-pressed="${(u.pile || 'keep') === v}">${label}</button>`).join('')}
         </div>
@@ -720,11 +715,13 @@ BT.inspector = (function () {
     return cur;
   }
 
-  /* ══ OWNERSHIP ════════════════════════════════════════════════════════════
-     `user.pile` is a SEPARATE axis from `user.status` and must never be drawn
-     as one. A book can be finished and kept, finished and marked to sell, or
-     unread and already sold. Collapsing the two into a single control is what
-     makes a clear-out unusable: "Sold" would then erase whether you read it.
+  /* ══ THE SELL PILE ════════════════════════════════════════════════════════
+     `user.pile` is a THIRD axis, separate from both `user.ownership` and
+     `user.reading`, and must never be drawn as either. A book can be owned and
+     finished and kept, owned and finished and marked to sell, or owned and
+     unread and already sold. Collapsing any two of those into one control is
+     what makes a clear-out unusable: "Sold" would then erase whether you read
+     it, and "Don't own" would erase that you are still trying to sell it.
 
      'keep' is the button's value for `null`, not a stored value. An empty
      `data-pile=""` reads back as the empty string and is easy to mistake for
@@ -769,7 +766,7 @@ BT.inspector = (function () {
       ? (total
           ? `<span class="prgval mono">${pct}%</span><span class="muted">page ${at} of ${total}</span>`
           : `<span class="prgval mono">p.${at}</span><span class="muted">no page count on this record, so no percentage</span>`)
-      : `<span class="muted">${(item.user || {}).status === 'finished' ? 'Finished, no position logged' : 'Nothing logged yet'}</span>`;
+      : `<span class="muted">${readingOf(item) === 'finished' ? 'Finished, no position logged' : 'Nothing logged yet'}</span>`;
 
     /* One field. Correcting the EXTENT belongs to the editions picker (M2):
        choosing which printing you hold is what supplies an authoritative page
@@ -1111,7 +1108,8 @@ BT.inspector = (function () {
        them silently, and after a few minutes one rating tick fired eight
        writes and eight re-renders. One slot, one handler, always the newest. */
     host.onclick = async e => {
-      const st = e.target.closest('[data-status]');
+      const rd = e.target.closest('[data-reading]');
+      const own = e.target.closest('[data-ownership]');
       const pile = e.target.closest('[data-pile]');
       const rate = e.target.closest('[data-rate]');
       const act = e.target.closest('[data-act]');
@@ -1124,11 +1122,25 @@ BT.inspector = (function () {
       const gen = e.target.closest('[data-genre]');
       const fw = e.target.closest('[data-follow]');
 
-      if (st) {
-        await BT.ui.setStatus(item.uid, st.dataset.status);
+      /* TWO CONTROLS, TWO WRITES, AND NEITHER REPAINTS THE OTHER. Only the
+         control that was pressed has its buttons re-marked, because the other
+         axis genuinely did not move — repainting both would be harmless today
+         and would quietly hide the day one of these setters started reaching
+         across, which is the exact bug the split exists to prevent. */
+      if (rd) {
+        await BT.ui.setReading(item.uid, rd.dataset.reading);
         /* In place: a segmented control does not need the whole pane rebuilt. */
-        for (const b of host.querySelectorAll('[data-status]')) {
-          b.setAttribute('aria-pressed', String(b.dataset.status === st.dataset.status));
+        for (const b of host.querySelectorAll('[data-reading]')) {
+          b.setAttribute('aria-pressed', String(b.dataset.reading === rd.dataset.reading));
+        }
+        invalidate();
+        BT.router.resolve();
+      }
+
+      if (own) {
+        await BT.ui.setOwnership(item.uid, own.dataset.ownership);
+        for (const b of host.querySelectorAll('[data-ownership]')) {
+          b.setAttribute('aria-pressed', String(b.dataset.ownership === own.dataset.ownership));
         }
         invalidate();
         BT.router.resolve();
@@ -1242,10 +1254,12 @@ BT.inspector = (function () {
       if (!fresh) return;
       const box = document.getElementById('prgBody');
       if (box) box.innerHTML = progressBody(fresh);
-      /* The status segment can move as a SIDE EFFECT of recording progress —
-         see the promotion rule below — so it is repainted here too. */
-      for (const b of host.querySelectorAll('[data-status]')) {
-        b.setAttribute('aria-pressed', String(b.dataset.status === statusOf(fresh.user)));
+      /* The READING segment can move as a side effect of recording progress —
+         see the promotion rule below — so it is repainted here too. The
+         OWNERSHIP segment deliberately is not: setProgress does not touch that
+         axis, and repainting it would hide the day something started to. */
+      for (const b of host.querySelectorAll('[data-reading]')) {
+        b.setAttribute('aria-pressed', String(b.dataset.reading === readingOf(fresh)));
       }
       invalidate();
       wireProgress(fresh);
@@ -1278,14 +1292,17 @@ BT.inspector = (function () {
         BT.ui.toast('Enter the page you are on.', { bad: true });
         return;
       }
-      /* BT.ui.setProgress clamps against the extent and promotes a book still
-         filed as `want` OR `have` to `reading`, because recording a position is
-         a statement that you have started it — and which of those two shelves
-         it was sitting on beforehand makes no difference to that. Never the
-         reverse, and never beyond that: reaching the last page must NOT set
-         `finished` and must not touch `have`, because
-         finishing is a decision rather than something inferred from a number.
-         The most this is allowed to do is ask — see offerFinish. */
+      /* BT.ui.setProgress clamps against the extent and moves the READING axis
+         only, `unread → reading`, because recording a position is a statement
+         that you have started the book. It does NOT touch ownership: a page
+         number says nothing about whether the copy is yours, and the old ladder
+         promoting `want → reading` silently claimed you had acquired a book
+         because you logged a page.
+
+         Never the reverse, and never beyond that: reaching the last page must
+         NOT set `finished`, because finishing is a decision rather than
+         something inferred from a number. The most this is allowed to do is
+         ask — see offerFinish. */
       const fresh = await BT.ui.setProgress(item.uid, { currentPage: n });
       reflect(fresh);
       offerFinish(fresh);
@@ -1320,11 +1337,13 @@ BT.inspector = (function () {
     const total = BT.ui.totalPagesOf(fresh);
     const p = BT.ui.progressOf(fresh);
     if (!total || !p || p.currentPage == null || p.currentPage < total) return;
-    if ((fresh.user || {}).status === 'finished') return;
+    if (readingOf(fresh) === 'finished') return;
     BT.ui.toast('That is the last page.', {
       actionLabel: 'Mark finished',
       onAction: async () => {
-        await BT.ui.setStatus(fresh.uid, 'finished');
+        /* The READING axis only. Whether they own the copy they just finished
+           is not something reaching the last page answers. */
+        await BT.ui.setReading(fresh.uid, 'finished');
         invalidate();
         show(fresh.uid);
         BT.router.resolve();

@@ -291,70 +291,151 @@ BT.ui = (function () {
     return chips + formatIcon(item);
   }
 
-  /* ── The reading ladder ────────────────────────────────────────────────
-     want → have → reading → finished → dropped, in shelf order, and the two
-     rungs at the front are genuinely different facts about a book:
+  /* ── The two axes ──────────────────────────────────────────────────────
+     A book's state is twofold, and the vocabulary for both lives in
+     38-normalize (see THE TWO USER AXES there) so that the tree's rows, this
+     file's cells, the list's filters and the stats tiles are all reading one
+     definition. What is added here is the LABELS and the forgiving reads.
 
-       want    you do not own it. This is a wishlist.
-       have    it is on your shelf and you have not started it.
+       ownership   want | own | dontown        Want · Own · Don't own
+       reading     unread | reading | finished | dnf
+                                               Unread · Reading · Finished · DNF
 
-     Collapsing those is what this ladder was rebuilt to stop — "I have books
-     I'm not yet reading" — and it is also why the two ADD doors disagree on
-     purpose. Search-add lands on `want`, because looking a title up is not
-     acquiring it. Scan-add lands on `have`, because you were holding the
-     object under the lens; see SCAN_STATUS in 39-scan.js.
+     Neither is `user.pile`, which is a third thing again — null | 'sell' |
+     'sold', what you intend to do with a copy. A book can be `own` +
+     `finished` + `sell` at once, and that is the ordinary state of a shelf
+     clear-out rather than an edge case.
 
-     `have` is NOT `user.pile`. Pile is ownership DISPOSITION — null | 'sell' |
-     'sold' — and the two axes are independent: a book can be `finished` and
-     marked `sell` at the same time, which is the ordinary state of a shelf
-     clear-out. Anything that folds one into the other loses a fact the reader
-     entered by hand.
-
-     MIGRATION, and this is the part not to "tidy up" later: NOTHING IN THIS
-     APP REWRITES A STORED STATUS. Every record written before `have` existed
-     still says want|reading|finished|dropped, and those are left exactly as
-     the reader filed them — a sweep that decided which of somebody's `want`
-     books they secretly own would be inventing ownership out of nothing. An
-     unknown or missing value is read as `want` at DISPLAY time only, which is
-     the honest bottom rung and is one tap from being re-filed by the person
-     who actually knows. */
-  const STATUSES = ['want', 'have', 'reading', 'finished', 'dropped'];
-  const STATUS_WORD = {
-    want: 'Want', have: 'Have', reading: 'Reading',
-    finished: 'Finished', dropped: 'Dropped',
+     The two ADD doors disagree on purpose and both now state BOTH axes.
+     Search-add is want + unread, because looking a title up is not acquiring
+     it. Scan-add is own + unread, because you were holding the object under
+     the lens; see SCAN_STATE in 39-scan.js. */
+  const OWNERSHIPS = BT.normalize.OWNERSHIP;
+  const OWNERSHIP_WORD = { want: 'Want', own: 'Own', dontown: 'Don’t own' };
+  const READINGS = BT.normalize.READING;
+  const READING_WORD = {
+    unread: 'Unread', reading: 'Reading', finished: 'Finished', dnf: 'DNF',
   };
 
-  /* The ONE reading of `user.status`, so a row, a count and a filter can never
-     disagree about what an unrecognised value means. Views call this rather
-     than reaching for `item.user.status` directly: a record restored from an
-     old export, or one merged mid-schema-change from another device, must land
-     on a shelf rather than fall out of every list while still drawing a row.
+  /* THE ONE READING OF EACH AXIS, so a row, a count and a filter can never
+     disagree about what an unrecognised value means. Views call these rather
+     than reaching for `item.user.ownership` directly.
 
-     Membership is tested against the LADDER ARRAY rather than by indexing the
-     label map, and that is not pedantry: `STATUS_WORD['toString']` is a
-     truthy inherited function, so a record carrying a stray `'constructor'` or
-     `'toString'` would pass a truthiness check, emit `class="dot c-toString"`,
-     and render a function's source text into the row. An array lookup has no
-     prototype chain to fall down. */
+     THEY DERIVE FROM THE LEGACY LADDER WHEN THE AXIS IS ABSENT, and that is
+     what makes the migration sweep optional rather than load-bearing: a
+     library the sweep has not reached yet — because it is still running,
+     because it failed, because a record just arrived from a device on the old
+     build — draws every shelf, count and filter correctly anyway. Display is
+     never waiting on a write.
+
+     Membership is tested against the VALUE ARRAY rather than by indexing the
+     label map, and that is not pedantry: `OWNERSHIP_WORD['toString']` is a
+     truthy inherited function, so a record carrying a stray `'constructor'`
+     would pass a truthiness check, emit `class="dot c-toString"`, and render a
+     function's source text into the row. An array lookup has no prototype
+     chain to fall down. */
+  function ownershipOf(item) {
+    const u = (item && item.user) || {};
+    if (OWNERSHIPS.indexOf(u.ownership) >= 0) return u.ownership;
+    return BT.normalize.axesFromLegacyStatus(u.status).ownership;
+  }
+  function readingOf(item) {
+    const u = (item && item.user) || {};
+    if (READINGS.indexOf(u.reading) >= 0) return u.reading;
+    return BT.normalize.axesFromLegacyStatus(u.status).reading;
+  }
+  const ownershipWord = o =>
+    (OWNERSHIPS.indexOf(o) >= 0 ? OWNERSHIP_WORD[o] : OWNERSHIP_WORD.want);
+  const readingWord = r =>
+    (READINGS.indexOf(r) >= 0 ? READING_WORD[r] : READING_WORD.unread);
+
+  /* The legacy ladder, kept as a DERIVED reading for the three files outside
+     this change that still index on `user.status` — 10-db's
+     by_status_priority, 12-repo's upcomingItems, 48-sync's "currently reading"
+     tier. Computed from the axes rather than read off the record so it cannot
+     drift from what the screens show. Nothing new should call these. */
+  const STATUSES = ['want', 'have', 'reading', 'finished', 'dropped'];
+  const STATUS_WORD = {
+    want: 'Want', have: 'Own', reading: 'Reading',
+    finished: 'Finished', dropped: 'DNF',
+  };
   function statusOf(item) {
-    const s = item && item.user && item.user.status;
-    return STATUSES.indexOf(s) >= 0 ? s : 'want';
+    return BT.normalize.legacyStatusFrom(ownershipOf(item), readingOf(item));
   }
   const statusWord = s => (STATUSES.indexOf(s) >= 0 ? STATUS_WORD[s] : STATUS_WORD.want);
 
-  /* The rungs that a recorded page position promotes out of — see setProgress.
-     `finished` and `dropped` are deliberately absent: both are decisions the
-     reader made, and re-opening a book to check a quotation must not undo
-     either of them. */
-  const PROMOTES_TO_READING = ['want', 'have'];
+  /* The reading rungs that a recorded page position promotes out of — see
+     setProgress. `finished` and `dnf` are deliberately absent: both are
+     decisions the reader made, and re-opening a book to check a quotation must
+     not undo either of them.
 
-  /* `fill` on `reading` alone. Every other rung is a hollow ring because
-     reading is the one state the app is actually about, and a second filled
-     dot beside it would spend that distinction for nothing. `have` is told
-     apart by hue instead — .c-have, alongside .c-want in 03-components.css. */
-  function statusCell(item) {
-    const s = statusOf(item);
-    return `<span class="stat"><span class="dot c-${s}${s === 'reading' ? ' fill' : ''}"></span>${STATUS_WORD[s]}</span>`;
+     ONLY `unread` remains, and dropping `want` from this list is the whole
+     point of the split. The old ladder promoted `want → reading`, which
+     silently claimed you had ACQUIRED a book because you logged a page — the
+     one axis a page number says nothing about. */
+  const PROMOTES_TO_READING = ['unread'];
+
+  /* TWO MARKS, NOT ONE, and deliberately two table COLUMNS rather than two
+     lines stacked in the old Status cell. Stacking them would have made the
+     status column twice as tall as every other cell on every row of the table,
+     halving how much shelf fits on a screen to show a field that is the same
+     value for most of a library. Side by side, each axis reads down the page as
+     its own stripe — which is the whole reason the table has columns.
+
+     `fill` on `reading` alone. Every other value is a hollow ring because
+     reading is the one state the app is actually about, and a second filled dot
+     beside it would spend that distinction for nothing. The rest are told apart
+     by hue — .c-unread, .c-own and the others in 03-components.css. */
+  function readingCell(item) {
+    const r = readingOf(item);
+    return `<span class="stat"><span class="dot c-${r}${r === 'reading' ? ' fill' : ''}"></span>${READING_WORD[r]}</span>`;
+  }
+  function ownershipCell(item) {
+    const o = ownershipOf(item);
+    return `<span class="stat"><span class="dot c-${o}"></span>${OWNERSHIP_WORD[o]}</span>`;
+  }
+
+  /* ── The migration sweep ───────────────────────────────────────────────
+     Stamps the two axes onto every stored record that predates them. The
+     per-record rule is BT.normalize.migrateUserAxes, which is pure and
+     idempotent; this is only the half that needs BT.repo, and it lives here
+     rather than in 38-normalize because normalize is a transform module that
+     must not reach for storage.
+
+     WRITES ONLY THE ROWS THAT CHANGED. migrateUserAxes answers 0 for an
+     already-migrated block, so the second and every later boot walks the
+     library and writes nothing — which is why this needs no "have I run"
+     marker. A marker would be the more fragile design here, not the safer one:
+     it is stored state that a restored export, a wipe, or a sync from a device
+     on the old build can leave set over unmigrated records, and then the
+     migration never runs again on data that needs it.
+
+     putItemQuiet, and `updatedAt` is deliberately NOT bumped. This is not the
+     reader editing their shelf — it is the same facts written in the current
+     vocabulary — and a bumped timestamp on every record would make this
+     device's whole library look newer than the other device's genuine edits
+     and win every merge. One `item:put` is emitted at the end if anything
+     moved, so the tree recounts once rather than once per book.
+
+     Errors are logged and swallowed per record. A single malformed row must
+     not abort the sweep for the rest of the library, and because every read
+     path derives the axes anyway (see ownershipOf), a row this never reaches
+     still draws correctly. */
+  async function migrateLibraryAxes() {
+    const items = await BT.repo.allItems();
+    let n = 0;
+    for (const it of items) {
+      try {
+        if (!it || !it.user) continue;            // 12-repo heals these on write
+        if (!BT.normalize.migrateUserAxes(it.user)) continue;
+        await BT.repo.putItemQuiet(it);
+        n++;
+      } catch (e) {
+        console.warn('[ui] could not migrate', it && it.uid, e && e.message);
+      }
+    }
+    if (n) BT.repo.emit('item:put', null);
+    return n;
   }
 
   /* ── The ownership axis ────────────────────────────────────────────────
@@ -421,7 +502,11 @@ BT.ui = (function () {
   const COLUMNS = [
     { key: 'title', label: 'Title' },
     { key: 'genre', label: 'Genre' },
-    { key: 'status', label: 'Status', drop: true },
+    /* Was one Status column. Two facts, two columns — see readingCell. Both
+       carry `drop`, exactly as the single column did, so the phone layout is
+       unchanged: it hid Status before and hides both of these now. */
+    { key: 'reading', label: 'Reading', drop: true },
+    { key: 'ownership', label: 'Owned', drop: true },
     { key: 'release', label: 'Published' },
     { key: 'pages', label: 'Pages', num: true, drop: true },
     { key: 'rating', label: 'Yours', num: true },
@@ -462,7 +547,8 @@ BT.ui = (function () {
     return `<tr data-uid="${esc(item.uid)}"${selected ? ' class="is-sel"' : ''}>
       <td data-col="title"><span class="title-cell">${chipart(item)}<span class="t">${esc(item.title)}</span>${pileTag(item)}${driftBadge(item.release)}</span>${progressBar(item)}</td>
       <td data-col="genre">${genreTag(item)}</td>
-      <td data-col="status" data-drop>${statusCell(item)}</td>
+      <td data-col="reading" data-drop>${readingCell(item)}</td>
+      <td data-col="ownership" data-drop>${ownershipCell(item)}</td>
       <td data-col="release">${dateCell(item.release)}</td>
       <td data-col="pages" data-drop class="num mono">${pagesCell(item)}</td>
       <td data-col="rating" class="num mono">${u.rating != null ? esc(u.rating) + '<span class="faint">/10</span>' : '<span class="faint">·&nbsp;·</span>'}</td>
@@ -513,7 +599,9 @@ BT.ui = (function () {
   function progressFraction(item) {
     const p = progressOf(item);
     if (!p || p.currentPage == null) {
-      return (item.user && item.user.status === 'finished') ? 1 : null;
+      /* readingOf, not `user.status`: a finished book still draws a full bar
+         whether the sweep has stamped its axes yet or not. */
+      return readingOf(item) === 'finished' ? 1 : null;
     }
     const total = totalPagesOf(item);
     if (!total) return null;
@@ -521,7 +609,6 @@ BT.ui = (function () {
   }
 
   function progressText(item) {
-    const u = item.user || {};
     const p = progressOf(item);
     if (p && p.currentPage != null) {
       const f = progressFraction(item);
@@ -530,7 +617,7 @@ BT.ui = (function () {
          percentage at all. */
       return f != null ? `${Math.round(f * 100)}% · p.${p.currentPage}` : `p.${p.currentPage}`;
     }
-    if (u.status === 'finished') return 'Finished';
+    if (readingOf(item) === 'finished') return 'Finished';
     return '—';
   }
 
@@ -581,22 +668,31 @@ BT.ui = (function () {
       const empty = !Object.keys(p).filter(key => key !== 'updatedAt').length;
       cur.user.progress = empty ? null : Object.assign(p, { updatedAt: Date.now() });
 
-      /* Recording progress on something still filed as "want" or "have" is a
-         statement that you have started it. Never the reverse: finishing is a
-         decision, not something inferred from reaching the last page.
+      /* THE READING AXIS ONLY. Recording a position is a statement that you
+         have started the book: `unread → reading`, and nothing else moves.
 
-         BOTH front rungs promote, and `have` is now the one that matters most:
-         a scanned shelf lands there by default, so the ordinary route into
-         "reading" starts from a book the reader already owns rather than from
-         a wishlist entry. Leaving `have` out would have quietly stranded every
-         barcode-added book on the shelf it started on, no matter how far into
-         it the reader got.
+         OWNERSHIP IS NOT TOUCHED, and that is the bug the split was made to
+         fix. The old ladder promoted `want → reading`, which meant logging a
+         page silently claimed you had ACQUIRED the book — the one thing a page
+         number says nothing about. A library copy you are halfway through is
+         `want`/`dontown` + `reading` and stays that way; the reader is the only
+         source for the ownership axis.
+
+         Never the reverse either: finishing is a decision, not something
+         inferred from reaching the last page. Only 56-inspector's offerFinish
+         may raise it, and only as a prompt.
 
          Gated on a real position rather than on the record being non-empty:
          typing in the page count of a book you have not opened is bookkeeping,
-         not reading, and it must not move the book. */
-      if (p.currentPage > 0 && PROMOTES_TO_READING.indexOf(cur.user.status) >= 0) {
-        cur.user.status = 'reading';
+         not reading, and it must not move the book.
+
+         Written through migrateUserAxes so the legacy `user.status` mirror is
+         recomputed in the same breath — 48-sync reads it to give a book being
+         read right now the T1 refresh tier, and a mirror left saying `want`
+         would quietly cost that. */
+      if (p.currentPage > 0 && PROMOTES_TO_READING.indexOf(readingOf(cur)) >= 0) {
+        cur.user.reading = 'reading';
+        BT.normalize.migrateUserAxes(cur.user);
       }
 
       await BT.repo.putItem(cur);
@@ -981,16 +1077,26 @@ BT.ui = (function () {
     const existingUid = await BT.repo.resolveUid(BT.repo.idKeysFor(stub));
     if (existingUid) {
       const existing = await BT.repo.getItem(existingUid);
-      /* statusWord, not a bare lookup: a record carrying a status this build
-         does not know about (an older export, a device mid-schema-change) used
-         to render “Already on your shelves as “undefined”.” here. */
-      if (existing) { toast(`Already on your shelves as “${statusWord(statusOf(existing))}”.`); return existing; }
+      /* Both axes, because either one alone answers half the question — "as
+         Unread" does not say whether you own it, and "as Own" does not say
+         whether you have read it. Read through ownershipOf/readingOf, not off
+         the record: a record carrying a value this build does not know about
+         (an older export, a device mid-schema-change) used to render “Already
+         on your shelves as “undefined”.” here. */
+      if (existing) {
+        toast(`Already on your shelves — ${ownershipWord(ownershipOf(existing))}, ` +
+          `${readingWord(readingOf(existing)).toLowerCase()}.`);
+        return existing;
+      }
     }
-    /* `want` by default, because this is the SEARCH door: looking a title up
-       says you would like to read it, not that a copy is on your shelf. The
-       scan door defaults to `have` for the opposite reason — you were holding
-       the book. Both are overridable by the caller. */
-    const item = BT.normalize.withDefaults(stub, opts.status || 'want', opts.source || 'search');
+    /* want + unread by default, because this is the SEARCH door: looking a
+       title up says you would like to read it, not that a copy is on your
+       shelf. The scan door defaults to own + unread for the opposite reason —
+       you were holding the book. Both are overridable by the caller, and
+       `opts.state` states BOTH axes so no add path can set one and leave the
+       other to a default nobody chose. */
+    const item = BT.normalize.withDefaults(
+      stub, opts.state || { ownership: 'want', reading: 'unread' }, opts.source || 'search');
     item.scope = opts.scope || stub.scope || 'open';
     retier(item);
     await BT.repo.putItem(item);
@@ -1118,31 +1224,71 @@ BT.ui = (function () {
     return merged;
   }
 
-  async function setStatus(uid, status) {
+  /* ── The two setters ───────────────────────────────────────────────────
+     ONE AXIS EACH, AND NEITHER TOUCHES THE OTHER. That is the contract the
+     whole split exists to provide: saying you own a book must not claim you
+     have read it, and saying you finished one must not claim you own it —
+     plenty of finished books were borrowed.
+
+     Both write the legacy `user.status` mirror through migrateUserAxes rather
+     than by hand, so the projection rule lives in exactly one place and the
+     three files still reading that field (10-db's index, 12-repo's
+     upcomingItems, 48-sync's tiers) cannot be shown a value the axes never
+     produced.
+
+     Undo restores the ONE axis it changed, for the same reason: an Undo that
+     put both axes back would silently revert an edit the reader made to the
+     other one in between. */
+  async function setOwnership(uid, ownership) {
     const item = await BT.repo.getItem(uid);
     if (!item) return null;
-    const before = item.user.status;
-    item.user.status = status;
-    /* `reading` is the only rung that stamps a start date, and `have` stamps
-       NOTHING on purpose. Acquiring a book is not an event in the reading of
-       it: there is no day you started, and writing `startedAt` the moment
+    const before = ownershipOf(item);
+    item.user.ownership = ownership;
+    BT.normalize.migrateUserAxes(item.user);
+    /* No date is stamped. Acquiring a book is not an event in the READING of
+       it — there is no day you started — and writing `startedAt` the moment
        someone says "this is on my shelf" would drop every unopened book into
-       "started this year" — which is exactly the muddle the rung was added to
-       clear up. `user.addedAt` already records when it arrived.
-
-       Nothing is CLEARED on the way back down either. Moving a book from
-       reading to have (put it down, still own it) keeps `startedAt`, because
-       you did start it; erasing that would rewrite the reader's history to
-       make the field agree with the current rung. */
-    if (status === 'reading' && !item.user.startedAt) item.user.startedAt = Date.now();
-    if (status === 'finished') { item.user.finishedAt = Date.now(); BT.repo.addHistory(uid, 'finished'); }
+       "started this year", which is exactly the muddle this axis was split out
+       to clear up. `user.addedAt` already records when it arrived. */
     retier(item);
     await BT.repo.putItem(item);
-    toast(`Moved to ${statusWord(status)}`, {
+    toast(`Marked ${ownershipWord(ownership)}`, {
       actionLabel: 'Undo',
       onAction: async () => {
         const it = await BT.repo.getItem(uid);
-        if (it) { it.user.status = before; await BT.repo.putItem(it); BT.router.resolve(); }
+        if (!it) return;
+        it.user.ownership = before;
+        BT.normalize.migrateUserAxes(it.user);
+        await BT.repo.putItem(it);
+        BT.router.resolve();
+      },
+    });
+    return item;
+  }
+
+  async function setReading(uid, reading) {
+    const item = await BT.repo.getItem(uid);
+    if (!item) return null;
+    const before = readingOf(item);
+    item.user.reading = reading;
+    BT.normalize.migrateUserAxes(item.user);
+    /* Nothing is CLEARED on the way back down. Moving a book from reading to
+       unread (put it down, still own it) keeps `startedAt`, because you did
+       start it; erasing that would rewrite the reader's history to make the
+       field agree with the current value. */
+    if (reading === 'reading' && !item.user.startedAt) item.user.startedAt = Date.now();
+    if (reading === 'finished') { item.user.finishedAt = Date.now(); BT.repo.addHistory(uid, 'finished'); }
+    retier(item);
+    await BT.repo.putItem(item);
+    toast(`Marked ${readingWord(reading)}`, {
+      actionLabel: 'Undo',
+      onAction: async () => {
+        const it = await BT.repo.getItem(uid);
+        if (!it) return;
+        it.user.reading = before;
+        BT.normalize.migrateUserAxes(it.user);
+        await BT.repo.putItem(it);
+        BT.router.resolve();
       },
     });
     return item;
@@ -1228,13 +1374,21 @@ BT.ui = (function () {
   return {
     esc, dateField, waterline, precisionTag, dateCell, whenText, driftBadge, shortWhen,
     poster, posterUrl, chipart, hues,
-    genresOf, genreTag, formatOf, formatIcon, statusCell, statusOf, statusWord, pileTag, pileLabel,
+    genresOf, genreTag, formatOf, formatIcon, pileTag, pileLabel,
+    /* The two axes. Everything new reads these. */
+    ownershipOf, readingOf, ownershipWord, readingWord, readingCell, ownershipCell,
+    OWNERSHIPS, OWNERSHIP_WORD, READINGS, READING_WORD,
+    setOwnership, setReading, migrateLibraryAxes,
+    /* The legacy ladder, DERIVED. Kept only so the files outside this change
+       that still read `user.status` — and 75-view-scan, which renders the word
+       39-scan hands it — keep working. Nothing new should call these. */
+    statusOf, statusWord,
     upcomingRelease, publishedKey, hasPublished,
     progressOf, progressFraction, progressText, progressBar, totalPagesOf, pagesCell, setProgress,
     table, tableRow, grid, COLUMNS,
     emptyState, errorBox, skeletonGrid, groupHead, toast, banner, crumb, paneActions,
     selection, rowNav,
-    addItem, hydrate, setStatus, setPile, bulkSetPile, confirmDialog,
+    addItem, hydrate, setPile, bulkSetPile, confirmDialog,
     STATUSES, STATUS_WORD, PILE_WORD, FORMAT_LABEL,
   };
 })();

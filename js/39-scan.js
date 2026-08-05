@@ -323,30 +323,35 @@ BT.scan = (function () {
 
   /* ══ 4 · WRITES ══════════════════════════════════════════════════════════ */
 
-  /* ── THE STATUS A SCAN LANDS ON ──────────────────────────────────────────
-     `have`, not `want`, and it is stated here once so all three add paths
-     below cannot disagree about it.
+  /* ── THE STATE A SCAN LANDS ON ───────────────────────────────────────────
+     own + unread, and BOTH axes are stated here once so all three add paths
+     below cannot disagree about either of them.
 
-     The reasoning is the barcode itself: you were holding the book, under a
-     lens, close enough to read a thirteen-digit code off its back cover. That
-     is an OWNERSHIP observation, and it is the strongest one this app ever
-     gets — stronger than anything the reader could type. `want` means the
-     opposite thing ("I do not have this and would like to"), so defaulting a
-     scanned shelf to it filed every book the reader physically owns onto a
-     wishlist, which is precisely the muddle the `have` rung was added to end.
+     `own` is the barcode itself: you were holding the book, under a lens, close
+     enough to read a thirteen-digit code off its back cover. That is an
+     OWNERSHIP observation, and it is the strongest one this app ever gets —
+     stronger than anything the reader could type. `want` means the opposite
+     thing ("I do not have this and would like to"), so defaulting a scanned
+     shelf to it filed every book the reader physically owns onto a wishlist.
 
-     The SEARCH door defaults to `want` for the mirror-image reason and must
-     stay that way — see BT.ui.addItem. Two doors, two different facts, and the
-     difference is the whole point of having both.
+     `unread` is the honest other half, and stating it is what stops the
+     ownership claim leaking into the reading axis. Holding a book says nothing
+     about whether you have read it, so the scan claims the least it can there
+     — and a reader scanning a shelf they have read most of corrects a book at a
+     time, rather than the app announcing they have finished a hundred books.
 
-     Overridable: `opts.status` still wins, so a view that knows better (a
-     reader scanning a stack they are already partway through) can say so. */
-  const SCAN_STATUS = 'have';
+     The SEARCH door defaults to want + unread for the mirror-image reason and
+     must stay that way — see BT.ui.addItem. Two doors, two different ownership
+     facts, and the difference is the whole point of having both.
+
+     Overridable: `opts.state` still wins, so a view that knows better (a reader
+     scanning a stack they are already partway through) can say so. */
+  const SCAN_STATE = { ownership: 'own', reading: 'unread' };
 
   /* Stated at every call site rather than left to createClosedItem's default,
      so the choice is visible where the write is made and a future add path
-     cannot inherit `want` by forgetting to think about it. */
-  const scanOpts = opts => Object.assign({ status: SCAN_STATUS }, opts || {});
+     cannot inherit want + unread by forgetting to think about it. */
+  const scanOpts = opts => Object.assign({ state: SCAN_STATE }, opts || {});
 
   /* Create a NEW closed item for a scanned code.
 
@@ -359,7 +364,7 @@ BT.scan = (function () {
     base.uid = await freeUid(base.uid || BT.normalize.uidOf('isbn', isbn13));
 
     const item = BT.normalize.withDefaults(
-      base, opts.status || SCAN_STATUS, opts.source || 'scan', 'closed');
+      base, opts.state || SCAN_STATE, opts.source || 'scan', 'closed');
 
     /* THE SCANNED CODE IS THE CLAIM, and it is restated here rather than
        trusted to the payload. Field presence on Open Library edition records
@@ -420,13 +425,15 @@ BT.scan = (function () {
      they already have — "which copy is it?" — and losing months of progress to
      that answer would be unforgivable.
 
-     Which is also why `user.status` is NOT touched here, even though the same
-     barcode on a NEW book lands it in `have`. That default is for a record
-     this app is minting; this record already exists and is already filed, by
-     the reader, possibly as `reading` or `finished`. Answering "which copy?"
-     is not a statement about how far through it they are, and a pin that
-     quietly re-filed a book they were halfway through would be the scanner
-     editing a shelf it was only asked to identify.
+     Which is also why NEITHER `user.ownership` NOR `user.reading` is touched
+     here, even though the same barcode on a NEW book lands it in own + unread.
+     That default is for a record this app is minting; this record already
+     exists and is already filed, by the reader, possibly as `reading` or
+     `finished`. Answering "which copy?" is not a statement about how far
+     through it they are, and a pin that quietly re-filed a book they were
+     halfway through would be the scanner editing a shelf it was only asked to
+     identify. It is not a statement about ownership either — the reader may
+     have pinned the printing their library lends.
 
      WHAT HAPPENS TO THE OLD INDEX ROWS IS THE WHOLE FUNCTION. An open item can
      carry hundreds of candidate ISBNs (The Hobbit's work yields 310 distinct
@@ -762,10 +769,26 @@ BT.scan = (function () {
     /* Already pinned: a no-op REPORT, not a write and not an error. Scanning a
        shelf you have already scanned is the normal way to check you did. */
     if (found.action === 'owned') {
+      const u = (found.item && found.item.user) || {};
+      /* THE FORGIVING READ, done here rather than through BT.ui because this
+         file sits below the UI layer and must not reach up into it. It is the
+         same rule BT.ui.ownershipOf uses: the stored axis if it is a legal
+         value, otherwise derived from the legacy `user.status` for a record the
+         migration sweep has not reached. */
+      const from = BT.normalize.axesFromLegacyStatus(u.status);
+      const ownership = BT.normalize.OWNERSHIP.indexOf(u.ownership) >= 0
+        ? u.ownership : from.ownership;
+      const reading = BT.normalize.READING.indexOf(u.reading) >= 0
+        ? u.reading : from.reading;
       return {
         result: 'already-owned', uid: found.uid,
         title: found.item.title,
-        status: (found.item.user && found.item.user.status) || null,
+        ownership, reading,
+        /* The legacy mirror travels too, because 75-view-scan renders this
+           field through BT.ui.STATUS_WORD and is not part of this change.
+           Derived from the axes rather than copied off the record so the two
+           can never disagree about the same book. */
+        status: BT.normalize.legacyStatusFrom(ownership, reading),
       };
     }
 

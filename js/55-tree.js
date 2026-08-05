@@ -60,15 +60,17 @@ BT.tree = (function () {
      the work is tracked and no edition has been chosen yet (scope 'open'). */
   const formatOf = it => (it.facets && it.facets.format) || 'unspecified';
 
-  /* One reading of the reading ladder, ui-core's. The fallback matters for the
-     same reason bucketOf's does: a record whose status this build does not
-     recognise — an older export, a device mid-schema-change — must still land
-     on a shelf. It counts as `want`, the bottom rung, rather than vanishing
-     from every row while still counting toward "All books", because a tree
-     whose numbers do not add up is a tree nobody trusts. Nothing is written:
-     this is a display reading, and the stored value is left alone. */
-  const statusOf = it => (BT.ui && BT.ui.statusOf ? BT.ui.statusOf(it)
-    : ((it.user && it.user.status) || 'want'));
+  /* One reading of each axis, ui-core's. The fallback matters for the same
+     reason bucketOf's does: a record whose values this build does not
+     recognise — an older export, a device mid-schema-change, a row the
+     migration sweep has not reached — must still land on a shelf. It counts as
+     `want` / `unread`, the two values that claim the least, rather than
+     vanishing from every row while still counting toward "All books", because
+     a tree whose numbers do not add up is a tree nobody trusts. Nothing is
+     written: these are display readings, and the stored values are left
+     alone. */
+  const ownershipOf = it => (BT.ui && BT.ui.ownershipOf ? BT.ui.ownershipOf(it) : 'want');
+  const readingOf = it => (BT.ui && BT.ui.readingOf ? BT.ui.readingOf(it) : 'unread');
 
   /* Rows for the three formats a reader actually distinguishes. `unspecified`
      deliberately has NO row: for most libraries it is the largest group by far
@@ -121,7 +123,14 @@ BT.tree = (function () {
     const follows = (await BT.repo.allFollows()).filter(f => f && f.type === 'author');
     const unread = await BT.repo.unreadCount();
 
-    const byStatus = { want: 0, have: 0, reading: 0, finished: 0, dropped: 0 };
+    /* Two tallies now, not one, because a book is counted on BOTH axes: it has
+       an ownership and it has a reading state. That is why these two objects
+       each sum to the library total on their own and why the two groups below
+       do not add up to each other — which is the correct answer to two
+       different questions, and is exactly what one flat ladder could not
+       express. */
+    const byOwnership = { want: 0, own: 0, dontown: 0 };
+    const byReading = { unread: 0, reading: 0, finished: 0, dnf: 0 };
     const byGenre = {};
     const byFormat = {};
     const byPile = { sell: 0, sold: 0 };
@@ -131,8 +140,10 @@ BT.tree = (function () {
     let upcoming = 0;
 
     for (const it of items) {
-      const st = statusOf(it);
-      byStatus[st] = (byStatus[st] || 0) + 1;
+      const own = ownershipOf(it);
+      byOwnership[own] = (byOwnership[own] || 0) + 1;
+      const rd = readingOf(it);
+      byReading[rd] = (byReading[rd] || 0) + 1;
       const g = bucketOf(it);
       byGenre[g] = (byGenre[g] || 0) + 1;
       const f = formatOf(it);
@@ -180,20 +191,39 @@ BT.tree = (function () {
     return [
       { id: 'library', label: 'Library', children: [
         { id: 'all', label: 'All books', route: '#/library', n: items.length },
-        { id: 'st-want', label: 'Want', route: '#/library?status=want', n: byStatus.want, dot: 'want' },
-        /* Between Want and Reading, because that is the order the shelf goes
-           in: you wanted it, then you got it, then you opened it. It is also
-           the row a scanned library fills up — 39-scan defaults every barcode
-           to `have` — so burying it under Reading would hide the largest group
-           in a scan-first shelf. The route is `?status=have` and 62-view-list
-           filters on exactly that string; the two names have to stay in step,
-           because a drift here does not error, it opens an empty list that
-           reads as "you own nothing", which is the most convincing wrong
-           answer this app can give. */
-        { id: 'st-have', label: 'Have', route: '#/library?status=have', n: byStatus.have, dot: 'have' },
-        { id: 'st-reading', label: 'Reading', route: '#/library?status=reading', n: byStatus.reading, dot: 'reading', fill: 1 },
-        { id: 'st-finished', label: 'Finished', route: '#/library?status=finished', n: byStatus.finished, dot: 'finished' },
-        { id: 'st-dropped', label: 'Dropped', route: '#/library?status=dropped', n: byStatus.dropped, dot: 'dropped' },
+        /* TWO GROUPS, NOT ONE FLAT LADDER, and they are groups rather than a
+           second run of top-level rows for the same reason By genre is: the
+           heading is what tells the reader these five rows answer one question
+           and those four answer a different one. Flat, "Own" and "Unread" sit
+           adjacent and read as two rungs of one scale, which is the exact
+           confusion the split was made to end.
+
+           Every route name here has to match 62-view-list's filter names
+           exactly. A drift does not error — it opens an empty list, which
+           reads as "you own nothing" and is the most convincing wrong answer
+           this app can give. Both sides take their vocabulary from
+           BT.ui.OWNERSHIPS / BT.ui.READINGS for that reason.
+
+           Ordered by the vocabulary arrays rather than typed out, so the day a
+           value is added or renamed there is no second hand-written copy of the
+           list here to forget — the failure `bucketOf` above documents. */
+        { id: 'ownership', label: 'Ownership', children: BT.ui.OWNERSHIPS.map(o => ({
+          id: 'own-' + o,
+          label: BT.ui.OWNERSHIP_WORD[o],
+          route: '#/library?ownership=' + o,
+          n: byOwnership[o] || 0,
+          dot: o,
+        })) },
+        { id: 'reading', label: 'Reading', children: BT.ui.READINGS.map(r => ({
+          id: 'rd-' + r,
+          label: BT.ui.READING_WORD[r],
+          route: '#/library?reading=' + r,
+          n: byReading[r] || 0,
+          dot: r,
+          /* The one filled dot in the tree. Reading is the state the app is
+             actually about; a second filled dot would spend that distinction. */
+          fill: r === 'reading' ? 1 : 0,
+        })) },
         /* Ids and labels both come from config so the tree can never drift out
            of step with the bucketing rules or with any other screen.
 
@@ -315,7 +345,12 @@ BT.tree = (function () {
      no node leaves the arrow keys starting from the top of the tree every
      time you press one. */
   const FILTER_PARAMS = {
-    '/library': ['status', 'genre', 'format', 'tag', 'pile'],
+    /* `status` stays in this list even though no node emits it any more. A
+       bookmarked or shared `#/library?status=finished` is redirected by
+       62-view-list, but until that redirect lands the hash really is a filtered
+       library — and leaving the old name out would light "All books" over a
+       list that is not all books. */
+    '/library': ['ownership', 'reading', 'status', 'genre', 'format', 'tag', 'pile'],
     '/up': ['undated'],
   };
 
@@ -369,9 +404,45 @@ BT.tree = (function () {
     if (focusIdx >= 0 && rows[focusIdx]) rows[focusIdx].classList.add('is-focus');
   }
 
+  /* ── The ownership/reading migration, kicked ──────────────────────────
+     Stamps the two axes onto every stored record that predates them. The sweep
+     itself is BT.ui.migrateLibraryAxes; this is only where it is fired.
+
+     HERE, and not in 90-boot beside retirePublisherFollows, because init() is
+     the once-per-session hook this module owns and boot is not part of this
+     change. Same shape and same rules as the two migrations boot already runs.
+
+     NOT AWAITED, which is the rule 90-boot enforces everywhere: nothing at
+     startup may block on work whose answer changes nothing about what happens
+     next. And here it genuinely changes nothing — BT.ui.ownershipOf and
+     BT.ui.readingOf DERIVE both axes from the legacy `user.status` whenever the
+     stored field is missing, so every shelf, count, filter and row is already
+     correct before this runs, while it is running, and if it never runs at all.
+     What the sweep buys is the axes being stored, so the next device to sync
+     gets them and so a reader can set the two independently.
+
+     Feature-detected on BT.ui rather than assumed. A tree that cannot find the
+     sweep is a migration deferred, not a navigation aid missing, and this file
+     is the one whose failure takes the router with it — see the try/catch
+     90-boot wraps refresh() in.
+
+     The refresh at the end is gated on `n` for the reason retirePublisherFollows
+     gates its own: on the second and every later boot the sweep writes nothing,
+     and a tree rebuild for zero changes is a full pass over the library for
+     nothing. */
+  function migrateAxes() {
+    if (!BT.ui || typeof BT.ui.migrateLibraryAxes !== 'function') return;
+    Promise.resolve()
+      .then(() => BT.ui.migrateLibraryAxes())
+      .then(n => { if (n) refresh(); })
+      .catch(e => console.warn('[tree] could not migrate reading/ownership', e && e.message));
+  }
+
   function init() {
     const host = document.getElementById('tree');
     const filter = document.getElementById('treeFilter');
+
+    migrateAxes();
 
     host.addEventListener('click', e => {
       const toggle = e.target.closest('[data-toggle]');

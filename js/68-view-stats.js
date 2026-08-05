@@ -307,7 +307,7 @@ BT.viewStats = (function () {
     }
     const out = new Map();
     for (const it of items) {
-      if (BT.ui.statusOf(it) !== 'finished') continue;
+      if (BT.ui.readingOf(it) !== 'finished') continue;
       const at = (it.user && it.user.finishedAt) || logged.get(it.uid) || null;
       if (at) out.set(it.uid, at);
     }
@@ -390,7 +390,7 @@ BT.viewStats = (function () {
         negative ones, and the next entry is measured from the new position.`);
     }
     const unlogged = items.filter(it =>
-      BT.ui.statusOf(it) === 'finished' && !hasPosition(it)).length;
+      BT.ui.readingOf(it) === 'finished' && !hasPosition(it)).length;
     if (unlogged) {
       out.push(`${esc(BT.util.pluralize(unlogged, 'finished book'))} never had a page recorded, so
         ${unlogged === 1 ? 'it contributes' : 'they contribute'} nothing to the bars.
@@ -489,13 +489,21 @@ BT.viewStats = (function () {
   }
 
   /* ── Tiles ─────────────────────────────────────────────────────────────
-     Read through BT.ui.statusOf rather than off `user.status`, so a record
-     written before the `have` rung existed, or restored from another device
-     mid-schema-change, lands on the same shelf here that it draws on in the
-     list. A stats page and a list disagreeing about how many books you own is
-     the kind of bug that gets the whole screen distrusted. */
+     Read through BT.ui.ownershipOf / BT.ui.readingOf rather than off the
+     record, so a book whose axes the migration sweep has not stamped yet, or
+     one restored from another device mid-schema-change, lands on the same shelf
+     here that it draws on in the list. A stats page and a list disagreeing
+     about how many books you own is the kind of bug that gets the whole screen
+     distrusted.
+
+     TWO TALLIES, and each sums to the whole library on its own — a book has
+     both an ownership and a reading state. The tiles are grouped accordingly:
+     the three ownership counts, then the four reading counts. They deliberately
+     do NOT add up across the two groups, which is what makes them two answers
+     instead of one confused one. */
   function tilesBlock(items, finishes) {
-    const byStatus = tally(items, BT.ui.statusOf);
+    const byOwnership = tally(items, BT.ui.ownershipOf);
+    const byReading = tally(items, BT.ui.readingOf);
     const rated = items.filter(it => it.user && it.user.rating != null);
     const avg = rated.length
       ? rated.reduce((s, it) => s + it.user.rating, 0) / rated.length : null;
@@ -506,11 +514,10 @@ BT.viewStats = (function () {
     const read = pagesRead(items);
 
     return `<div class="tiles">
-      ${tile(byStatus.want || 0, 'Want')}
-      ${tile(byStatus.have || 0, 'Have')}
-      ${tile(byStatus.reading || 0, 'Reading')}
-      ${tile(byStatus.finished || 0, 'Finished')}
-      ${tile(byStatus.dropped || 0, 'Dropped')}
+      ${BT.ui.OWNERSHIPS.map(o =>
+        tile(byOwnership[o] || 0, BT.ui.OWNERSHIP_WORD[o])).join('')}
+      ${BT.ui.READINGS.map(r =>
+        tile(byReading[r] || 0, BT.ui.READING_WORD[r])).join('')}
       ${tile(thisYear, `Finished in ${year}`)}
       ${tile(read.total.toLocaleString(), 'Pages read')}
       ${tile(avg != null ? avg.toFixed(1) : '—', 'Your average')}
@@ -535,7 +542,7 @@ BT.viewStats = (function () {
     for (const it of items) {
       const p = BT.ui.progressOf(it);
       const pos = (p && p.currentPage > 0) ? p.currentPage : 0;
-      if (BT.ui.statusOf(it) === 'finished') {
+      if (BT.ui.readingOf(it) === 'finished') {
         const extent = BT.ui.totalPagesOf(it);
         if (extent) total += Math.max(extent, pos);
         else if (pos) total += pos;
@@ -549,23 +556,35 @@ BT.viewStats = (function () {
     return { total, unknownFinished };
   }
 
-  /* The ladder as one bar. `finished` and `dropped` take the two neutral text
-     tokens rather than a hue, exactly as their tree dots do (.c-finished and
-     .c-dropped in 03-components.css) — the palette has six hue families and
-     they are spent on genre, so a seventh invented for "dropped" would exist
-     in this app and not in MovieTrak, which is the one thing the shared
-     palette is for. Muted against faint is a visible difference in both
-     themes, and every segment carries its label in the tooltip regardless. */
-  const STATUS_INK = {
-    want: 'var(--bt-ice)', have: 'var(--bt-moss)', reading: 'var(--bt-teal)',
-    finished: 'var(--bt-text-muted)', dropped: 'var(--bt-text-faint)',
+  /* TWO BARS, ONE PER AXIS, because one bar cannot draw two facts. Each is a
+     complete partition of the library on its own, so each fills its full width
+     — which is also what makes them comparable: the same shelf, cut two ways,
+     stacked so the cuts line up.
+
+     `finished` and `dnf` take the two neutral text tokens rather than a hue,
+     exactly as their tree dots do (.c-finished and .c-dnf in
+     03-components.css) — the palette has six hue families and they are spent on
+     genre, so a seventh invented here would exist in this app and not in
+     MovieTrak, which is the one thing the shared palette is for. Muted against
+     faint is a visible difference in both themes, and every segment carries its
+     label in the tooltip regardless. */
+  const OWNERSHIP_INK = {
+    want: 'var(--bt-ice)', own: 'var(--bt-moss)', dontown: 'var(--bt-text-faint)',
   };
-  function compositionBlock(items) {
-    const byStatus = tally(items, BT.ui.statusOf);
-    const segs = BT.ui.STATUSES.filter(s => byStatus[s])
-      .map(s => `<i style="flex:${byStatus[s]};background:${STATUS_INK[s]}"
-        title="${esc(`${BT.ui.statusWord(s)}: ${byStatus[s]}`)}"></i>`).join('');
+  const READING_INK = {
+    unread: 'var(--bt-text-muted)', reading: 'var(--bt-teal)',
+    finished: 'var(--bt-moss)', dnf: 'var(--bt-text-faint)',
+  };
+  function stackBar(items, values, words, ink, read) {
+    const by = tally(items, read);
+    const segs = values.filter(v => by[v])
+      .map(v => `<i style="flex:${by[v]};background:${ink[v]}"
+        title="${esc(`${words[v]}: ${by[v]}`)}"></i>`).join('');
     return segs ? `<div class="stack">${segs}</div>` : '';
+  }
+  function compositionBlock(items) {
+    return stackBar(items, BT.ui.READINGS, BT.ui.READING_WORD, READING_INK, BT.ui.readingOf)
+      + stackBar(items, BT.ui.OWNERSHIPS, BT.ui.OWNERSHIP_WORD, OWNERSHIP_INK, BT.ui.ownershipOf);
   }
 
   /* ── Genre ─────────────────────────────────────────────────────────────
@@ -750,7 +769,7 @@ BT.viewStats = (function () {
     const read = pagesRead(items);
     const rated = items.filter(it => it.user && it.user.rating != null).length;
     const noFinishDate = items.filter(it =>
-      BT.ui.statusOf(it) === 'finished').length - finishes.size;
+      BT.ui.readingOf(it) === 'finished').length - finishes.size;
 
     /* WHAT SURVIVES HERE IS FACTS ABOUT THE READER'S OWN DATA, never methodology.
        The removed notes explained how pages, pace, averages and genre buckets are
@@ -801,7 +820,7 @@ BT.viewStats = (function () {
   /* Counts into a null-prototype object. A plain `{}` inherits `toString` and
      `constructor`, so a stored value of either name would land on a truthy
      function and be counted as one — the same prototype-chain trap
-     BT.ui.statusOf tests around an array for. Nothing here is user-typed
+     BT.ui.readingOf tests around an array for. Nothing here is user-typed
      today, but tags and custom genre ids both are one feature away from
      reaching a tally. */
   function tally(arr, fn) {

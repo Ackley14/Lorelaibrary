@@ -2157,47 +2157,191 @@ BT.normalize = (function () {
     cur[parts[parts.length - 1]] = value;
   }
 
+  /* ══ THE TWO USER AXES ═══════════════════════════════════════════════════
+     A book's state is TWOFOLD — "the status of a book is actually twofold,
+     read status and ownership status" — and the single ladder this app shipped
+     with could not say both at once. `want → have → reading → finished →
+     dropped` forced one answer to two questions: filing a library copy you are
+     halfway through as `reading` erased that you do not own it, and there was
+     no way at all to say "I own this and gave up on it" separately from "I read
+     a borrowed copy and gave up on it".
+
+       user.ownership   want | own | dontown
+       user.reading     unread | reading | finished | dnf
+
+     `user.pile` (null | 'sell' | 'sold') is a THIRD, separate thing and is
+     untouched by any of this. Ownership says whether the book is yours; pile
+     says what you intend to do with a copy that is. A book can be `own` +
+     `finished` + `sell` all at once, which is the ordinary state of a shelf
+     clear-out, and any control that folds two of those together loses a fact
+     the reader entered by hand.
+
+     `user.status` SURVIVES as a derived mirror — see legacyStatusFrom. It is
+     never the source of truth again, but three files that are not part of this
+     change still read it (10-db's by_status_priority index, 12-repo's
+     upcomingItems exclusion, 48-sync's T1 "currently reading" tier), and a
+     field that silently stops existing turns each of those into a filter that
+     matches nothing rather than an error anybody would notice. */
+  const OWNERSHIP = ['want', 'own', 'dontown'];
+  const READING = ['unread', 'reading', 'finished', 'dnf'];
+
+  /* THE MIGRATION TABLE, and it is the one part of this file that is about
+     real synced user data rather than about catalogue records.
+
+     The old ladder never stated ownership for its reading rungs, so `own` here
+     is INFERRED rather than read. That direction is deliberate: a reader who
+     had books filed as `reading`, `finished` or `dropped` almost certainly had
+     a copy of them, and guessing `dontown` instead would empty a real shelf —
+     "Own" would report zero for a library of hundreds and the reader would
+     conclude the app had lost their data. Over-claiming ownership is one tap to
+     correct on the book it is wrong about; under-claiming it is invisible.
+
+     `dropped` becomes `dnf`, which is the reader's own word for it. */
+  const LEGACY_AXES = {
+    want:     { ownership: 'want', reading: 'unread' },
+    have:     { ownership: 'own',  reading: 'unread' },
+    reading:  { ownership: 'own',  reading: 'reading' },
+    finished: { ownership: 'own',  reading: 'finished' },
+    dropped:  { ownership: 'own',  reading: 'dnf' },
+  };
+
+  /* Anything this build does not recognise — a hand-edited import, a sync from
+     a future ladder, a stray 'toString' — lands on want + unread. That is the
+     claim-the-least answer: it asserts no ownership and no reading, and it is
+     one tap from being corrected by the person who actually knows.
+
+     Looked up with hasOwnProperty rather than by indexing, because a plain
+     object literal inherits `toString` and `constructor` as truthy functions —
+     a record carrying either as its status would otherwise return a FUNCTION
+     here and every downstream `.ownership` read would be undefined. */
+  function axesFromLegacyStatus(status) {
+    return Object.prototype.hasOwnProperty.call(LEGACY_AXES, status)
+      ? LEGACY_AXES[status] : LEGACY_AXES.want;
+  }
+
+  /* The mirror, projecting the two axes back onto the old five-rung ladder for
+     the files that still read `user.status`. Reading wins wherever the two
+     disagree, because every rung above `have` on the old ladder was a reading
+     fact — which is what makes the projection exact for migrated data: run it
+     over the table above and every one of the five rungs comes back as itself.
+
+     The one lossy pair is ownership `dontown` + reading `unread`, which mirrors
+     to `want` — the old ladder has no rung for "I have read none of this and do
+     not have a copy", and `want` is the only one of the five that does not
+     CLAIM a copy. `have` would, and that is the reading to avoid: `dontown` is
+     not an inference the way the migration table's `own` is, it is a fact the
+     reader entered by hand, so a mirror that answered `have` would contradict
+     it — visibly, in 39-scan's already-owned report, which renders this field
+     as the word "Own" through BT.ui.STATUS_WORD, and on any device still
+     running the old build that syncs the record back. Under-claiming here is
+     the safe direction for exactly the reason over-claiming is safe in the
+     migration table: there ownership was unknown and had to be guessed, here it
+     is known and must not be overwritten. */
+  function legacyStatusFrom(ownership, reading) {
+    const r = READING.indexOf(reading) >= 0 ? reading : 'unread';
+    if (r === 'reading') return 'reading';
+    if (r === 'finished') return 'finished';
+    if (r === 'dnf') return 'dropped';
+    return ownership === 'own' ? 'have' : 'want';
+  }
+
+  /* THE MIGRATION ITSELF. Mutates one `user` block in place and answers 1 if it
+     changed anything, 0 if there was nothing to do.
+
+     IDEMPOTENT BY CONSTRUCTION, with no version flag to get out of step: each
+     axis is written only when what is stored is not a legal value for that
+     axis, and the mirror only when it disagrees with the axes. A second run
+     over an already-migrated block therefore takes all three no-op branches
+     and answers 0 — which is also what makes the sweep in 50-ui-core cheap
+     enough to run on every boot instead of once behind a marker that a restored
+     export or a sync from an old device could reset.
+
+     SAFE HALF-RUN for the same reason. The axes are derived independently, so a
+     block that somehow carries `ownership` and not `reading` (a sweep that was
+     interrupted between two writes, a merge that took half a record) fills in
+     the missing one from the still-present legacy `status` and keeps the axis
+     that is already there. Nothing is ever cleared, so an interrupted run
+     leaves records that are either fully migrated or entirely untouched — never
+     a record that has lost something. */
+  function migrateUserAxes(user) {
+    if (!user || typeof user !== 'object') return 0;
+    const from = axesFromLegacyStatus(user.status);
+    let changed = 0;
+    if (OWNERSHIP.indexOf(user.ownership) < 0) { user.ownership = from.ownership; changed = 1; }
+    if (READING.indexOf(user.reading) < 0) { user.reading = from.reading; changed = 1; }
+    const mirror = legacyStatusFrom(user.ownership, user.reading);
+    if (user.status !== mirror) { user.status = mirror; changed = 1; }
+    return changed;
+  }
+
+  /* What a caller means by "add this book in this state". Accepts either axis
+     pair — `{ ownership, reading }`, which is what the two add doors now pass —
+     or a bare legacy string, so a caller that has not been rewritten (and any
+     stored route that still speaks the old ladder) keeps working. */
+  function startingAxes(state) {
+    if (state && typeof state === 'object') {
+      return {
+        ownership: OWNERSHIP.indexOf(state.ownership) >= 0 ? state.ownership : 'want',
+        reading: READING.indexOf(state.reading) >= 0 ? state.reading : 'unread',
+      };
+    }
+    return axesFromLegacyStatus(state);
+  }
+
   /* ══ DEFAULTS ════════════════════════════════════════════════════════════
      A brand-new item needs reader state and refresh bookkeeping. Everything
      here is a 0|1 rather than a boolean because IndexedDB cannot use booleans
      as keys, and 12-repo coerces them anyway — writing them correctly at the
      source means the coercion never has to fire. */
-  function withDefaults(item, status, source, scope) {
+  function withDefaults(item, state, source, scope) {
     if (!item) return item;
     item.kind = item.kind || KIND;
     item.scope = scope || item.scope || 'open';
 
-    item.user = Object.assign({
-      /* THE CALLER'S WORD, TAKEN AS GIVEN. The two add doors disagree on
-         purpose and this is not the place to second-guess either of them:
-         BT.ui.addItem passes 'want' (you looked a title up — a wishlist entry),
-         39-scan passes 'have' (you were holding the object under the lens, so
-         you own it). 'want' is the FALLBACK, for a caller that says nothing.
+    /* Held BEFORE the assign below, because what this record already said about
+       itself decides whether the caller's opening state is used at all. */
+    const prior = item.user || {};
 
-         NOTHING HERE REWRITES AN EXISTING RECORD. `item.user` is assigned OVER
-         these defaults, so a status already on the item always survives — which
-         is what makes the ladder gaining a rung a non-event for stored data.
-         Every book saved before `have` existed still reads want|reading|
-         finished|dropped and stays exactly where the reader filed it; deciding
-         on their behalf which of their `want` books they secretly own would be
-         inventing ownership out of nothing. A value this build does not know
-         is read as `want` at DISPLAY time only (BT.ui.statusOf) and is one tap
-         from being corrected by the person who actually knows. */
-      status: status || 'want',
+    item.user = Object.assign({
       priority: 0,
       notes: '',
       tags: [],
-      /* The OWNERSHIP axis, independent of reading status: you can own a book
-         you have not started and can finish one you never owned. null is a real
-         value here, not "unset", which is why it is stamped rather than left
-         off. `rating` deliberately is NOT stamped — the by_userRating index is
-         sparse by design and a 0 would mean "rated zero". */
+      /* The DISPOSITION axis — what you intend to do with a copy — which is
+         separate again from ownership and from reading. null is a real value
+         here, not "unset", which is why it is stamped rather than left off.
+         `rating` deliberately is NOT stamped: the by_userRating index is sparse
+         by design and a 0 would mean "rated zero". */
       pile: null,
       progress: null,
       addedAt: Date.now(), updatedAt: Date.now(),
       startedAt: null, finishedAt: null,
       source: source || 'search',
-    }, item.user || {});
+    }, prior);
+
+    /* THE CALLER'S WORD, TAKEN AS GIVEN, AND ONLY FOR A RECORD BEING MINTED.
+       The two add doors disagree on purpose and this is not the place to
+       second-guess either: BT.ui.addItem passes want + unread (you looked a
+       title up — a wishlist entry), 39-scan passes own + unread (you were
+       holding the object under the lens, so you own it).
+
+       NOTHING HERE REWRITES AN EXISTING RECORD, and the gate is stated as three
+       explicit `== null` tests rather than folded into the Object.assign above
+       because that is exactly where it would go wrong: a stored record carries
+       `status` and, until the sweep reaches it, NO axes — so defaults assigned
+       underneath it would survive as the caller's opening state and a shelf of
+       finished books re-normalised on any write would come back as want +
+       unread. Deriving from what the record itself says is the only safe read.
+
+       withDefaults runs on every add path and on any later re-normalisation, so
+       this doubles as the migration's second front door: a record that reaches
+       it before the sweep does is migrated here and the sweep then finds
+       nothing to do. Both call the same function, so they cannot disagree. */
+    if (prior.ownership == null && prior.reading == null && prior.status == null) {
+      const start = startingAxes(state);
+      item.user.ownership = start.ownership;
+      item.user.reading = start.reading;
+    }
+    migrateUserAxes(item.user);
 
     /* T4 for anything already published, which is most of a library and
        exactly the point of that tier — a 1965 novel does not need polling. A
@@ -2337,6 +2481,16 @@ BT.normalize = (function () {
        1965 novel, and the earliest-printing rule that dates a work. */
     workDate, earlierRelease,
     withDefaults, mergeItem, bucketGenres,
+    /* The two axes and the one migration between them. Exported as the SINGLE
+       definition of the vocabulary so the tree's rows, the list's filters, the
+       inspector's controls and the stats tiles cannot each keep a private copy
+       that drifts — the failure 55-tree.js documents for `genreOf`, where a
+       name that no longer matched silently disabled a feature instead of
+       throwing. `migrateUserAxes` is the pure per-record half; the library-wide
+       sweep that calls it lives in 50-ui-core, which is the layer allowed to
+       touch BT.repo. */
+    OWNERSHIP, READING, LEGACY_AXES,
+    axesFromLegacyStatus, legacyStatusFrom, migrateUserAxes, startingAxes,
     /* The one answer to "can this book show an edition list?", read by the
        sweep (which decides whether to spend a request on the bridge) and by the
        picker (which decides what to draw when there is nothing). Two copies of

@@ -1166,6 +1166,87 @@ BT.follows = (function () {
     });
   }
 
+  /* ══ IS THIS A REISSUE RATHER THAN A NEW BOOK? ══════════════════════════
+     -> { reissue, firstYear, releaseYear, gap }
+
+     THE REPORTED BUG: a 2018 novel getting a 2026 printing sat in the upcoming
+     list looking exactly like a new release. Measured on this user's own four
+     follows, live, Open Library half — `Exit Strategy`, first published 2018,
+     dated 2026, one row above `Platform Decay`, which really is new. Both said
+     "2026" in the same type at the same size, so the list could not be read.
+
+     THE SIGNAL IS ALREADY STORED. Every work row carries the release we show
+     AND `firstYear`, and the union preserves the earlier of the two sources'
+     answers precisely so this question stays answerable — see mergeSameSource,
+     where the FORWARD-LOOKING printing wins the date and `firstYear` keeps the
+     work's own age.
+
+     ── THE THRESHOLD IS ONE YEAR, WITH NO GRACE PERIOD ──────────────────────
+     A paperback the year after the hardback is a printing of a book that
+     already exists, so `firstYear < releaseYear` is the whole rule. The grace
+     year was considered and MEASURED against rather than argued about: of 182
+     stored works across Martha Wells, Gwendolyn Kiste, Brandon Sanderson and
+     Stephen King, 22 carry a gap of exactly one year, and every one of them is
+     a later printing of an existing book — the paperbacks of `Defiant`,
+     `Tress of the Emerald Sea`, `Cytonic`, `Network Effect`, `Holly`,
+     `The Haunting of Velkwood`, `The Edge of Worlds`. Not one was a new book
+     mislabelled by an off-by-one year. A grace year would therefore have let
+     the whole paperback cycle of four prolific authors back into "upcoming",
+     which is the exact redundancy this exists to remove.
+
+     ── AN UNUSABLE `firstYear` MEANS NEW, NEVER HIDDEN ──────────────────────
+     `first_publish_year` is a computed MINIMUM over every edition Open Library
+     holds and it is frequently wrong — The Alloy of Law, published 2011,
+     reports 2001 (verified). So three readings are refused outright, and all
+     three fail OPEN, toward showing the book:
+
+       missing        olWork() already falls back to the latest year when the
+                      field is absent, which lands here as a gap of zero. A row
+                      that still has nothing is a record we cannot date, not a
+                      reprint.
+       later than the a work cannot first exist after the printing we are
+       release        looking at. The record contradicts itself and neither
+                      half of it can be trusted to hide anything.
+       absurdly early below FIRST_YEAR_FLOOR is a corrupt field (bad MARC years
+                      arrive as 0, 1 and 101), not a very old book.
+
+     WHAT IS NOT DETECTABLE FROM INSIDE THE RECORD is the Alloy-of-Law class of
+     error where the wrong year is merely PLAUSIBLE — a brand-new 2026 title
+     with one edition record mistyped as 2016 reads identically to a real
+     reissue, and no test here can separate them. That is why 67-view-people.js
+     DISCLOSES the count and keeps the hidden rows one click away instead of
+     deleting them: a wrong verdict then costs the reader a click, not a book.
+     Note also that the common form of this error does not flip the verdict at
+     all — a decade-early year on a genuine 2026 reprint of a 2011 novel is
+     still a reprint.
+
+     RETURNED AS A RECORD, NOT A BOOLEAN, so the card that prints "first
+     published 2018" and the band that hid it are reading the same numbers. Two
+     copies of this arithmetic is how a card ends up captioned as a reissue
+     while sitting under the heading for new releases. */
+  const REISSUE_MIN_GAP = 1;
+  /* Below this a year is a corrupt field rather than an old book. Deliberately
+     far below anything a followed author can have written, because the job here
+     is to reject junk, not to judge age. */
+  const FIRST_YEAR_FLOOR = 1450;
+
+  function reissueOf(work, release) {
+    const rel = release || releaseOfWork(work);
+    /* Returns null for SK_UNKNOWN, so an undated row can never be called a
+       reissue — it is an unfinished catalogue record. */
+    const parts = BT.util.sortKeyToParts(rel && rel.sortKey);
+    const releaseYear = (parts && parts.y) || null;
+    const raw = work && work.firstYear;
+    const firstYear = (Number.isFinite(raw) && raw > 0) ? raw : null;
+    const out = { reissue: false, firstYear, releaseYear, gap: null };
+    if (firstYear == null || releaseYear == null) return out;
+    if (firstYear < FIRST_YEAR_FLOOR) return out;
+    if (firstYear > releaseYear) return out;
+    out.gap = releaseYear - firstYear;
+    out.reissue = out.gap >= REISSUE_MIN_GAP;
+    return out;
+  }
+
   /* ══ RELEASE WINDOWS ════════════════════════════════════════════════════
      Does this release fall in [from, to]?
 
@@ -2089,12 +2170,16 @@ BT.follows = (function () {
        toggle. A boolean would collapse 'maybe' into one of its neighbours at the
        only point where the distinction is visible. */
     releaseOfWork, futureness, windowEnd, inWindow, windowFit, sharpenYear, workKey,
+    /* New book or a new printing of an old one. Exported as the same record the
+       card's "first published" caption reads, so the band and the caption cannot
+       disagree about which of the two a row is. */
+    reissueOf,
     /* The English gate, exported so the console and a test can assert the rule
        that cannot be seen from a rendered row: an undeclared language is KEPT. */
     keepEnglish,
     retirePublisherFollows, seedGoogleNames,
     /* Exposed so the sweep, 16-cloud's merge and the console can assert the
        invariants that cannot be seen from a stored row. */
-    KNOWN_CAP, WORKS_CAP, WORKS_TTL, NEWS_CAP, SCHEMA,
+    KNOWN_CAP, WORKS_CAP, WORKS_TTL, NEWS_CAP, SCHEMA, REISSUE_MIN_GAP,
   };
 })();

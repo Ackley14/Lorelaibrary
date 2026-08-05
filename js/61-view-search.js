@@ -883,8 +883,20 @@ BT.viewSearch = (function () {
     const uid = await BT.repo.resolveUid(keys);
     if (!uid) return null;
     const item = await BT.repo.getItem(uid);
-    return (item && item.user && item.user.status) || 'want';
+    return item ? ownedMark(item) : null;
   }
+
+  /* WHAT AN ALREADY-OWNED ROW SAYS, and it is the READING axis rather than the
+     ownership one. This row is answering "should I add this?", and the useful
+     half of the answer is what the reader has done with the copy they already
+     filed — "Finished" tells them something, "Own" is one word for what the
+     tick already said.
+
+     Truthy for every legal value, which the caller depends on: `r.owned`
+     partitions the results into "already on your shelves" and the rest, and a
+     falsy mark would put a book you own back into the Add list. Every value in
+     BT.ui.READINGS has a non-empty label, so the string is always truthy. */
+  const ownedMark = item => BT.ui.readingWord(BT.ui.readingOf(item));
 
   /* A source that is DOWN and a source that found nothing are different facts,
      and collapsing them is how "Nothing matching Piranesi" gets shown during an
@@ -1018,9 +1030,9 @@ BT.viewSearch = (function () {
   async function addRow(hit, btn) {
     const added = await addStub(hit.stub);
     if (!added) return;
-    hit.owned = (added.user && added.user.status) || 'want';
+    hit.owned = ownedMark(added);
     if (!btn) { paint(); return; }                // no element to swap: rebuild
-    btn.outerHTML = `<span class="add is-in">✓ ${esc(BT.ui.STATUS_WORD[hit.owned] || 'On the shelf')}</span>`;
+    btn.outerHTML = `<span class="add is-in">✓ ${esc(hit.owned)}</span>`;
     /* The signature no longer describes what is on screen, so the next REAL
        paint must not skip itself. */
     const host = document.getElementById('results');
@@ -1036,7 +1048,16 @@ BT.viewSearch = (function () {
      other door, because there the reader was holding the object. */
   async function addStub(stub) {
     try {
-      return await BT.ui.addItem(stub, { scope: 'open', source: 'search' });
+      /* BOTH AXES STATED, rather than left to addItem's default, so the choice
+         is visible where the write is made — the same discipline 39-scan's
+         scanOpts keeps for the other door. want + unread, because looking a
+         title up says you would like to read it and nothing more: it is not a
+         claim that a copy is on your shelf, which is exactly what the scan door
+         claims and this one must not. */
+      return await BT.ui.addItem(stub, {
+        scope: 'open', source: 'search',
+        state: { ownership: 'want', reading: 'unread' },
+      });
     } catch (e) {
       /* addItem writes the item BEFORE it records an alert baseline. If it
          threw after the write, the book IS on the shelves, and reporting a
@@ -1067,7 +1088,7 @@ BT.viewSearch = (function () {
         </div>
       </div>
       ${r.owned
-        ? `<span class="add is-in">✓ ${esc(BT.ui.STATUS_WORD[r.owned] || 'On the shelf')}</span>`
+        ? `<span class="add is-in">✓ ${esc(r.owned)}</span>`
         : `<button class="add" type="button" data-add="${esc(s.uid)}" aria-label="Add ${esc(s.title)}">Add</button>`}
     </div>`;
   }
